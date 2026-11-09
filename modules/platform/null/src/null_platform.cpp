@@ -31,6 +31,10 @@ public:
         return m_size;
     }
 
+    NativeWindow native_window() const override {
+        return {};
+    }
+
     std::optional<Event> poll_event() override {
         // The main loop reads events until there are none, so each "none" is one frame.
         if (m_frames_left <= 0) {

@@ -19,11 +19,13 @@ namespace dream::runtime {
 //     title = "My Game"
 //     width = 1280
 //     height = 720
-//     max_fps = 60     # 0 means no limit.
+//     max_fps = 60     # 0 means no limit. Defaults to 60, or no limit with a graphics device,
+//                      # whose vertical sync already sets the pace.
 class App {
 public:
-    // `config` must outlive this object.
-    App(std::unique_ptr<platform::Platform> platform, const core::Config& config);
+    // `config` must outlive this object. `device` is null for a program that draws nothing.
+    App(std::unique_ptr<platform::Platform> platform, const core::Config& config,
+        std::unique_ptr<rhi::Device> device = nullptr);
 
     App(const App&) = delete;
     App& operator=(const App&) = delete;
@@ -48,6 +50,11 @@ public:
         return m_config;
     }
 
+    // Null if the project has no graphics module.
+    [[nodiscard]] rhi::Device* device() noexcept {
+        return m_device.get();
+    }
+
     [[nodiscard]] platform::SurfaceSize surface_size() const noexcept {
         return m_surface_size;
     }
@@ -59,8 +66,12 @@ private:
 
     void pump_events(Game& game);
     void handle_event(Game& game, const platform::Event& event);
+    [[nodiscard]] core::Result<void> attach_surface();
+    [[nodiscard]] core::Result<void> render_frame(Game& game);
 
+    // Declared in this order so the device is destroyed before the window it draws to.
     std::unique_ptr<platform::Platform> m_platform;
+    std::unique_ptr<rhi::Device> m_device;
     const core::Config& m_config;
     VirtualFileSystem m_files;
     InputActions m_input;
@@ -68,6 +79,7 @@ private:
     bool m_running = true;
     bool m_paused = false;
     bool m_has_surface = true;
+    bool m_surface_attached = false;
 };
 
 } // namespace dream::runtime

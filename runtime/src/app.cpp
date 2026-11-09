@@ -1,6 +1,7 @@
 #include "dream/runtime/app.h"
 
 #include "dream/core/clock.h"
+#include "dream/core/log.h"
 
 #include <algorithm>
 #include <chrono>
@@ -30,8 +31,43 @@ core::Result<std::uint32_t> read_setting(const core::Config& config, std::string
 
 } // namespace
 
-App::App(std::unique_ptr<platform::Platform> platform, const core::Config& config)
-    : m_platform(std::move(platform)), m_config(config), m_files(*m_platform) {}
+App::App(std::unique_ptr<platform::Platform> platform, const core::Config& config,
+         std::unique_ptr<rhi::Device> device)
+    : m_platform(std::move(platform)), m_device(std::move(device)), m_config(config),
+      m_files(*m_platform) {}
+
+core::Result<void> App::attach_surface() {
+    if (m_device == nullptr || m_surface_attached) {
+        return {};
+    }
+    core::Result<void> attached =
+        m_device->attach_surface(m_platform->native_window(), m_surface_size);
+    m_surface_attached = attached.has_value();
+    return attached;
+}
+
+core::Result<void> App::render_frame(Game& game) {
+    if (m_device == nullptr) {
+        return {};
+    }
+
+    // Android can report a surface before it's usable, so a failed attach is retried each frame.
+    if (const core::Result<void> attached = attach_surface(); !attached.has_value()) {
+        DREAM_LOG_WARNING("{}", attached.error().message);
+        return {};
+    }
+
+    const core::Result<rhi::CommandList*> frame = m_device->begin_frame();
+    if (!frame.has_value()) {
+        return frame.error();
+    }
+    if (frame.value() == nullptr) {
+        return {};
+    }
+
+    game.on_render(*this, *frame.value());
+    return m_device->end_frame();
+}
 
 core::Result<void> App::run(Game& game) {
     core::Result<InputActions> input = InputActions::from_config(m_config);
@@ -48,7 +84,8 @@ core::Result<void> App::run(Game& game) {
     if (!height.has_value()) {
         return height.error();
     }
-    const core::Result<std::uint32_t> max_fps = read_setting(m_config, "app.max_fps", 60, 0);
+    const core::Result<std::uint32_t> max_fps =
+        read_setting(m_config, "app.max_fps", m_device != nullptr ? 0 : 60, 0);
     if (!max_fps.has_value()) {
         return max_fps.error();
     }
@@ -63,6 +100,10 @@ core::Result<void> App::run(Game& game) {
     }
     m_surface_size = m_platform->surface_size();
 
+    if (core::Result<void> attached = attach_surface(); !attached.has_value()) {
+        return attached;
+    }
+
     if (core::Result<void> started = game.on_start(*this); !started.has_value()) {
         return started;
     }
@@ -75,6 +116,7 @@ core::Result<void> App::run(Game& game) {
 
     core::Clock clock;
     core::TimePoint next_frame = core::now();
+    core::Result<void> outcome;
 
     while (m_running) {
         m_input.begin_frame();
@@ -86,8 +128,12 @@ core::Result<void> App::run(Game& game) {
 
         game.on_update(*this, clock.tick());
 
-        // A temporary limit that stops the loop using a whole CPU core. The renderer's vertical
-        // sync will take over this job.
+        outcome = render_frame(game);
+        if (!outcome.has_value()) {
+            break;
+        }
+
+        // Stops the loop using a whole CPU core when nothing else sets the pace.
         if (frame_period > Duration::zero()) {
             next_frame = std::max(next_frame + frame_period, core::now());
             std::this_thread::sleep_until(next_frame);
@@ -95,7 +141,7 @@ core::Result<void> App::run(Game& game) {
     }
 
     game.on_stop(*this);
-    return {};
+    return outcome;
 }
 
 void App::pump_events(Game& game) {
@@ -133,6 +179,10 @@ void App::handle_event(Game& game, const platform::Event& event) {
                 if (m_has_surface) {
                     m_has_surface = false;
                     game.on_surface_lost(*this);
+                    if (m_surface_attached) {
+                        m_device->detach_surface();
+                        m_surface_attached = false;
+                    }
                 }
             } else if constexpr (std::is_same_v<Type, platform::SurfaceRestored>) {
                 if (!m_has_surface) {
@@ -143,6 +193,9 @@ void App::handle_event(Game& game, const platform::Event& event) {
             } else if constexpr (std::is_same_v<Type, platform::SurfaceResized>) {
                 if (value.size != m_surface_size) {
                     m_surface_size = value.size;
+                    if (m_surface_attached) {
+                        m_device->resize_surface(value.size);
+                    }
                     game.on_surface_resized(*this, value.size);
                 }
             } else if constexpr (std::is_same_v<Type, platform::LowMemory>) {

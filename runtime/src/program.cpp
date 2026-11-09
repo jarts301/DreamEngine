@@ -3,6 +3,7 @@
 #include "dream/core/log.h"
 #include "dream/core/module_project.h"
 #include "dream/platform/platform.h"
+#include "dream/rhi/rhi.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/game.h"
 
@@ -32,7 +33,18 @@ int run_program() {
         return 1;
     }
 
-    App app(std::move(created.value().instance), project.value().config());
+    std::unique_ptr<rhi::Device> device;
+    if (project.value().is_configured<rhi::Device>()) {
+        core::Result<core::CreatedModule<rhi::Device>> created_device =
+            project.value().create<rhi::Device>();
+        if (!created_device.has_value()) {
+            DREAM_LOG_ERROR("{}", created_device.error().message);
+            return 1;
+        }
+        device = std::move(created_device.value().instance);
+    }
+
+    App app(std::move(created.value().instance), project.value().config(), std::move(device));
     if (const core::Result<void> result = app.run(*game); !result.has_value()) {
         DREAM_LOG_ERROR("{}", result.error().message);
         return 1;

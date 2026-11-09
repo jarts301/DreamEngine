@@ -36,9 +36,22 @@ cmake --workflow --preset android-arm64-debug
 
 Each preset also has a `-release` version. Output goes to `build/<preset>/`.
 
+## Run the cube
+
+After building, run the Vulkan cube on Windows. Space or a click toggles the spin, and Escape quits:
+
+```bash
+build/windows-debug/samples/cube/dream_cube.exe
+```
+
+To check the Vulkan backend with the Khronos validation layers, configure with
+`-DVCPKG_MANIFEST_FEATURES=vulkan-validation` and set `VK_LAYER_PATH` to the folder containing
+`VkLayer_khronos_validation.json` under `vcpkg_installed/`. Debug builds then turn validation on.
+
 ## Android APK
 
-Build a game's APK, then install it on a phone connected by USB with debugging enabled:
+The targets are `dream_cube_apk` and `dream_hello_game_apk`. Build a game's APK, then install it on
+a phone connected by USB with debugging enabled:
 
 ```bash
 cmake --build --preset android-arm64-debug --target dream_hello_game_apk

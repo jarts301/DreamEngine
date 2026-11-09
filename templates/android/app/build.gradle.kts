@@ -39,9 +39,7 @@ android {
     sourceSets.getByName("main") {
         java.srcDirs(dreamProperty("dreamJavaDirs").split(",").filter { it.isNotEmpty() })
         jniLibs.srcDir(dreamProperty("dreamNativeDir"))
-        if (dreamProperty("dreamAssetsDir").isNotEmpty()) {
-            assets.srcDir(dreamProperty("dreamAssetsDir"))
-        }
+        assets.srcDirs(dreamProperty("dreamAssetDirs").split(",").filter { it.isNotEmpty() })
     }
 
     packaging {

@@ -44,6 +44,13 @@ public:
         return m_registry.create<Interface>(*preference, m_config);
     }
 
+    // Whether the configuration has a list for `Interface` on this platform. A subsystem a project
+    // doesn't list is simply left out.
+    template <ModuleInterface Interface> [[nodiscard]] bool is_configured() const {
+        return m_config.contains(
+            std::format("modules.{}.{}", m_platform, Interface::k_module_interface));
+    }
+
     [[nodiscard]] const ModuleRegistry& registry() const noexcept {
         return m_registry;
     }

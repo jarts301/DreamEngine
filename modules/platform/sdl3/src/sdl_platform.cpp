@@ -7,8 +7,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <deque>
 #include <format>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -19,6 +21,9 @@ namespace dream::modules {
 namespace {
 
 using namespace platform;
+
+// How often a paused program checks for app events. Short enough to feel instant on return.
+constexpr Sint32 k_wait_slice_ms = 50;
 
 core::Error sdl_error(core::ErrorCode code, std::string_view action) {
     return core::Error{code, std::format("{}: {}", action, SDL_GetError())};
@@ -95,9 +100,12 @@ std::optional<PointerButton> translate_mouse_button(Uint8 button) {
 class SdlPlatform final : public Platform {
 public:
     SdlPlatform(std::string organization, std::string application)
-        : m_organization(std::move(organization)), m_application(std::move(application)) {}
+        : m_organization(std::move(organization)), m_application(std::move(application)) {
+        SDL_AddEventWatch(&SdlPlatform::watch_app_event, this);
+    }
 
     ~SdlPlatform() override {
+        SDL_RemoveEventWatch(&SdlPlatform::watch_app_event, this);
         if (m_window != nullptr) {
             SDL_DestroyWindow(m_window);
         }
@@ -127,32 +135,54 @@ public:
                            static_cast<std::uint32_t>(std::max(height, 0))};
     }
 
+    NativeWindow native_window() const override {
+        if (m_window == nullptr) {
+            return {};
+        }
+        const SDL_PropertiesID properties = SDL_GetWindowProperties(m_window);
+
+#if defined(SDL_PLATFORM_ANDROID)
+        // Null while the app is in the background, because Android has taken the surface away.
+        void* const window =
+            SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
+        return window != nullptr ? NativeWindow{AndroidWindow{window}} : NativeWindow{};
+#elif defined(SDL_PLATFORM_WIN32)
+        void* const window =
+            SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+        void* const instance =
+            SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, nullptr);
+        return window != nullptr ? NativeWindow{Win32Window{instance, window}} : NativeWindow{};
+#else
+        return {};
+#endif
+    }
+
     std::optional<Event> poll_event() override {
+        SDL_PumpEvents();
         if (std::optional<Event> pending = take_pending()) {
             return pending;
         }
 
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
-            if (std::optional<Event> translated = translate(event)) {
-                return translated;
+            translate_into_pending(event);
+            if (std::optional<Event> pending = take_pending()) {
+                return pending;
             }
         }
-        return std::nullopt;
+        return take_pending();
     }
 
     Event wait_event() override {
-        if (std::optional<Event> pending = take_pending()) {
-            return *pending;
-        }
-
         while (true) {
-            SDL_Event event;
-            if (!SDL_WaitEvent(&event)) {
-                return QuitRequested{};
+            if (std::optional<Event> pending = take_pending()) {
+                return *std::move(pending);
             }
-            if (std::optional<Event> translated = translate(event)) {
-                return *translated;
+
+            // SDL_WaitEvent would never wake for the app events, which skip SDL's queue.
+            SDL_Event event;
+            if (SDL_WaitEventTimeout(&event, k_wait_slice_ms)) {
+                translate_into_pending(event);
             }
         }
     }
@@ -231,26 +261,60 @@ private:
         return std::format("{}{}", m_user_root, path);
     }
 
+    // SDL never queues the app lifecycle events. It only hands them to event watchers, from inside
+    // its event pump on Android and possibly from another thread elsewhere.
+    static bool SDLCALL watch_app_event(void* user_data, SDL_Event* event) {
+        auto* const self = static_cast<SdlPlatform*>(user_data);
+        switch (event->type) {
+        case SDL_EVENT_TERMINATING:
+            self->push_pending(QuitRequested{});
+            break;
+        case SDL_EVENT_WILL_ENTER_BACKGROUND:
+            self->push_pending(AppPaused{});
+            break;
+        case SDL_EVENT_DID_ENTER_BACKGROUND:
+            self->push_pending(SurfaceLost{});
+            break;
+        case SDL_EVENT_WILL_ENTER_FOREGROUND:
+            self->push_pending(SurfaceRestored{});
+            break;
+        case SDL_EVENT_DID_ENTER_FOREGROUND:
+            self->push_pending(AppResumed{});
+            break;
+        case SDL_EVENT_LOW_MEMORY:
+            self->push_pending(LowMemory{});
+            break;
+        default:
+            break;
+        }
+        return true;
+    }
+
+    void push_pending(Event event) {
+        const std::lock_guard lock(m_pending_mutex);
+        m_pending.push_back(std::move(event));
+    }
+
     std::optional<Event> take_pending() {
-        return std::exchange(m_pending, std::nullopt);
+        const std::lock_guard lock(m_pending_mutex);
+        if (m_pending.empty()) {
+            return std::nullopt;
+        }
+        Event event = std::move(m_pending.front());
+        m_pending.pop_front();
+        return event;
+    }
+
+    void translate_into_pending(const SDL_Event& event) {
+        if (std::optional<Event> translated = translate(event)) {
+            push_pending(*std::move(translated));
+        }
     }
 
     std::optional<Event> translate(const SDL_Event& event) {
         switch (event.type) {
         case SDL_EVENT_QUIT:
-        case SDL_EVENT_TERMINATING:
             return QuitRequested{};
-
-        case SDL_EVENT_WILL_ENTER_BACKGROUND:
-            return AppPaused{};
-        case SDL_EVENT_DID_ENTER_BACKGROUND:
-            return SurfaceLost{};
-        case SDL_EVENT_WILL_ENTER_FOREGROUND:
-            return SurfaceRestored{};
-        case SDL_EVENT_DID_ENTER_FOREGROUND:
-            return AppResumed{};
-        case SDL_EVENT_LOW_MEMORY:
-            return LowMemory{};
 
 #if !defined(SDL_PLATFORM_ANDROID)
         // Android reports these through the background events above.
@@ -293,8 +357,8 @@ private:
                 return std::nullopt;
             }
             // Report where the finger is before reporting the press.
-            m_pending = PointerButtonChanged{PointerButton::Touch, true};
-            return finger_position(event);
+            push_pending(finger_position(event));
+            return PointerButtonChanged{PointerButton::Touch, true};
 
         case SDL_EVENT_FINGER_MOTION:
             return m_fingers_down == 1 ? std::optional<Event>(finger_position(event))
@@ -323,7 +387,8 @@ private:
     std::string m_application;
     std::string m_user_root;
     SDL_Window* m_window = nullptr;
-    std::optional<Event> m_pending;
+    std::mutex m_pending_mutex;
+    std::deque<Event> m_pending;
     int m_fingers_down = 0;
 };
 

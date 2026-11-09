@@ -6,6 +6,24 @@
   "dependencies": [
     "doctest",
     "sdl3",
-    "tomlplusplus"
-  ]
+    {
+      "name": "shader-slang",
+      "host": true
+    },
+    "tomlplusplus",
+    "volk",
+    "vulkan-headers",
+    "vulkan-memory-allocator"
+  ],
+  "features": {
+    "vulkan-validation": {
+      "description": "Khronos validation layers, for checking the Vulkan backend during development",
+      "dependencies": [
+        {
+          "name": "vulkan-validationlayers",
+          "host": true
+        }
+      ]
+    }
+  }
 }

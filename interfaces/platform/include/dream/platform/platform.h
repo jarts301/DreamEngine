@@ -2,6 +2,7 @@
 
 #include "dream/core/result.h"
 #include "dream/platform/event.h"
+#include "dream/platform/native_window.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -39,6 +40,9 @@ public:
     [[nodiscard]] virtual core::Result<void> create_window(const WindowSettings& settings) = 0;
 
     [[nodiscard]] virtual SurfaceSize surface_size() const = 0;
+
+    // Changes when a surface is lost and restored, so fetch it again after SurfaceRestored.
+    [[nodiscard]] virtual NativeWindow native_window() const = 0;
 
     // Returns the next pending event, or nothing if there are none.
     [[nodiscard]] virtual std::optional<Event> poll_event() = 0;

@@ -22,7 +22,8 @@ has a surface. It ignores events that change nothing, and sleeps in `wait_event`
 
 SDL freezes programs inside its event functions by default while on Android's background, so the
 game would learn it had been paused only after returning. The backend turns that off
-(`SDL_HINT_ANDROID_BLOCK_ON_PAUSE`) and `App` does the waiting.
+(`SDL_HINT_ANDROID_BLOCK_ON_PAUSE`) and `App` does the waiting. ADR 0008 describes how these events
+reach the backend.
 
 ### Game interface and entry point
 

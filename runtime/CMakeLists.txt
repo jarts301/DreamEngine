@@ -7,7 +7,7 @@ add_library(dream_runtime STATIC
 add_library(dream::runtime ALIAS dream_runtime)
 
 target_include_directories(dream_runtime PUBLIC include)
-target_link_libraries(dream_runtime PUBLIC dream::core dream::interface_platform)
+target_link_libraries(dream_runtime PUBLIC dream::core dream::interface_platform dream::interface_rhi)
 dream_configure_target(dream_runtime)
 
 if(DREAM_BUILD_TESTS)

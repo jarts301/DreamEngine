@@ -1,0 +1,23 @@
+[app]
+organization = "DreamEngine"
+name = "DreamCube"
+title = "Dream Cube"
+width = 1280
+height = 720
+
+[input.actions]
+toggle_spin = ["key:space", "mouse:left", "touch"]
+quit = ["key:escape"]
+
+# Each list is a priority order: use Vulkan, or fall back to drawing nothing.
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]

@@ -116,6 +116,19 @@ class CheckLayersTest(unittest.TestCase):
             "must not link",
         )
 
+    def test_module_may_link_itself_for_its_tests(self):
+        self.assert_clean(
+            "modules/physics/jolt/CMakeLists.txt",
+            "dream_add_test(t LIBRARIES dream::module_physics_jolt)\n",
+        )
+
+    def test_module_must_not_link_another_backend(self):
+        self.assert_violation(
+            "modules/physics/jolt/CMakeLists.txt",
+            "target_link_libraries(a PRIVATE dream::module_physics_bullet)\n",
+            "must not link",
+        )
+
     def test_module_must_not_link_the_runtime(self):
         self.assert_violation(
             "modules/physics/jolt/CMakeLists.txt",

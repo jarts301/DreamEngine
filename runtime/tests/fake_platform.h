@@ -24,6 +24,7 @@ struct FakeState {
     int wait_calls = 0;
     std::optional<platform::WindowSettings> window;
     platform::SurfaceSize size{640, 480};
+    platform::NativeWindow native_window;
     std::map<std::string, std::vector<std::byte>, std::less<>> assets;
     std::map<std::string, std::vector<std::byte>, std::less<>> user_files;
 };
@@ -39,6 +40,10 @@ public:
 
     platform::SurfaceSize surface_size() const override {
         return m_state.size;
+    }
+
+    platform::NativeWindow native_window() const override {
+        return m_state.native_window;
     }
 
     std::optional<platform::Event> poll_event() override {

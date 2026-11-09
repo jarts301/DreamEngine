@@ -1,5 +1,6 @@
 #include "dream/runtime/app.h"
 
+#include "fake_device.h"
 #include "fake_platform.h"
 
 #include <doctest/doctest.h>
@@ -42,6 +43,10 @@ public:
         }
     }
 
+    void on_render(App&, rhi::CommandList&) override {
+        log.emplace_back("render");
+    }
+
     void on_stop(App&) override {
         log.emplace_back("stop");
     }
@@ -76,6 +81,19 @@ struct Run {
     core::Result<void> go(std::deque<Step> script, const core::Config& config = k_config) {
         state.script = std::move(script);
         App app(std::make_unique<FakePlatform>(state), config);
+        return app.run(game);
+    }
+};
+
+struct RenderRun {
+    FakeState state;
+    FakeDeviceState device;
+    RecordingGame game;
+
+    core::Result<void> go(std::deque<Step> script) {
+        state.script = std::move(script);
+        App app(std::make_unique<FakePlatform>(state), k_config,
+                std::make_unique<FakeDevice>(device));
         return app.run(game);
     }
 };
@@ -253,6 +271,106 @@ TEST_CASE("App rejects invalid settings before starting the game") {
     CHECK_FALSE(run.go({}, config.value()).has_value());
     CHECK(run.game.log.empty());
     CHECK_FALSE(run.state.window.has_value());
+}
+
+TEST_CASE("App attaches the surface before starting and renders after updating") {
+    RenderRun run;
+    REQUIRE(run.go({k_end_of_frame}).has_value());
+
+    CHECK(run.device.calls == Log{"attach 640x480", "begin_frame", "end_frame"});
+    CHECK(run.game.log == Log{"start", "update", "render", "stop"});
+}
+
+TEST_CASE("App gives up the surface in the background and takes the new one on return") {
+    RenderRun run;
+    REQUIRE(run.go({AppPaused{}, SurfaceLost{}, k_end_of_frame, SurfaceRestored{}, AppResumed{},
+                    k_end_of_frame})
+                .has_value());
+
+    CHECK(run.device.calls == Log{"attach 640x480", "detach", "attach 640x480", "begin_frame",
+                                  "end_frame"});
+    CHECK(run.game.log == Log{"start", "pause", "surface_lost", "surface_restored", "resume",
+                              "update", "render", "stop"});
+}
+
+TEST_CASE("App passes the current native window to the device") {
+    RenderRun run;
+    run.state.native_window = AndroidWindow{&run};
+
+    REQUIRE(run.go({}).has_value());
+
+    const auto* const window = std::get_if<AndroidWindow>(&run.device.last_window);
+    REQUIRE(window != nullptr);
+    CHECK(window->window == &run);
+}
+
+TEST_CASE("App fails if the first surface can't be attached") {
+    RenderRun run;
+    run.device.attach_failures_left = 1;
+
+    const core::Result<void> result = run.go({k_end_of_frame});
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(run.game.log.empty());
+}
+
+TEST_CASE("App keeps retrying a surface that isn't ready after returning") {
+    // Fails only attaches made after the game has started, so startup itself succeeds.
+    struct FailNextAttach final : Game {
+        FakeDeviceState& device;
+        explicit FailNextAttach(FakeDeviceState& state) : device(state) {}
+        core::Result<void> on_start(App&) override {
+            device.attach_failures_left = 1;
+            return {};
+        }
+        void on_update(App&, const core::FrameTime&) override {}
+    };
+
+    FakeState state;
+    FakeDeviceState device;
+    state.script = {SurfaceLost{}, k_end_of_frame, SurfaceRestored{}, k_end_of_frame,
+                    k_end_of_frame};
+    App app(std::make_unique<FakePlatform>(state), k_config, std::make_unique<FakeDevice>(device));
+    FailNextAttach game{device};
+
+    REQUIRE(app.run(game).has_value());
+    CHECK(device.calls == Log{"attach 640x480", "detach", "attach_failed", "attach 640x480",
+                              "begin_frame", "end_frame"});
+}
+
+TEST_CASE("App skips drawing when the device has no frame available") {
+    RenderRun run;
+    run.device.frames_available = false;
+
+    REQUIRE(run.go({k_end_of_frame}).has_value());
+
+    CHECK(run.device.calls == Log{"attach 640x480", "begin_frame"});
+    CHECK(run.game.log == Log{"start", "update", "stop"});
+}
+
+TEST_CASE("App ends with the error when the device fails") {
+    RenderRun run;
+    run.device.begin_frame_error = core::Error{core::ErrorCode::Unknown, "device lost"};
+
+    const core::Result<void> result = run.go({k_end_of_frame, k_end_of_frame});
+
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().message == "device lost");
+    CHECK(run.game.log == Log{"start", "update", "stop"});
+}
+
+TEST_CASE("App tells the device about resizes") {
+    RenderRun run;
+    REQUIRE(run.go({SurfaceResized{{800, 600}}, k_end_of_frame}).has_value());
+
+    CHECK(run.device.calls == Log{"attach 640x480", "resize 800x600", "begin_frame", "end_frame"});
+}
+
+TEST_CASE("App draws nothing while paused") {
+    RenderRun run;
+    REQUIRE(run.go({AppPaused{}, k_end_of_frame, QuitRequested{}}).has_value());
+
+    CHECK(run.device.calls == Log{"attach 640x480"});
 }
 
 TEST_CASE("App limits the frame rate when asked") {

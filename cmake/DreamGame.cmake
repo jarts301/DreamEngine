@@ -1,12 +1,16 @@
 # Builds a game for the current platform. See docs/adr/0007-platform-and-game-loop.md.
 #
 # Usage: dream_add_game(<name> SOURCES <files...> CONFIG <toml-file> [ASSETS <directory>]
-#                       [APPLICATION_ID <id> DISPLAY_NAME <text>])
+#                       [SHADERS <slang-files...>] [APPLICATION_ID <id> DISPLAY_NAME <text>])
+#
+# Each shader file must define vertex_main and fragment_main. They become the game assets
+# assets:/shaders/<file>.vert and .frag, plus the suffix given by rhi::Device::shader_file_suffix.
 #
 # On PC this creates an executable, with the assets copied next to it. On Android it creates
 # libmain.so and, if APPLICATION_ID is given and ANDROID_HOME is set, a <name>_apk target.
 function(dream_add_game name)
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG;ASSETS;APPLICATION_ID;DISPLAY_NAME" "SOURCES")
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG;ASSETS;APPLICATION_ID;DISPLAY_NAME"
+        "SOURCES;SHADERS")
 
     if(ANDROID)
         set(native_dir "${CMAKE_CURRENT_BINARY_DIR}/${name}_native")
@@ -23,24 +27,67 @@ function(dream_add_game name)
     dream_configure_target(${name})
     dream_link_modules(${name} CONFIG "${ARG_CONFIG}")
 
+    set(asset_dirs "")
     if(ARG_ASSETS)
         cmake_path(ABSOLUTE_PATH ARG_ASSETS NORMALIZE)
+        list(APPEND asset_dirs "${ARG_ASSETS}")
+    endif()
+    if(ARG_SHADERS)
+        set(generated_assets "${CMAKE_CURRENT_BINARY_DIR}/${name}_generated_assets")
+        _dream_compile_shaders(${name} "${generated_assets}/shaders" ${ARG_SHADERS})
+        list(APPEND asset_dirs "${generated_assets}")
     endif()
 
     if(ANDROID)
         if(ARG_APPLICATION_ID)
-            _dream_add_apk(${name} "${native_dir}" "${ARG_ASSETS}" "${ARG_APPLICATION_ID}"
+            _dream_add_apk(${name} "${native_dir}" "${asset_dirs}" "${ARG_APPLICATION_ID}"
                 "${ARG_DISPLAY_NAME}")
         endif()
-    elseif(ARG_ASSETS)
-        add_custom_command(TARGET ${name} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ARG_ASSETS}"
-                "$<TARGET_FILE_DIR:${name}>/assets"
-            VERBATIM)
+    else()
+        foreach(asset_dir IN LISTS asset_dirs)
+            add_custom_command(TARGET ${name} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${asset_dir}"
+                    "$<TARGET_FILE_DIR:${name}>/assets"
+                VERBATIM)
+        endforeach()
     endif()
 endfunction()
 
-function(_dream_add_apk name native_dir assets application_id display_name)
+# Compiles Slang shaders on the build machine, so a game ships only the compiled result.
+function(_dream_compile_shaders target output_dir)
+    # vcpkg installs this for the build machine, in a folder named after that machine's triplet.
+    file(GLOB slang_dirs "${VCPKG_INSTALLED_DIR}/*/tools/shader-slang")
+    find_program(DREAM_SLANGC slangc HINTS ${slang_dirs}
+        NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
+
+    set(outputs "")
+    foreach(source IN LISTS ARGN)
+        cmake_path(ABSOLUTE_PATH source NORMALIZE)
+        cmake_path(GET source STEM stem)
+
+        foreach(stage IN ITEMS vertex fragment)
+            string(SUBSTRING ${stage} 0 4 short_stage)
+            set(output "${output_dir}/${stem}.${short_stage}.spv")
+            add_custom_command(
+                OUTPUT "${output}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${output_dir}"
+                COMMAND "${DREAM_SLANGC}" "${source}"
+                    -target spirv -profile spirv_1_3
+                    -matrix-layout-column-major
+                    -entry ${stage}_main -stage ${stage}
+                    -o "${output}"
+                DEPENDS "${source}"
+                COMMENT "Compiling ${stem} ${stage} shader"
+                VERBATIM)
+            list(APPEND outputs "${output}")
+        endforeach()
+    endforeach()
+
+    add_custom_target(${target}_shaders DEPENDS ${outputs})
+    add_dependencies(${target} ${target}_shaders)
+endfunction()
+
+function(_dream_add_apk name native_dir asset_dirs application_id display_name)
     # The APK has to carry the C++ runtime that the game was linked against.
     find_file(DREAM_LIBCXX_SHARED libc++_shared.so
         PATHS "${ANDROID_TOOLCHAIN_ROOT}/sysroot/usr/lib/aarch64-linux-android"
@@ -64,6 +111,7 @@ function(_dream_add_apk name native_dir assets application_id display_name)
         endif()
     endforeach()
     list(JOIN java_dirs "," java_dirs)
+    list(JOIN asset_dirs "," asset_dirs)
 
     if(CMAKE_HOST_WIN32)
         set(gradle "${DreamEngine_SOURCE_DIR}/templates/android/gradlew.bat")
@@ -85,7 +133,7 @@ function(_dream_add_apk name native_dir assets application_id display_name)
             "-PdreamApplicationId=${application_id}"
             "-PdreamDisplayName=${display_name}"
             "-PdreamNativeDir=${native_dir}"
-            "-PdreamAssetsDir=${assets}"
+            "-PdreamAssetDirs=${asset_dirs}"
             "-PdreamJavaDirs=${java_dirs}"
             ${gradle_task}
         WORKING_DIRECTORY "${DreamEngine_SOURCE_DIR}/templates/android"

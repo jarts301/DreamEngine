@@ -3,6 +3,7 @@
 #include "dream/core/clock.h"
 #include "dream/core/result.h"
 #include "dream/platform/event.h"
+#include "dream/rhi/rhi.h"
 
 #include <memory>
 
@@ -22,6 +23,10 @@ public:
 
     // Called every frame, but never while paused or without a surface.
     virtual void on_update(App& app, const core::FrameTime& time) = 0;
+
+    // Called after on_update whenever the frame can be drawn. Projects without a graphics module
+    // never get this.
+    virtual void on_render(App& /*app*/, rhi::CommandList& /*commands*/) {}
 
     // Called once when the program ends normally. Android may kill a paused program without
     // calling this, so save progress in on_pause.

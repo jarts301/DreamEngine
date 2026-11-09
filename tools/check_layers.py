@@ -49,6 +49,14 @@ def kind_of_target(name):
     return name
 
 
+def own_module_target(relative):
+    """Returns the target name of the backend containing `relative`, if it is in one."""
+    parts = relative.parts
+    if len(parts) >= 3 and parts[0] == "modules":
+        return f"module_{parts[1]}_{parts[2]}"
+    return None
+
+
 def is_standard_header(path):
     return "/" not in path and "." not in path
 
@@ -91,6 +99,9 @@ def check_cmake(path, relative, layer):
     for number, line in enumerate(lines, start=1):
         code = line.split("#", 1)[0]
         for target in LINKED_TARGET.findall(code):
+            # A module's own tests have to link the module.
+            if target == own_module_target(relative):
+                continue
             if kind_of_target(target) not in ALLOWED[layer]:
                 problems.append(
                     f"{relative.as_posix()}:{number}: {layer} must not link dream::{target}"
