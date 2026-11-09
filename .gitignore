@@ -43,6 +43,11 @@ build/
 Build/
 build-*/
 
+# Personal build settings and IDE build folders
+CMakeUserPresets.json
+cmake-build-*/
+.vs/
+
 # CMake generated files
 CMakeFiles/
 CMakeCache.txt
