@@ -71,6 +71,32 @@ TEST_CASE("Config returns nothing for a missing key or the wrong type") {
     CHECK_FALSE(config.get_string("width").has_value());
 }
 
+TEST_CASE("Config lists the values directly inside a table") {
+    const Result<Config> result = Config::parse(R"(
+[input]
+speed = 1
+
+[input.actions]
+jump = ["key:space"]
+fire = ["mouse:left"]
+
+[input.actions.nested]
+ignored = 1
+
+[input_other]
+unrelated = 1
+)");
+    REQUIRE(result.has_value());
+
+    const auto names = result.value().keys_in("input.actions");
+    REQUIRE(names.size() == 2);
+    CHECK(names[0] == "fire");
+    CHECK(names[1] == "jump");
+
+    CHECK(result.value().keys_in("input").size() == 1);
+    CHECK(result.value().keys_in("missing").empty());
+}
+
 TEST_CASE("Config accepts empty text") {
     CHECK(Config::parse("").has_value());
 }

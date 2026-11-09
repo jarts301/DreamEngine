@@ -81,3 +81,10 @@ jobs:
 
       - name: Configure and build
         run: cmake --workflow --preset ${{ matrix.preset }}
+
+      # GitHub's Ubuntu images come with the Android SDK and a JDK.
+      - name: Install the Android SDK packages
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Package the sample as an APK
+        run: cmake --build --preset ${{ matrix.preset }} --target dream_hello_game_apk

@@ -1,0 +1,19 @@
+[app]
+organization = "DreamEngine"
+name = "DreamHello"
+title = "Dream Hello"
+width = 1280
+height = 720
+
+[input.actions]
+confirm = ["key:space", "key:enter", "mouse:left", "touch"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+
+[modules.android]
+platform = ["sdl3"]
+
+[modules.linux]
+platform = ["sdl3"]

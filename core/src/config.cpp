@@ -84,6 +84,20 @@ bool Config::contains(std::string_view key) const {
     return find(key) != nullptr;
 }
 
+std::vector<std::string_view> Config::keys_in(std::string_view table) const {
+    const std::string prefix = std::format("{}.", table);
+
+    std::vector<std::string_view> names;
+    for (auto entry = m_values.lower_bound(prefix);
+         entry != m_values.end() && entry->first.starts_with(prefix); ++entry) {
+        const std::string_view name = std::string_view(entry->first).substr(prefix.size());
+        if (name.find('.') == std::string_view::npos) {
+            names.push_back(name);
+        }
+    }
+    return names;
+}
+
 std::optional<bool> Config::get_bool(std::string_view key) const {
     const ConfigValue* const value = find(key);
     const bool* const result = std::get_if<bool>(value);

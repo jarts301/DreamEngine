@@ -14,6 +14,7 @@ string(REPLACE "/EHsc" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 
 include(cmake/DreamTargets.cmake)
 include(cmake/DreamModules.cmake)
+include(cmake/DreamGame.cmake)
 
 if(DREAM_BUILD_TESTS)
     enable_testing()
@@ -32,6 +33,7 @@ endif()
 
 add_subdirectory(core)
 add_subdirectory(interfaces)
+add_subdirectory(runtime)
 
 if(DREAM_BUILD_SAMPLES)
     add_subdirectory(samples)

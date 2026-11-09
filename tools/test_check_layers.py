@@ -47,6 +47,13 @@ class CheckLayersTest(unittest.TestCase):
             '#include "dream/runtime/app.h"\n#include "dream/physics/physics.h"\n#include <vector>\n',
         )
 
+    def test_runtime_may_use_itself(self):
+        self.assert_clean(
+            "runtime/src/a.cpp",
+            '#include "dream/runtime/app.h"\n#include "dream/physics/physics.h"\n',
+        )
+        self.assert_clean("runtime/CMakeLists.txt", "target_link_libraries(t PRIVATE dream::runtime)\n")
+
     def test_core_must_stay_at_the_bottom(self):
         self.assert_violation(
             "core/src/a.cpp", '#include "dream/physics/physics.h"\n', "core must not include"

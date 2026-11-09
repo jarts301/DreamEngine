@@ -23,7 +23,7 @@ ALLOWED = {
     "core": {"core"},
     "interfaces": {"core", "interface"},
     "modules": {"core", "interface"},
-    "runtime": {"core", "interface"},
+    "runtime": {"core", "interface", "runtime"},
     "samples": {"core", "interface", "runtime"},
 }
 

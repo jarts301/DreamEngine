@@ -1,0 +1,20 @@
+[app]
+organization = "DreamEngine"
+name = "DreamHelloTest"
+max_fps = 0
+
+[hello]
+quit_after_frames = 3
+
+[input.actions]
+confirm = ["key:space"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+
+[modules.android]
+platform = ["sdl3"]
+
+[modules.linux]
+platform = ["sdl3"]

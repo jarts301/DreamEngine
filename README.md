@@ -14,6 +14,8 @@ Architecture rules and conventions are in [docs/adr](docs/adr/README.md).
 | [vcpkg](https://github.com/microsoft/vcpkg) | Any; `VCPKG_ROOT` must point to it | All builds |
 | Visual Studio C++ tools | 2022 or newer | Windows builds |
 | [Android NDK](https://developer.android.com/ndk/downloads) | r30; `ANDROID_NDK_HOME` must point to it | Android builds |
+| [Android SDK](https://developer.android.com/tools/releases/cmdline-tools) | Platform 35, build-tools 35.0.0; `ANDROID_HOME` must point to it | Android APKs |
+| JDK | 17 or newer; `JAVA_HOME` must point to it | Android APKs |
 
 ## Build
 
@@ -33,6 +35,26 @@ cmake --workflow --preset android-arm64-debug
 ```
 
 Each preset also has a `-release` version. Output goes to `build/<preset>/`.
+
+## Android APK
+
+Build a game's APK, then install it on a phone connected by USB with debugging enabled:
+
+```bash
+cmake --build --preset android-arm64-debug --target dream_hello_game_apk
+```
+
+```bash
+adb install -r build/android-arm64-debug/samples/hello_game/dream_hello_game_apk/app/outputs/apk/debug/app-debug.apk
+```
+
+Engine messages appear in Logcat:
+
+```bash
+adb logcat DreamEngine:V SDL:V *:S
+```
+
+The APK contains only `arm64-v8a` code, so it needs a real device rather than an x86-64 emulator.
 
 ## Choosing modules
 

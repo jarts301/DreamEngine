@@ -1,0 +1,18 @@
+[app]
+max_fps = 0
+
+[platform.null]
+frame_limit = 3
+
+[input.actions]
+confirm = ["key:space"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["null"]
+
+[modules.android]
+platform = ["null"]
+
+[modules.linux]
+platform = ["null"]

@@ -17,6 +17,7 @@ enum class ErrorCode : std::uint32_t {
     NotFound,
     OutOfMemory,
     ParseError,
+    IoError,
 };
 
 struct Error {

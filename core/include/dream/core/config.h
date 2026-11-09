@@ -26,6 +26,10 @@ public:
 
     [[nodiscard]] bool contains(std::string_view key) const;
 
+    // The names of the values directly inside a table, sorted. Nested tables are not included. The
+    // returned views are valid for as long as this Config exists.
+    [[nodiscard]] std::vector<std::string_view> keys_in(std::string_view table) const;
+
     [[nodiscard]] std::optional<bool> get_bool(std::string_view key) const;
     [[nodiscard]] std::optional<std::int64_t> get_int(std::string_view key) const;
 

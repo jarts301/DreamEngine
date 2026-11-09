@@ -32,6 +32,7 @@ Formatting is defined by `.clang-format`.
 | `runtime/` | Engine runtime |
 | `samples/` | Sample games |
 | `tools/` | Offline tools |
+| `templates/` | Packaging projects, such as the Android APK |
 | `cmake/` | Shared build scripts |
 | `docs/adr/` | Decision records |
 

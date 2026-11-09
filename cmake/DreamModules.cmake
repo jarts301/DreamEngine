@@ -71,6 +71,7 @@ function(dream_link_modules target)
     set(DREAM_MODULE_DECLARATIONS "")
     set(DREAM_MODULE_CALLS "")
     set(module_targets "")
+    set(module_dirs "")
 
     foreach(interface IN LISTS config_INTERFACES)
         foreach(backend IN LISTS config_BACKENDS_${interface})
@@ -95,8 +96,10 @@ function(dream_link_modules target)
                 "        return result;\n"
                 "    }\n")
             list(APPEND module_targets dream::module_${interface}_${backend})
+            list(APPEND module_dirs "${DreamEngine_SOURCE_DIR}/modules/${interface}/${backend}")
         endforeach()
     endforeach()
+    set_target_properties(${target} PROPERTIES DREAM_MODULE_DIRS "${module_dirs}")
 
     file(READ "${ARG_CONFIG}" DREAM_MODULE_CONFIG_TEXT)
     set(DREAM_MODULE_CONFIG_PATH "${ARG_CONFIG}")
