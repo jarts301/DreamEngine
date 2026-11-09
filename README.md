@@ -34,6 +34,26 @@ cmake --workflow --preset android-arm64-debug
 
 Each preset also has a `-release` version. Output goes to `build/<preset>/`.
 
+## Choosing modules
+
+A project picks its backends in a TOML file, with one priority list per interface and platform.
+[samples/module_demo/dream.toml](samples/module_demo/dream.toml) is an example:
+
+```toml
+[modules.windows]
+greeter = ["english", "spanish"]
+```
+
+Only the listed backends are compiled, and the first one that starts is used. To build your own
+program with them, call `dream_link_modules(<target> CONFIG <file>)` in CMake and
+`core::ModuleProject::load` at startup. See [ADR 0006](docs/adr/0006-module-system.md).
+
+To check the layer rules locally (needs Python 3):
+
+```bash
+python tools/check_layers.py
+```
+
 ## CLion
 
 Use a preset profile, because CLion's default `Debug` profile does not use vcpkg. In

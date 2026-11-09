@@ -1,0 +1,11 @@
+# Each list is a priority order. Only the backends listed for a platform are compiled for it, and
+# the first one that starts is used.
+
+[modules.windows]
+greeter = ["english", "spanish"]
+
+[modules.android]
+greeter = ["english", "spanish"]
+
+[modules.linux]
+greeter = ["english", "spanish"]

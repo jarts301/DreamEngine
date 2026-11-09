@@ -10,6 +10,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0003](0003-naming-and-layout.md) | Naming and repository layout |
 | [0004](0004-initial-targets.md) | First targets: 3D, SDL3 backend, Android API 29 |
 | [0005](0005-core-design-choices.md) | Math conventions, configuration format, job system |
+| [0006](0006-module-system.md) | Module selection, registration and the layer check |
 
 ## Template
 

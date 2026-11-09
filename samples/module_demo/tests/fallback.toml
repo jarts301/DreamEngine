@@ -1,0 +1,13 @@
+# The first choice fails to start, so the next one in the list is used.
+
+[greeter.spanish]
+available = false
+
+[modules.windows]
+greeter = ["spanish", "english"]
+
+[modules.android]
+greeter = ["spanish", "english"]
+
+[modules.linux]
+greeter = ["spanish", "english"]

@@ -8,6 +8,18 @@ env:
   NDK_VERSION: r30
 
 jobs:
+  layers:
+    name: Layer rules
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Test the checker
+        run: python3 tools/test_check_layers.py
+
+      - name: Check the repository
+        run: python3 tools/check_layers.py
+
   windows:
     name: Windows (${{ matrix.preset }})
     runs-on: windows-2025

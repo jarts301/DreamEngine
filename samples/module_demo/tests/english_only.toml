@@ -1,0 +1,10 @@
+# A backend that isn't listed is not linked.
+
+[modules.windows]
+greeter = ["english"]
+
+[modules.android]
+greeter = ["english"]
+
+[modules.linux]
+greeter = ["english"]

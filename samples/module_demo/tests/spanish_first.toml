@@ -1,0 +1,10 @@
+# Changing the order changes which backend runs.
+
+[modules.windows]
+greeter = ["spanish", "english"]
+
+[modules.android]
+greeter = ["spanish", "english"]
+
+[modules.linux]
+greeter = ["spanish", "english"]
