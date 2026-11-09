@@ -30,6 +30,8 @@ function(dream_add_test name)
 
     add_executable(${name} ${ARG_SOURCES})
     target_link_libraries(${name} PRIVATE ${ARG_LIBRARIES} doctest::doctest)
+    # Tests build without exceptions, like the engine. In this mode a failed REQUIRE ends the run.
+    target_compile_definitions(${name} PRIVATE DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS)
     dream_configure_target(${name})
 
     if(NOT CMAKE_CROSSCOMPILING)
