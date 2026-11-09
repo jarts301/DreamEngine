@@ -97,6 +97,71 @@ unrelated = 1
     CHECK(result.value().keys_in("missing").empty());
 }
 
+TEST_CASE("Config reads arrays of numbers") {
+    const Result<Config> result = Config::parse(R"(
+position = [1, 2.5, -3]
+empty = []
+names = ["a"]
+)");
+    REQUIRE(result.has_value());
+
+    const auto position = result.value().get_float_list("position");
+    REQUIRE(position.has_value());
+    REQUIRE(position->size() == 3);
+    CHECK((*position)[0] == Approx(1.0));
+    CHECK((*position)[1] == Approx(2.5));
+    CHECK((*position)[2] == Approx(-3.0));
+
+    const auto empty = result.value().get_float_list("empty");
+    REQUIRE(empty.has_value());
+    CHECK(empty->empty());
+
+    CHECK_FALSE(result.value().get_float_list("names").has_value());
+    CHECK_FALSE(result.value().get_float_list("missing").has_value());
+    CHECK_FALSE(result.value().get_string_list("position").has_value());
+}
+
+TEST_CASE("Config lists the tables directly inside a table") {
+    const Result<Config> result = Config::parse(R"(
+top = 1
+
+[entities.zeta]
+value = 1
+
+[entities.alpha.transform]
+scale = 1
+
+[entities.alpha.spin]
+speed = 1
+
+[entities.empty]
+
+[entities-other.thing]
+value = 1
+)");
+    REQUIRE(result.has_value());
+    const Config& config = result.value();
+
+    const auto entities = config.tables_in("entities");
+    REQUIRE(entities.size() == 3);
+    CHECK(entities[0] == "alpha");
+    CHECK(entities[1] == "empty");
+    CHECK(entities[2] == "zeta");
+
+    const auto components = config.tables_in("entities.alpha");
+    REQUIRE(components.size() == 2);
+    CHECK(components[0] == "spin");
+    CHECK(components[1] == "transform");
+
+    CHECK(config.tables_in("entities.zeta").empty());
+    CHECK(config.tables_in("missing").empty());
+
+    const auto top_level = config.tables_in("");
+    REQUIRE(top_level.size() == 2);
+    CHECK(top_level[0] == "entities");
+    CHECK(top_level[1] == "entities-other");
+}
+
 TEST_CASE("Config accepts empty text") {
     CHECK(Config::parse("").has_value());
 }

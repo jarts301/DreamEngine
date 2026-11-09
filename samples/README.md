@@ -6,5 +6,6 @@ and never include platform or backend headers.
 | Sample | Shows |
 |---|---|
 | [cube](cube) | A spinning cube drawn with Vulkan on PC and Android, with Slang shaders |
+| [scene_demo](scene_demo) | Scenes in TOML files, built from components, using shared assets and events |
 | [hello_game](hello_game) | A complete game on PC and Android: window, lifecycle, files and input actions |
 | [module_demo](module_demo) | Choosing a backend from `dream.toml`, with no backend named in the code |

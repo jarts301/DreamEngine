@@ -1,0 +1,22 @@
+[app]
+organization = "DreamEngine"
+name = "DreamScenes"
+title = "Dream Scenes"
+width = 1280
+height = 720
+
+[input.actions]
+switch_scene = ["key:space", "mouse:left", "touch"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]

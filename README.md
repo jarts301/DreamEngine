@@ -96,3 +96,23 @@ Use a preset profile, because CLion's default `Debug` profile does not use vcpkg
 
 If `VCPKG_ROOT` and `ANDROID_NDK_HOME` are not set on your system, create a `CMakeUserPresets.json`
 (ignored by Git) with presets that set them under `environment` and inherit from the presets above.
+
+## Non-English Visual Studio
+
+Ninja finds a source file's headers by matching the compiler's "including file" message. In a
+non-English Visual Studio that text can contain accented letters, and their bytes depend on the
+console code page. If the console differs between configuring and building, as it can in an IDE,
+editing a header silently stops rebuilding the files that use it, which can cause strange crashes.
+
+To avoid this, install Visual Studio's English language pack (**Visual Studio Installer > Modify >
+Language packs**). The Windows presets set `VSLANG=1033`, which makes the compiler use it. CLion
+doesn't apply that setting when building, so with CLion also remove the other language, leaving
+English as the only one. Then reconfigure from scratch and rebuild.
+
+To check a build folder, this should print no lines:
+
+```bash
+ninja -C build/windows-debug -t deps | grep "#deps 0,"
+```
+
+Without the language pack, rebuild the project after editing a header.

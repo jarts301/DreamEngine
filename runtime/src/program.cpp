@@ -27,12 +27,6 @@ int run_program() {
         return 1;
     }
 
-    const std::unique_ptr<Game> game = create_game();
-    if (game == nullptr) {
-        DREAM_LOG_ERROR("create_game returned null");
-        return 1;
-    }
-
     std::unique_ptr<rhi::Device> device;
     if (project.value().is_configured<rhi::Device>()) {
         core::Result<core::CreatedModule<rhi::Device>> created_device =
@@ -45,6 +39,14 @@ int run_program() {
     }
 
     App app(std::move(created.value().instance), project.value().config(), std::move(device));
+
+    // Created after the App so it is destroyed first, while the GPU resources it holds are valid.
+    const std::unique_ptr<Game> game = create_game();
+    if (game == nullptr) {
+        DREAM_LOG_ERROR("create_game returned null");
+        return 1;
+    }
+
     if (const core::Result<void> result = app.run(*game); !result.has_value()) {
         DREAM_LOG_ERROR("{}", result.error().message);
         return 1;

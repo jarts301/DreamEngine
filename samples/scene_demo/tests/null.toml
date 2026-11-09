@@ -1,0 +1,22 @@
+[app]
+max_fps = 0
+
+[demo]
+quit_after_frames = 30
+switch_every_frames = 10
+
+[input.actions]
+switch_scene = ["key:space"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["null"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["null"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["null"]

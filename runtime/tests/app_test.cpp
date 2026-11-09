@@ -373,6 +373,39 @@ TEST_CASE("App draws nothing while paused") {
     CHECK(run.device.calls == Log{"attach 640x480"});
 }
 
+TEST_CASE("App publishes platform events and flushes queued events before each update") {
+    struct EventGame final : Game {
+        Log log;
+        std::vector<Subscription> subscriptions;
+
+        core::Result<void> on_start(App& app) override {
+            subscriptions.push_back(app.events().subscribe<SurfaceResized>([this](const SurfaceResized& e) {
+                log.push_back(std::format("resized {}", e.size.width));
+            }));
+            subscriptions.push_back(
+                app.events().subscribe<int>([this](const int& value) {
+                    log.push_back(std::format("queued {}", value));
+                }));
+            return {};
+        }
+
+        void on_update(App& app, const core::FrameTime& time) override {
+            log.emplace_back("update");
+            if (time.frame_index == 0) {
+                app.events().enqueue(7);
+            }
+        }
+    };
+
+    FakeState state;
+    state.script = {SurfaceResized{{800, 600}}, k_end_of_frame, k_end_of_frame};
+    App app(std::make_unique<FakePlatform>(state), k_config);
+    EventGame game;
+
+    REQUIRE(app.run(game).has_value());
+    CHECK(game.log == Log{"resized 800", "update", "queued 7", "update"});
+}
+
 TEST_CASE("App limits the frame rate when asked") {
     const auto config = core::Config::parse("[app]\nmax_fps = 100");
     REQUIRE(config.has_value());

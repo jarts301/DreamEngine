@@ -34,7 +34,7 @@ core::Result<std::uint32_t> read_setting(const core::Config& config, std::string
 App::App(std::unique_ptr<platform::Platform> platform, const core::Config& config,
          std::unique_ptr<rhi::Device> device)
     : m_platform(std::move(platform)), m_device(std::move(device)), m_config(config),
-      m_files(*m_platform) {}
+      m_files(*m_platform), m_assets(m_files), m_scenes(m_files, m_assets) {}
 
 core::Result<void> App::attach_surface() {
     if (m_device == nullptr || m_surface_attached) {
@@ -126,6 +126,7 @@ core::Result<void> App::run(Game& game) {
             continue;
         }
 
+        m_events.flush();
         game.on_update(*this, clock.tick());
 
         outcome = render_frame(game);
@@ -205,6 +206,8 @@ void App::handle_event(Game& game, const platform::Event& event) {
             }
         },
         event);
+
+    std::visit([&](const auto& value) { m_events.publish(value); }, event);
 }
 
 } // namespace dream::runtime

@@ -1,0 +1,2 @@
+vertex_shader = "assets:/shaders/solid.vert"
+fragment_shader = "assets:/shaders/solid.frag"

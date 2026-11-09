@@ -3,8 +3,11 @@
 #include "dream/core/config.h"
 #include "dream/core/result.h"
 #include "dream/platform/platform.h"
+#include "dream/runtime/asset_manager.h"
+#include "dream/runtime/event_bus.h"
 #include "dream/runtime/game.h"
 #include "dream/runtime/input_actions.h"
+#include "dream/runtime/scene_loader.h"
 #include "dream/runtime/virtual_file_system.h"
 
 #include <memory>
@@ -46,6 +49,19 @@ public:
         return m_files;
     }
 
+    [[nodiscard]] AssetManager& assets() noexcept {
+        return m_assets;
+    }
+
+    [[nodiscard]] SceneLoader& scenes() noexcept {
+        return m_scenes;
+    }
+
+    // Every platform event, such as platform::SurfaceResized, is also published here.
+    [[nodiscard]] EventBus& events() noexcept {
+        return m_events;
+    }
+
     [[nodiscard]] const core::Config& config() const noexcept {
         return m_config;
     }
@@ -74,6 +90,9 @@ private:
     std::unique_ptr<rhi::Device> m_device;
     const core::Config& m_config;
     VirtualFileSystem m_files;
+    AssetManager m_assets;
+    SceneLoader m_scenes;
+    EventBus m_events;
     InputActions m_input;
     platform::SurfaceSize m_surface_size;
     bool m_running = true;

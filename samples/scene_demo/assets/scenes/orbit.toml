@@ -1,0 +1,43 @@
+# A small solar system. The moon's position is relative to the planet, which is relative to the sun.
+
+[entities.camera.transform]
+position = [0.0, 7.0, 13.0]
+
+[entities.camera.camera]
+target = [0.0, 0.0, 0.0]
+field_of_view = 45.0
+
+[entities.sun.transform]
+scale = [1.3, 1.3, 1.3]
+
+[entities.sun.spin]
+speed = 0.5
+
+[entities.sun.solid]
+pipeline = "assets:/pipelines/solid.toml"
+tint = [0.95, 0.70, 0.15]
+
+[entities.planet]
+parent = "sun"
+
+[entities.planet.transform]
+position = [3.6, 0.0, 0.0]
+scale = [0.45, 0.45, 0.45]
+
+[entities.planet.spin]
+speed = 1.4
+
+[entities.planet.solid]
+pipeline = "assets:/pipelines/solid.toml"
+tint = [0.20, 0.45, 0.95]
+
+[entities.moon]
+parent = "planet"
+
+[entities.moon.transform]
+position = [2.6, 0.0, 0.0]
+scale = [0.4, 0.4, 0.4]
+
+[entities.moon.solid]
+pipeline = "assets:/pipelines/solid.toml"
+tint = [0.70, 0.70, 0.75]
