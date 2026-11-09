@@ -47,6 +47,7 @@ build-*/
 CMakeUserPresets.json
 cmake-build-*/
 .vs/
+.idea/
 
 # CMake generated files
 CMakeFiles/
