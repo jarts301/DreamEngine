@@ -14,6 +14,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0007](0007-platform-and-game-loop.md) | Platform layer, lifecycle, game loop and APK packaging |
 | [0008](0008-rhi-and-shaders.md) | Graphics interface, Vulkan baseline and shader pipeline |
 | [0009](0009-world-assets-scenes.md) | Entities, events, assets and scene files |
+| [0010](0010-renderer-v1.md) | Forward renderer, models and textures |
 
 ## Template
 

@@ -1,7 +1,10 @@
 # Builds a game for the current platform. See docs/adr/0007-platform-and-game-loop.md.
 #
 # Usage: dream_add_game(<name> SOURCES <files...> CONFIG <toml-file> [ASSETS <directory>]
-#                       [SHADERS <slang-files...>] [APPLICATION_ID <id> DISPLAY_NAME <text>])
+#                       [SHADERS <slang-files...>] [RENDERER]
+#                       [APPLICATION_ID <id> DISPLAY_NAME <text>])
+#
+# RENDERER adds the shaders that runtime::Renderer needs.
 #
 # Each shader file must define vertex_main and fragment_main. They become the game assets
 # assets:/shaders/<file>.vert and .frag, plus the suffix given by rhi::Device::shader_file_suffix.
@@ -9,8 +12,12 @@
 # On PC this creates an executable, with the assets copied next to it. On Android it creates
 # libmain.so and, if APPLICATION_ID is given and ANDROID_HOME is set, a <name>_apk target.
 function(dream_add_game name)
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG;ASSETS;APPLICATION_ID;DISPLAY_NAME"
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "RENDERER" "CONFIG;ASSETS;APPLICATION_ID;DISPLAY_NAME"
         "SOURCES;SHADERS")
+
+    if(ARG_RENDERER)
+        list(APPEND ARG_SHADERS "${DreamEngine_SOURCE_DIR}/runtime/shaders/forward.slang")
+    endif()
 
     if(ANDROID)
         set(native_dir "${CMAKE_CURRENT_BINARY_DIR}/${name}_native")

@@ -1,0 +1,21 @@
+[app]
+max_fps = 0
+
+[demo]
+quit_after_frames = 5
+
+[input.actions]
+toggle_spin = ["key:space"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["null"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["null"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["null"]

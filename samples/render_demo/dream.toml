@@ -1,0 +1,22 @@
+[app]
+organization = "DreamEngine"
+name = "DreamRenderer"
+title = "Dream Renderer"
+width = 1280
+height = 720
+
+[input.actions]
+toggle_spin = ["key:space", "mouse:left", "touch"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]

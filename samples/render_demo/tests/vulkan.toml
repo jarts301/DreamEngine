@@ -1,0 +1,27 @@
+[app]
+title = "Dream Renderer Check"
+width = 960
+height = 540
+
+[demo]
+quit_after_frames = 600
+spin = false
+
+[rhi.vulkan]
+validation = true
+
+[input.actions]
+toggle_spin = ["key:space"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["vulkan"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["vulkan"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["vulkan"]

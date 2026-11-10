@@ -17,6 +17,7 @@ struct FakeDeviceState {
     bool frames_available = true;
     std::optional<core::Error> begin_frame_error;
     platform::NativeWindow last_window;
+    std::vector<std::byte> last_uniforms;
 };
 
 class FakeDevice final : public rhi::Device, private rhi::CommandList {
@@ -49,18 +50,25 @@ public:
 
     core::Result<rhi::BufferHandle> create_buffer(rhi::BufferUsage,
                                                   std::span<const std::byte>) override {
-        return rhi::BufferHandle{};
+        return rhi::BufferHandle{.index = 0, .generation = 1};
+    }
+
+    core::Result<rhi::TextureHandle> create_texture(const rhi::TextureDesc& desc,
+                                                    std::span<const std::byte>) override {
+        m_state.calls.push_back(std::format("texture {}x{}", desc.width, desc.height));
+        return rhi::TextureHandle{.index = ++m_next_texture, .generation = 1};
     }
 
     core::Result<rhi::ShaderHandle> create_shader(rhi::ShaderStage,
                                                   std::span<const std::byte>) override {
-        return rhi::ShaderHandle{};
+        return rhi::ShaderHandle{.index = 0, .generation = 1};
     }
 
     core::Result<rhi::PipelineHandle> create_pipeline(const rhi::PipelineDesc&) override {
-        return rhi::PipelineHandle{};
+        return rhi::PipelineHandle{.index = 0, .generation = 1};
     }
 
+    void destroy_texture(rhi::TextureHandle) override {}
     void destroy_buffer(rhi::BufferHandle) override {}
     void destroy_shader(rhi::ShaderHandle) override {}
     void destroy_pipeline(rhi::PipelineHandle) override {}
@@ -85,9 +93,26 @@ private:
     void bind_vertex_buffer(rhi::BufferHandle) override {}
     void bind_index_buffer(rhi::BufferHandle, rhi::IndexFormat) override {}
     void push_constants(std::span<const std::byte>) override {}
-    void draw_indexed(std::uint32_t) override {}
+
+    void set_uniforms(std::span<const std::byte> data) override {
+        m_state.last_uniforms.assign(data.begin(), data.end());
+        m_state.calls.emplace_back("uniforms");
+    }
+
+    void bind_texture(rhi::TextureHandle texture) override {
+        m_state.calls.push_back(std::format("bind_texture {}", texture.is_valid() ? texture.index : 0));
+    }
+
+    void draw_indexed(std::uint32_t count) override {
+        m_state.calls.push_back(std::format("draw {}", count));
+    }
+
+    void draw_indexed_range(std::uint32_t first, std::uint32_t count) override {
+        m_state.calls.push_back(std::format("draw {}+{}", first, count));
+    }
 
     FakeDeviceState& m_state;
+    std::uint32_t m_next_texture = 0;
 };
 
 } // namespace dream::runtime::tests

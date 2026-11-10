@@ -1,4 +1,5 @@
 add_subdirectory(cube)
 add_subdirectory(hello_game)
 add_subdirectory(module_demo)
+add_subdirectory(render_demo)
 add_subdirectory(scene_demo)

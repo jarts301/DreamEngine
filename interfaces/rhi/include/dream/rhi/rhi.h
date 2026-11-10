@@ -18,10 +18,12 @@ namespace dream::rhi {
 struct BufferTag;
 struct ShaderTag;
 struct PipelineTag;
+struct TextureTag;
 
 using BufferHandle = core::Handle<BufferTag>;
 using ShaderHandle = core::Handle<ShaderTag>;
 using PipelineHandle = core::Handle<PipelineTag>;
+using TextureHandle = core::Handle<TextureTag>;
 
 // For backends, which keep their own resource types in a core::HandlePool.
 template <typename To, typename From>
@@ -32,7 +34,21 @@ template <typename To, typename From>
 // The guaranteed minimum on all supported hardware.
 inline constexpr std::size_t k_max_push_constant_size = 128;
 
+// The largest block accepted by CommandList::set_uniforms.
+inline constexpr std::size_t k_max_uniform_size = 256;
+
 enum class BufferUsage : std::uint8_t { Vertex, Index };
+
+// Both are four bytes per pixel. Srgb is for colors, and Unorm is for data such as normal maps.
+enum class TextureFormat : std::uint8_t { Rgba8Srgb, Rgba8Unorm };
+
+struct TextureDesc {
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    TextureFormat format = TextureFormat::Rgba8Srgb;
+    bool generate_mipmaps = true;
+};
+
 enum class ShaderStage : std::uint8_t { Vertex, Fragment };
 enum class IndexFormat : std::uint8_t { UInt16, UInt32 };
 enum class VertexFormat : std::uint8_t { Float2, Float3, Float4 };
@@ -75,7 +91,18 @@ public:
     // At most k_max_push_constant_size bytes, visible to every shader stage.
     virtual void push_constants(std::span<const std::byte> data) = 0;
 
+    // Sets the block that shaders read at binding 0 of set 0, for this and later draws. The data is
+    // copied, and it can change any number of times per frame. At most k_max_uniform_size bytes.
+    virtual void set_uniforms(std::span<const std::byte> data) = 0;
+
+    // Sets the texture that shaders read at binding 1 of set 0, for this and later draws. Each
+    // frame starts with a plain white texture, which an invalid handle also selects.
+    virtual void bind_texture(TextureHandle texture) = 0;
+
     virtual void draw_indexed(std::uint32_t index_count) = 0;
+
+    // Draws part of the bound index buffer.
+    virtual void draw_indexed_range(std::uint32_t first_index, std::uint32_t index_count) = 0;
 
 protected:
     ~CommandList() = default;
@@ -107,6 +134,11 @@ public:
     [[nodiscard]] virtual core::Result<BufferHandle>
     create_buffer(BufferUsage usage, std::span<const std::byte> contents) = 0;
 
+    // `pixels` holds width * height pixels of four bytes, row by row from the top of the image.
+    // The contents are fixed at creation.
+    [[nodiscard]] virtual core::Result<TextureHandle>
+    create_texture(const TextureDesc& desc, std::span<const std::byte> pixels) = 0;
+
     [[nodiscard]] virtual core::Result<ShaderHandle>
     create_shader(ShaderStage stage, std::span<const std::byte> code) = 0;
 
@@ -117,6 +149,7 @@ public:
     // May wait for the GPU, so don't call these while a frame is being recorded. Handles that no
     // longer exist are ignored.
     virtual void destroy_buffer(BufferHandle buffer) = 0;
+    virtual void destroy_texture(TextureHandle texture) = 0;
     virtual void destroy_shader(ShaderHandle shader) = 0;
     virtual void destroy_pipeline(PipelineHandle pipeline) = 0;
 

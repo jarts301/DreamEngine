@@ -87,4 +87,4 @@ jobs:
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Package the samples as APKs
-        run: cmake --build --preset ${{ matrix.preset }} --target dream_hello_game_apk dream_cube_apk
+        run: cmake --build --preset ${{ matrix.preset }} --target dream_hello_game_apk dream_cube_apk dream_render_demo_apk

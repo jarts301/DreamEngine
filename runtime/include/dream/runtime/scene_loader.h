@@ -23,6 +23,10 @@ public:
     ComponentData(const core::Config& config, std::string prefix)
         : m_config(config), m_prefix(std::move(prefix)) {}
 
+    [[nodiscard]] bool has(std::string_view key) const {
+        return m_config.contains(full_key(key));
+    }
+
     [[nodiscard]] core::Result<float> number(std::string_view key, float fallback) const;
     [[nodiscard]] core::Result<core::Vec3> vec3(std::string_view key, core::Vec3 fallback) const;
 

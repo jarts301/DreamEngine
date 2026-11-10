@@ -47,7 +47,7 @@ backend registers a watcher and keeps its own queue, and `wait_event` wakes regu
 
 ## Consequences
 
-- Buffers use CPU-visible memory until the renderer adds staging uploads for large meshes.
+- Buffers started in CPU-visible memory. ADR 0010 moved them to staging uploads.
 - Destroying a buffer or pipeline waits for the GPU. A deletion queue can replace that if streaming
   needs it.
 - Build servers have no GPU, so CI covers the `null` backend. The real Vulkan path is checked by

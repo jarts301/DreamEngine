@@ -89,6 +89,36 @@ TEST_CASE("Null device records a complete frame") {
     CHECK(device->end_frame().has_value());
 }
 
+TEST_CASE("Null device accepts textures and uniforms in a frame") {
+    const auto device = make_device();
+    REQUIRE(device->attach_surface({}, k_size).has_value());
+    const PipelineHandle pipeline = make_pipeline(*device);
+    constexpr std::array<std::byte, 8> k_two_pixels{};
+    const TextureHandle texture =
+        device->create_texture(TextureDesc{.width = 2, .height = 1}, k_two_pixels).value();
+
+    CommandList* const commands = device->begin_frame().value();
+    REQUIRE(commands != nullptr);
+    commands->begin_render_pass(ClearColor{});
+    commands->bind_pipeline(pipeline);
+    commands->set_uniforms(k_bytes);
+    commands->bind_texture(texture);
+    commands->bind_texture(TextureHandle{});
+    commands->draw_indexed_range(3, 6);
+    commands->end_render_pass();
+    CHECK(device->end_frame().has_value());
+
+    device->destroy_texture(texture);
+    device->destroy_texture(texture);
+}
+
+TEST_CASE("Null device rejects textures whose pixels don't match their size") {
+    const auto device = make_device();
+
+    CHECK_FALSE(device->create_texture(TextureDesc{.width = 2, .height = 2}, k_bytes).has_value());
+    CHECK_FALSE(device->create_texture(TextureDesc{.width = 0, .height = 1}, {}).has_value());
+}
+
 TEST_CASE("Null device keeps pipelines across a reattached surface") {
     const auto device = make_device();
     REQUIRE(device->attach_surface({}, k_size).has_value());

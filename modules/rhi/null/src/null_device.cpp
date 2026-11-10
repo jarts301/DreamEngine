@@ -50,6 +50,17 @@ public:
         return handle_cast<BufferTag>(m_buffers.create());
     }
 
+    core::Result<TextureHandle> create_texture(const TextureDesc& desc,
+                                               std::span<const std::byte> pixels) override {
+        if (desc.width == 0 || desc.height == 0) {
+            return invalid("A texture can't be empty");
+        }
+        if (pixels.size() != std::size_t{desc.width} * desc.height * 4) {
+            return invalid("The pixels don't match the texture's size");
+        }
+        return handle_cast<TextureTag>(m_textures.create());
+    }
+
     core::Result<ShaderHandle> create_shader(ShaderStage /*stage*/,
                                              std::span<const std::byte> code) override {
         if (code.empty()) {
@@ -71,6 +82,10 @@ public:
 
     void destroy_buffer(BufferHandle buffer) override {
         m_buffers.destroy(handle_cast<Resource>(buffer));
+    }
+
+    void destroy_texture(TextureHandle texture) override {
+        m_textures.destroy(handle_cast<Resource>(texture));
     }
 
     void destroy_shader(ShaderHandle shader) override {
@@ -128,10 +143,24 @@ private:
         DREAM_VERIFY(data.size() <= k_max_push_constant_size, "Too many push constants");
     }
 
+    void set_uniforms(std::span<const std::byte> data) override {
+        DREAM_VERIFY(data.size() <= k_max_uniform_size, "Too many uniforms");
+    }
+
+    void bind_texture(TextureHandle texture) override {
+        DREAM_VERIFY(!texture.is_valid() || m_textures.contains(handle_cast<Resource>(texture)),
+                     "Binding a texture that doesn't exist");
+    }
+
     void draw_indexed(std::uint32_t /*index_count*/) override {
         DREAM_VERIFY(m_in_pass && m_pipeline_bound, "Drawing without a pass and pipeline");
     }
 
+    void draw_indexed_range(std::uint32_t /*first_index*/, std::uint32_t /*index_count*/) override {
+        DREAM_VERIFY(m_in_pass && m_pipeline_bound, "Drawing without a pass and pipeline");
+    }
+
+    core::HandlePool<Resource> m_textures;
     core::HandlePool<Resource> m_buffers;
     core::HandlePool<Resource> m_shaders;
     core::HandlePool<Resource> m_pipelines;
