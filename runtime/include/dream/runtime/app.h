@@ -80,6 +80,22 @@ public:
         return m_surface_size;
     }
 
+    // See platform::Platform::display_scale.
+    [[nodiscard]] float display_scale() const {
+        return m_platform->display_scale();
+    }
+
+    // See platform::Platform::safe_area.
+    [[nodiscard]] platform::SurfaceRect safe_area() const {
+        return m_platform->safe_area();
+    }
+
+    // While on, typing arrives as platform::TextEntered events, and touch screens show their
+    // keyboard.
+    void set_text_input(bool enabled) {
+        m_platform->set_text_input(enabled);
+    }
+
     [[nodiscard]] double fixed_step_seconds() const noexcept {
         return m_fixed_steps.step_seconds();
     }

@@ -43,6 +43,8 @@ struct RenderFixture {
         state.assets["shaders/forward.frag.fake"] = fake_shader();
         state.assets["shaders/debug_lines.vert.fake"] = fake_shader();
         state.assets["shaders/debug_lines.frag.fake"] = fake_shader();
+        state.assets["shaders/ui.vert.fake"] = fake_shader();
+        state.assets["shaders/ui.frag.fake"] = fake_shader();
     }
 
     // Calls `body` from inside a frame, with everything set up.

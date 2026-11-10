@@ -1,0 +1,40 @@
+# The scripted run with the real backends and no GPU or sound hardware. One fixed step per frame,
+# at most.
+[app]
+max_fps = 120
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[audio.miniaudio]
+device = false
+
+[input.actions]
+throw = ["key:space"]
+menu = ["key:escape"]
+debug = ["key:f1"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]
+debug_ui = ["imgui"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]
+debug_ui = ["imgui"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]
+debug_ui = ["imgui"]

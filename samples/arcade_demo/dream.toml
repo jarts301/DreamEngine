@@ -1,0 +1,38 @@
+[app]
+organization = "DreamEngine"
+name = "DreamArcade"
+title = "Dream Arcade"
+width = 1280
+height = 720
+
+[demo]
+debug_tools = false
+
+[input.actions]
+throw = ["key:space", "mouse:left", "touch"]
+menu = ["key:escape", "key:back"]
+debug = ["key:f1"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+physics3d = ["jolt"]
+audio = ["miniaudio", "null"]
+ui = ["rmlui"]
+debug_ui = ["imgui"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+physics3d = ["jolt"]
+audio = ["miniaudio", "null"]
+ui = ["rmlui"]
+debug_ui = ["imgui"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+physics3d = ["jolt"]
+audio = ["miniaudio", "null"]
+ui = ["rmlui"]
+debug_ui = ["imgui"]

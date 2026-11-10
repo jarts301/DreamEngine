@@ -173,6 +173,21 @@ private:
         return true;
     }
 
+    bool bind_frame_geometry(std::span<const std::byte> vertices,
+                             std::span<const std::uint32_t> indices) override {
+        DREAM_VERIFY(m_in_pass, "Binding geometry outside a render pass");
+        const std::size_t bytes = vertices.size() + indices.size_bytes();
+        if (m_frame_vertex_bytes + bytes > k_max_frame_vertex_bytes) {
+            return false;
+        }
+        m_frame_vertex_bytes += bytes;
+        return true;
+    }
+
+    void set_scissor(std::optional<ScissorRect> /*rect*/) override {
+        DREAM_VERIFY(m_in_pass, "Setting a scissor outside a render pass");
+    }
+
     core::HandlePool<Resource> m_textures;
     core::HandlePool<Resource> m_buffers;
     core::HandlePool<Resource> m_shaders;

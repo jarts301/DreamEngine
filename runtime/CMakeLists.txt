@@ -6,6 +6,7 @@ find_path(DREAM_CGLTF_INCLUDE_DIR cgltf.h REQUIRED)
 add_library(dream_runtime STATIC
     src/app.cpp
     src/asset_manager.cpp
+    src/audio.cpp
     src/debug_lines.cpp
     src/event_bus.cpp
     src/input_actions.cpp
@@ -15,6 +16,7 @@ add_library(dream_runtime STATIC
     src/program.cpp
     src/renderer.cpp
     src/scene_loader.cpp
+    src/ui.cpp
     src/virtual_file_system.cpp
     src/world.cpp
 )
@@ -25,7 +27,8 @@ target_include_directories(dream_runtime SYSTEM PRIVATE
     ${Stb_INCLUDE_DIR} ${DREAM_CGLTF_INCLUDE_DIR})
 target_link_libraries(dream_runtime PUBLIC
     dream::core dream::interface_platform dream::interface_rhi dream::interface_physics2d
-    dream::interface_physics3d EnTT::EnTT)
+    dream::interface_physics3d dream::interface_audio dream::interface_ui
+    dream::interface_debug_ui EnTT::EnTT)
 dream_configure_target(dream_runtime)
 
 if(DREAM_BUILD_TESTS)
@@ -34,12 +37,14 @@ if(DREAM_BUILD_TESTS)
             tests/test_main.cpp
             tests/app_test.cpp
             tests/asset_manager_test.cpp
+            tests/audio_test.cpp
             tests/event_bus_test.cpp
             tests/input_actions_test.cpp
             tests/model_loader_test.cpp
             tests/physics_test.cpp
             tests/renderer_test.cpp
             tests/scene_loader_test.cpp
+            tests/ui_test.cpp
             tests/virtual_file_system_test.cpp
             tests/world_test.cpp
         LIBRARIES

@@ -6,6 +6,7 @@
 #include <SDL3/SDL_main.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <deque>
 #include <format>
@@ -57,6 +58,12 @@ Key translate_scancode(SDL_Scancode scancode) {
         return Key::Tab;
     case SDL_SCANCODE_BACKSPACE:
         return Key::Backspace;
+    case SDL_SCANCODE_DELETE:
+        return Key::Delete;
+    case SDL_SCANCODE_HOME:
+        return Key::Home;
+    case SDL_SCANCODE_END:
+        return Key::End;
     case SDL_SCANCODE_LEFT:
         return Key::Left;
     case SDL_SCANCODE_RIGHT:
@@ -155,6 +162,45 @@ public:
 #else
         return {};
 #endif
+    }
+
+    float display_scale() const override {
+        const float scale = m_window != nullptr ? SDL_GetWindowDisplayScale(m_window) : 0.0f;
+        return scale > 0.0f ? scale : 1.0f;
+    }
+
+    SurfaceRect safe_area() const override {
+        const SurfaceSize size = surface_size();
+        SurfaceRect whole{0, 0, size.width, size.height};
+        SDL_Rect area;
+        if (m_window == nullptr || !SDL_GetWindowSafeArea(m_window, &area) || area.w <= 0 ||
+            area.h <= 0) {
+            return whole;
+        }
+        // SDL reports window units, which differ from pixels on high-DPI screens.
+        const float density = SDL_GetWindowPixelDensity(m_window);
+        const auto pixels = [density](int value) {
+            return static_cast<std::int32_t>(std::lround(static_cast<float>(value) * density));
+        };
+        const std::int32_t left = std::clamp(pixels(area.x), 0, static_cast<std::int32_t>(size.width));
+        const std::int32_t top = std::clamp(pixels(area.y), 0, static_cast<std::int32_t>(size.height));
+        const std::int32_t right = std::clamp(pixels(area.x + area.w), left,
+                                              static_cast<std::int32_t>(size.width));
+        const std::int32_t bottom = std::clamp(pixels(area.y + area.h), top,
+                                               static_cast<std::int32_t>(size.height));
+        return SurfaceRect{left, top, static_cast<std::uint32_t>(right - left),
+                           static_cast<std::uint32_t>(bottom - top)};
+    }
+
+    void set_text_input(bool enabled) override {
+        if (m_window == nullptr) {
+            return;
+        }
+        if (enabled) {
+            SDL_StartTextInput(m_window);
+        } else {
+            SDL_StopTextInput(m_window);
+        }
     }
 
     std::optional<Event> poll_event() override {
@@ -350,6 +396,14 @@ private:
             const float density = m_window != nullptr ? SDL_GetWindowPixelDensity(m_window) : 1.0f;
             return PointerMoved{event.motion.x * density, event.motion.y * density};
         }
+
+        case SDL_EVENT_MOUSE_WHEEL: {
+            const float flip = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1.0f : 1.0f;
+            return PointerWheel{event.wheel.x * flip, event.wheel.y * flip};
+        }
+
+        case SDL_EVENT_TEXT_INPUT:
+            return TextEntered{std::string(event.text.text != nullptr ? event.text.text : "")};
 
         case SDL_EVENT_FINGER_DOWN:
             ++m_fingers_down;

@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -54,10 +55,23 @@ struct TextureDesc {
 
 enum class ShaderStage : std::uint8_t { Vertex, Fragment };
 enum class IndexFormat : std::uint8_t { UInt16, UInt32 };
-enum class VertexFormat : std::uint8_t { Float2, Float3, Float4 };
+// UByte4Norm is four bytes read as numbers from 0 to 1, such as an RGBA color.
+enum class VertexFormat : std::uint8_t { Float2, Float3, Float4, UByte4Norm };
 
 // Lines draws each pair of vertices as a line one pixel wide.
 enum class PrimitiveTopology : std::uint8_t { Triangles, Lines };
+
+// How drawn colors combine with what is already there. Alpha uses the color's alpha as its
+// opacity; PremultipliedAlpha expects colors already multiplied by their alpha.
+enum class BlendMode : std::uint8_t { Opaque, Alpha, PremultipliedAlpha };
+
+// In pixels from the top-left corner of the surface.
+struct ScissorRect {
+    std::int32_t x = 0;
+    std::int32_t y = 0;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+};
 
 struct VertexAttribute {
     std::uint32_t location = 0;
@@ -71,6 +85,7 @@ struct PipelineDesc {
     std::uint32_t vertex_stride = 0;
     std::span<const VertexAttribute> attributes;
     PrimitiveTopology topology = PrimitiveTopology::Triangles;
+    BlendMode blend = BlendMode::Opaque;
     bool depth_test = true;
 
     // Whether drawing updates the depth buffer. Ignored without depth_test.
@@ -119,6 +134,16 @@ public:
     // All calls in a frame share k_max_frame_vertex_bytes; a call that would go over it draws
     // nothing and returns false.
     virtual bool draw_vertices(std::span<const std::byte> vertices, std::uint32_t vertex_count) = 0;
+
+    // Copies vertices and 32-bit indices into the same per-frame memory as draw_vertices, and binds
+    // them in place of the vertex and index buffers, for draw_indexed_range. Returns false, binding
+    // nothing, if they don't fit.
+    virtual bool bind_frame_geometry(std::span<const std::byte> vertices,
+                                     std::span<const std::uint32_t> indices) = 0;
+
+    // Limits drawing to a rectangle, or with nullopt to the whole surface, which is also how each
+    // render pass starts.
+    virtual void set_scissor(std::optional<ScissorRect> rect) = 0;
 
 protected:
     ~CommandList() = default;

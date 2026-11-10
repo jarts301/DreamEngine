@@ -1,5 +1,6 @@
 #include "dream/runtime/renderer.h"
 
+#include "dream/core/assert.h"
 #include "dream/runtime/app.h"
 
 #include <algorithm>
@@ -9,7 +10,9 @@
 #include <format>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace dream::runtime {
 namespace {
@@ -32,6 +35,13 @@ struct DrawConstants {
     Vec4 normal_y;
     Vec4 normal_z;
     Vec4 base_color;
+};
+
+// Matches UiConstants in runtime/shaders/ui.slang.
+struct UiConstants {
+    core::Vec2 scale;
+    core::Vec2 offset;
+    float premultiplied = 0.0f;
 };
 
 static_assert(sizeof(FrameUniforms) <= rhi::k_max_uniform_size);
@@ -123,6 +133,175 @@ core::Result<void> read_directional_light(ComponentContext& context) {
 
 } // namespace
 
+// Owns the textures interfaces create, by the ids they were given.
+class Renderer::UiTextures final : public ui::Host {
+public:
+    UiTextures(App& app, rhi::Device& device) : m_app(app), m_device(device) {}
+
+    core::Result<std::vector<std::byte>> read_file(std::string_view path) override {
+        return m_app.files().read(path);
+    }
+
+    core::Result<ui::TextureId> create_texture(std::uint32_t width, std::uint32_t height,
+                                               std::span<const std::byte> rgba,
+                                               ui::TextureKind kind) override {
+        const core::Result<rhi::TextureHandle> texture = m_device.create_texture(
+            rhi::TextureDesc{
+                .width = width,
+                .height = height,
+                .format = kind == ui::TextureKind::Color ? rhi::TextureFormat::Rgba8Srgb
+                                                         : rhi::TextureFormat::Rgba8Unorm,
+                .generate_mipmaps = false,
+            },
+            rgba);
+        if (!texture.has_value()) {
+            return texture.error();
+        }
+        const ui::TextureId id = ++m_next_id;
+        m_textures.emplace(id, GpuTexture(m_device, texture.value()));
+        return id;
+    }
+
+    core::Result<ui::LoadedTexture> load_texture(std::string_view path,
+                                                 bool premultiply_alpha) override {
+        const auto file = m_app.files().read(path);
+        if (!file.has_value()) {
+            return file.error();
+        }
+        core::Result<ImageData> image = decode_image(file.value());
+        if (!image.has_value()) {
+            return core::Error{image.error().code,
+                               std::format("'{}': {}", path, image.error().message)};
+        }
+        ImageData& data = image.value();
+        if (premultiply_alpha) {
+            for (std::size_t i = 0; i + 3 < data.pixels.size(); i += 4) {
+                const auto alpha = static_cast<unsigned>(data.pixels[i + 3]);
+                for (std::size_t c = 0; c < 3; ++c) {
+                    data.pixels[i + c] = static_cast<std::byte>(
+                        (static_cast<unsigned>(data.pixels[i + c]) * alpha + 127) / 255);
+                }
+            }
+        }
+        const core::Result<ui::TextureId> id =
+            create_texture(data.width, data.height, data.pixels, ui::TextureKind::Color);
+        if (!id.has_value()) {
+            return id.error();
+        }
+        return ui::LoadedTexture{id.value(), data.width, data.height};
+    }
+
+    void release_texture(ui::TextureId texture) override {
+        if (m_textures.contains(texture)) {
+            m_released.push_back(texture);
+        }
+    }
+
+    void release_pending() {
+        for (const ui::TextureId texture : m_released) {
+            m_textures.erase(texture);
+        }
+        m_released.clear();
+    }
+
+    [[nodiscard]] rhi::TextureHandle find(ui::TextureId texture) const {
+        const auto found = m_textures.find(texture);
+        return found == m_textures.end() ? rhi::TextureHandle{} : found->second.get();
+    }
+
+    [[nodiscard]] std::size_t count() const noexcept {
+        return m_textures.size();
+    }
+
+private:
+    App& m_app;
+    rhi::Device& m_device;
+    std::unordered_map<ui::TextureId, GpuTexture> m_textures;
+    std::vector<ui::TextureId> m_released;
+    ui::TextureId m_next_id = 0;
+};
+
+Renderer::Renderer() = default;
+Renderer::~Renderer() = default;
+
+void Renderer::set_ui_layer(UiLayer layer, const ui::DrawList& list, core::Vec2 offset) {
+    if (layer < UiLayer::Count) {
+        m_ui_offsets[static_cast<std::size_t>(layer)] = offset;
+        ui::DrawList& target = m_ui_layers[static_cast<std::size_t>(layer)];
+        target.vertices.assign(list.vertices.begin(), list.vertices.end());
+        target.indices.assign(list.indices.begin(), list.indices.end());
+        target.commands.assign(list.commands.begin(), list.commands.end());
+        target.premultiplied_alpha = list.premultiplied_alpha;
+    }
+}
+
+void Renderer::clear_ui_layer(UiLayer layer) {
+    if (layer < UiLayer::Count) {
+        m_ui_layers[static_cast<std::size_t>(layer)].clear();
+    }
+}
+
+ui::Host& Renderer::ui_host() noexcept {
+    DREAM_ASSERT(m_ui_textures != nullptr, "The renderer isn't initialized");
+    return *m_ui_textures;
+}
+
+void Renderer::release_ui_textures() {
+    if (m_ui_textures != nullptr) {
+        m_ui_textures->release_pending();
+    }
+}
+
+void Renderer::draw_ui(rhi::CommandList& commands, platform::SurfaceSize size) {
+    if (!m_ui_pipeline.has_value() || size.width == 0 || size.height == 0) {
+        return;
+    }
+    const float width = static_cast<float>(size.width);
+    const float height = static_cast<float>(size.height);
+
+    for (std::size_t layer = 0; layer < m_ui_layers.size(); ++layer) {
+        const ui::DrawList& list = m_ui_layers[layer];
+        const core::Vec2 offset = m_ui_offsets[layer];
+        if (list.commands.empty() || list.vertices.empty()) {
+            continue;
+        }
+        commands.bind_pipeline(list.premultiplied_alpha ? m_ui_premultiplied_pipeline->get()
+                                                        : m_ui_pipeline->get());
+        if (!commands.bind_frame_geometry(std::as_bytes(std::span(list.vertices)),
+                                          list.indices)) {
+            continue;
+        }
+        for (const ui::DrawCommand& command : list.commands) {
+            if (command.index_count == 0 ||
+                command.first_index + command.index_count > list.indices.size()) {
+                continue;
+            }
+            const UiConstants constants{
+                .scale = core::Vec2{2.0f / width, -2.0f / height},
+                .offset = core::Vec2{-1.0f + 2.0f * (command.translation.x + offset.x) / width,
+                                     1.0f - 2.0f * (command.translation.y + offset.y) / height},
+                .premultiplied = list.premultiplied_alpha ? 1.0f : 0.0f,
+            };
+            if (command.clip.has_value()) {
+                const ui::ClipRect& clip = *command.clip;
+                commands.set_scissor(rhi::ScissorRect{
+                    .x = clip.x + static_cast<std::int32_t>(offset.x),
+                    .y = clip.y + static_cast<std::int32_t>(offset.y),
+                    .width = static_cast<std::uint32_t>(std::max(clip.width, 0)),
+                    .height = static_cast<std::uint32_t>(std::max(clip.height, 0)),
+                });
+            } else {
+                commands.set_scissor(std::nullopt);
+            }
+            commands.bind_texture(m_ui_textures->find(command.texture));
+            commands.push_constants(std::as_bytes(std::span(&constants, 1)));
+            commands.draw_indexed_range(command.first_index, command.index_count);
+            ++m_last_ui_command_count;
+        }
+        commands.set_scissor(std::nullopt);
+    }
+}
+
 float fitted_vertical_fov(float vertical_fov_radians, float aspect) noexcept {
     if (aspect >= 1.0f || aspect <= 0.0f) {
         return vertical_fov_radians;
@@ -197,6 +376,45 @@ core::Result<void> Renderer::initialize(App& app) {
     m_line_fragment_shader.emplace(std::move(line_fragment).value());
     m_line_pipeline.emplace(*device, line_pipeline.value());
 
+    core::Result<GpuShader> ui_vertex =
+        load_shader(app, *device, "ui.vert", rhi::ShaderStage::Vertex);
+    if (!ui_vertex.has_value()) {
+        return ui_vertex.error();
+    }
+    core::Result<GpuShader> ui_fragment =
+        load_shader(app, *device, "ui.frag", rhi::ShaderStage::Fragment);
+    if (!ui_fragment.has_value()) {
+        return ui_fragment.error();
+    }
+    constexpr std::array k_ui_attributes{
+        rhi::VertexAttribute{0, rhi::VertexFormat::Float2, offsetof(ui::Vertex, position)},
+        rhi::VertexAttribute{1, rhi::VertexFormat::Float2, offsetof(ui::Vertex, uv)},
+        rhi::VertexAttribute{2, rhi::VertexFormat::UByte4Norm, offsetof(ui::Vertex, color)},
+    };
+    rhi::PipelineDesc ui_desc{
+        .vertex_shader = ui_vertex.value().get(),
+        .fragment_shader = ui_fragment.value().get(),
+        .vertex_stride = sizeof(ui::Vertex),
+        .attributes = k_ui_attributes,
+        .blend = rhi::BlendMode::Alpha,
+        .depth_test = false,
+        .cull_back_faces = false,
+    };
+    const auto ui_pipeline = device->create_pipeline(ui_desc);
+    if (!ui_pipeline.has_value()) {
+        return ui_pipeline.error();
+    }
+    m_ui_pipeline.emplace(*device, ui_pipeline.value());
+    ui_desc.blend = rhi::BlendMode::PremultipliedAlpha;
+    const auto premultiplied_pipeline = device->create_pipeline(ui_desc);
+    if (!premultiplied_pipeline.has_value()) {
+        return premultiplied_pipeline.error();
+    }
+    m_ui_premultiplied_pipeline.emplace(*device, premultiplied_pipeline.value());
+    m_ui_vertex_shader.emplace(std::move(ui_vertex).value());
+    m_ui_fragment_shader.emplace(std::move(ui_fragment).value());
+    m_ui_textures = std::make_unique<UiTextures>(app, *device);
+
     app.assets().register_loader<ModelAsset>(
         [device](AssetLoadContext& context) -> core::Result<ModelAsset> {
             const auto file = context.files.read(context.path);
@@ -239,6 +457,7 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
                       rhi::ClearColor clear_color) {
     m_last_draw_count = 0;
     m_last_line_count = 0;
+    m_last_ui_command_count = 0;
     commands.begin_render_pass(clear_color);
 
     const Registry& registry = world.registry();
@@ -310,6 +529,7 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
     }
 
     m_debug_lines.clear();
+    draw_ui(commands, size);
     commands.end_render_pass();
 }
 

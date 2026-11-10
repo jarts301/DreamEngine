@@ -44,6 +44,18 @@ public:
     // Changes when a surface is lost and restored, so fetch it again after SurfaceRestored.
     [[nodiscard]] virtual NativeWindow native_window() const = 0;
 
+    // How much larger than usual the system draws its own text and controls, such as 2 on many
+    // phones. Interfaces multiply their sizes by this, so they stay readable on dense screens.
+    [[nodiscard]] virtual float display_scale() const = 0;
+
+    // While on, typing arrives as TextEntered events, and touch screens show their keyboard.
+    virtual void set_text_input(bool enabled) = 0;
+
+    // The part of the surface that nothing covers, such as a phone's status bar, camera cutout or
+    // rounded corners. Interfaces keep their contents inside it. The whole surface where nothing
+    // covers it.
+    [[nodiscard]] virtual SurfaceRect safe_area() const = 0;
+
     // Returns the next pending event, or nothing if there are none.
     [[nodiscard]] virtual std::optional<Event> poll_event() = 0;
 

@@ -1,0 +1,36 @@
+# The scripted run with every null backend.
+[app]
+max_fps = 120
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[input.actions]
+throw = ["key:space"]
+menu = ["key:escape"]
+debug = ["key:f1"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["null"]
+audio = ["null"]
+ui = ["null"]
+debug_ui = ["null"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["null"]
+audio = ["null"]
+ui = ["null"]
+debug_ui = ["null"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["null"]
+audio = ["null"]
+ui = ["null"]
+debug_ui = ["null"]

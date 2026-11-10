@@ -1,0 +1,41 @@
+# The scripted run on the real GPU and sound hardware, with Vulkan validation.
+[app]
+title = "Dream Arcade Check"
+width = 960
+height = 540
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[rhi.vulkan]
+validation = true
+
+[input.actions]
+throw = ["key:space"]
+menu = ["key:escape"]
+debug = ["key:f1"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["vulkan"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]
+debug_ui = ["imgui"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["vulkan"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]
+debug_ui = ["imgui"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["vulkan"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]
+debug_ui = ["imgui"]

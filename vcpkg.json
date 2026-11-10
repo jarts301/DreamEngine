@@ -8,7 +8,10 @@
     "cgltf",
     "doctest",
     "entt",
+    "imgui",
     "joltphysics",
+    "miniaudio",
+    "rmlui",
     "sdl3",
     {
       "name": "shader-slang",

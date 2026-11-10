@@ -18,7 +18,8 @@ function(dream_add_game name)
     if(ARG_RENDERER)
         list(APPEND ARG_SHADERS
             "${DreamEngine_SOURCE_DIR}/runtime/shaders/forward.slang"
-            "${DreamEngine_SOURCE_DIR}/runtime/shaders/debug_lines.slang")
+            "${DreamEngine_SOURCE_DIR}/runtime/shaders/debug_lines.slang"
+            "${DreamEngine_SOURCE_DIR}/runtime/shaders/ui.slang")
     endif()
 
     if(ANDROID)

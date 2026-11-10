@@ -118,6 +118,18 @@ private:
         return true;
     }
 
+    bool bind_frame_geometry(std::span<const std::byte> vertices,
+                             std::span<const std::uint32_t> indices) override {
+        m_state.calls.push_back(std::format("geometry {} {}", vertices.size(), indices.size()));
+        return true;
+    }
+
+    void set_scissor(std::optional<rhi::ScissorRect> rect) override {
+        m_state.calls.push_back(rect.has_value() ? std::format("scissor {} {} {} {}", rect->x,
+                                                               rect->y, rect->width, rect->height)
+                                                 : std::string("scissor off"));
+    }
+
     FakeDeviceState& m_state;
     std::uint32_t m_next_texture = 0;
 };

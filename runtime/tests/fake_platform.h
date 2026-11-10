@@ -25,6 +25,9 @@ struct FakeState {
     std::optional<platform::WindowSettings> window;
     platform::SurfaceSize size{640, 480};
     platform::NativeWindow native_window;
+    float display_scale = 1.0f;
+    std::optional<platform::SurfaceRect> safe_area;
+    bool text_input = false;
     std::map<std::string, std::vector<std::byte>, std::less<>> assets;
     std::map<std::string, std::vector<std::byte>, std::less<>> user_files;
 };
@@ -44,6 +47,19 @@ public:
 
     platform::NativeWindow native_window() const override {
         return m_state.native_window;
+    }
+
+    float display_scale() const override {
+        return m_state.display_scale;
+    }
+
+    void set_text_input(bool enabled) override {
+        m_state.text_input = enabled;
+    }
+
+    platform::SurfaceRect safe_area() const override {
+        return m_state.safe_area.value_or(
+            platform::SurfaceRect{0, 0, m_state.size.width, m_state.size.height});
     }
 
     std::optional<platform::Event> poll_event() override {

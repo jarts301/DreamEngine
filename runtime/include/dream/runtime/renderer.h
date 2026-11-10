@@ -9,13 +9,19 @@
 #include "dream/runtime/debug_lines.h"
 #include "dream/runtime/model.h"
 #include "dream/runtime/world.h"
+#include "dream/ui/draw_list.h"
 
+#include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 
 namespace dream::runtime {
 
 class App;
+
+// Interface layers, drawn over the scene in this order.
+enum class UiLayer : std::uint8_t { Game, Debug, Count };
 
 // Looks along its entity's -Z axis, or at `target` if one is set.
 struct Camera {
@@ -66,7 +72,11 @@ struct DirectionalLight {
 // The game needs the RENDERER option on dream_add_game, for the shaders.
 class Renderer {
 public:
-    Renderer() = default;
+    Renderer();
+    ~Renderer();
+
+    Renderer(const Renderer&) = delete;
+    Renderer& operator=(const Renderer&) = delete;
 
     // Needs a graphics device, and must be called before any scene that uses these components is
     // loaded. Game::on_start is the place for it.
@@ -92,8 +102,28 @@ public:
         return m_last_line_count;
     }
 
+    // Draws `list` over the scene in every frame from now on, until replaced or cleared. The list
+    // is copied, and moved by `offset` pixels. Textures it names come from ui_host().
+    void set_ui_layer(UiLayer layer, const ui::DrawList& list, core::Vec2 offset = {});
+    void clear_ui_layer(UiLayer layer);
+
+    // Textures and files for interface backends. Valid after initialize.
+    [[nodiscard]] ui::Host& ui_host() noexcept;
+
+    // Destroys textures that interfaces released. It may wait for the GPU, so call it outside
+    // on_render; DebugOverlay and UserInterface call it from their updates.
+    void release_ui_textures();
+
+    // How many interface draw commands the last call to render drew.
+    [[nodiscard]] std::uint32_t last_ui_command_count() const noexcept {
+        return m_last_ui_command_count;
+    }
+
 private:
+    class UiTextures;
+
     void draw_debug_lines(rhi::CommandList& commands);
+    void draw_ui(rhi::CommandList& commands, platform::SurfaceSize size);
 
     std::optional<GpuShader> m_vertex_shader;
     std::optional<GpuShader> m_fragment_shader;
@@ -101,9 +131,17 @@ private:
     std::optional<GpuShader> m_line_vertex_shader;
     std::optional<GpuShader> m_line_fragment_shader;
     std::optional<GpuPipeline> m_line_pipeline;
+    std::optional<GpuShader> m_ui_vertex_shader;
+    std::optional<GpuShader> m_ui_fragment_shader;
+    std::optional<GpuPipeline> m_ui_pipeline;
+    std::optional<GpuPipeline> m_ui_premultiplied_pipeline;
+    std::unique_ptr<UiTextures> m_ui_textures;
+    std::array<ui::DrawList, static_cast<std::size_t>(UiLayer::Count)> m_ui_layers;
+    std::array<core::Vec2, static_cast<std::size_t>(UiLayer::Count)> m_ui_offsets{};
     DebugLines m_debug_lines;
     std::uint32_t m_last_draw_count = 0;
     std::uint32_t m_last_line_count = 0;
+    std::uint32_t m_last_ui_command_count = 0;
 };
 
 } // namespace dream::runtime

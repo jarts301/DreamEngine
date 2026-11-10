@@ -35,6 +35,17 @@ public:
         return {};
     }
 
+    float display_scale() const override {
+        return 1.0f;
+    }
+
+    void set_text_input(bool /*enabled*/) override {}
+
+    SurfaceRect safe_area() const override {
+        const SurfaceSize size = surface_size();
+        return SurfaceRect{0, 0, size.width, size.height};
+    }
+
     std::optional<Event> poll_event() override {
         // The main loop reads events until there are none, so each "none" is one frame.
         if (m_frames_left <= 0) {

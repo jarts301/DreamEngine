@@ -1,5 +1,8 @@
+add_subdirectory(audio)
+add_subdirectory(debug_ui)
 add_subdirectory(greeter)
 add_subdirectory(physics2d)
 add_subdirectory(physics3d)
 add_subdirectory(platform)
 add_subdirectory(rhi)
+add_subdirectory(ui)

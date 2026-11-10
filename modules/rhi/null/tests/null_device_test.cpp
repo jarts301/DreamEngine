@@ -184,3 +184,24 @@ TEST_CASE("Null device ignores destroying a handle twice") {
     device->destroy_buffer(buffer);
     device->destroy_buffer(BufferHandle{});
 }
+
+TEST_CASE("Null device takes per-frame indexed geometry and scissors inside a pass") {
+    const auto device = make_device();
+    REQUIRE(device->attach_surface({}, k_size).has_value());
+    const PipelineHandle pipeline = make_pipeline(*device);
+    const std::array<std::byte, 64> vertices{};
+    const std::array<std::uint32_t, 6> indices{0, 1, 2, 2, 1, 3};
+    const std::vector<std::byte> too_much(k_max_frame_vertex_bytes);
+
+    CommandList* const commands = device->begin_frame().value();
+    REQUIRE(commands != nullptr);
+    commands->begin_render_pass(ClearColor{});
+    commands->bind_pipeline(pipeline);
+    commands->set_scissor(ScissorRect{.x = 10, .y = 20, .width = 30, .height = 40});
+    CHECK(commands->bind_frame_geometry(vertices, indices));
+    commands->draw_indexed_range(0, 6);
+    commands->set_scissor(std::nullopt);
+    CHECK_FALSE(commands->bind_frame_geometry(too_much, indices));
+    commands->end_render_pass();
+    CHECK(device->end_frame().has_value());
+}

@@ -16,6 +16,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0009](0009-world-assets-scenes.md) | Entities, events, assets and scene files |
 | [0010](0010-renderer-v1.md) | Forward renderer, models and textures |
 | [0011](0011-physics.md) | 3D and 2D physics, fixed timestep and debug drawing |
+| [0012](0012-audio-and-ui.md) | Audio, game and debug interfaces drawn by the renderer |
 
 ## Template
 

@@ -1,0 +1,139 @@
+/* RmlUi starts with no styles at all, so even block layout is declared here. Sizes use dp, which
+   the engine scales with the screen's density. */
+
+body {
+    width: 100%;
+    height: 100%;
+    font-family: LatoLatin;
+    font-size: 18dp;
+    color: #ffffff;
+}
+
+div, h1, p {
+    display: block;
+}
+
+h1 {
+    font-size: 30dp;
+    font-weight: bold;
+    margin-bottom: 14dp;
+    text-align: center;
+}
+
+button {
+    display: block;
+    padding: 10dp 18dp;
+    margin: 6dp 0dp;
+    background-color: #2d4f7ccc;
+    border-radius: 8dp;
+    text-align: center;
+    font-weight: bold;
+}
+
+button:hover {
+    background-color: #4874b0e6;
+}
+
+button:active {
+    background-color: #6a9be0;
+}
+
+/* The heads-up display. */
+
+#score_box {
+    position: absolute;
+    left: 16dp;
+    top: 16dp;
+    padding: 8dp 14dp;
+    background-color: #00000080;
+    border-radius: 8dp;
+    font-size: 22dp;
+}
+
+#score {
+    font-weight: bold;
+    color: #ffd75e;
+}
+
+#hint {
+    position: absolute;
+    left: 16dp;
+    bottom: 16dp;
+    color: #ffffffcc;
+}
+
+#menu {
+    position: absolute;
+    right: 16dp;
+    top: 16dp;
+    margin: 0dp;
+}
+
+/* The pause menu. */
+
+body.menu {
+    background-color: #00000099;
+}
+
+.panel {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 300dp;
+    margin-left: -170dp;
+    margin-top: -200dp;
+    padding: 20dp;
+    background-color: #1b2333ee;
+    border-radius: 12dp;
+}
+
+.row {
+    margin: 10dp 0dp;
+    height: 30dp;
+}
+
+.row label {
+    display: inline-block;
+    width: 90dp;
+}
+
+.row label.wide {
+    width: auto;
+}
+
+input.range {
+    display: inline-block;
+    width: 190dp;
+    height: 24dp;
+}
+
+input.range slidertrack {
+    margin-top: 10dp;
+    height: 4dp;
+    background-color: #ffffff55;
+}
+
+input.range sliderbar {
+    width: 18dp;
+    height: 24dp;
+    background-color: #ffd75e;
+    border-radius: 9dp;
+}
+
+input.range sliderarrowdec, input.range sliderarrowinc {
+    width: 0dp;
+    height: 0dp;
+}
+
+input.checkbox {
+    display: inline-block;
+    width: 22dp;
+    height: 22dp;
+    margin-right: 10dp;
+    background-color: #ffffff33;
+    border-radius: 4dp;
+}
+
+input.checkbox:checked {
+    background-color: #ffd75e;
+}

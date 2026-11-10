@@ -20,7 +20,7 @@ namespace dream::runtime {
 //     jump = ["key:space", "mouse:left", "touch"]
 //
 // Keys are written as "key:a", "key:0", "key:f1", "key:space", "key:enter", "key:escape",
-// "key:tab", "key:backspace", "key:left", "key:right", "key:up", "key:down", "key:left_shift",
+// "key:tab", "key:backspace", "key:delete", "key:home", "key:end", "key:left", "key:right", "key:up", "key:down", "key:left_shift",
 // "key:right_shift", "key:left_control", "key:right_control", "key:left_alt", "key:right_alt" and
 // "key:back". Pointers are "mouse:left", "mouse:right", "mouse:middle" and "touch".
 class InputActions {
@@ -53,6 +53,10 @@ public:
     void apply(const platform::KeyChanged& event) noexcept;
     void apply(const platform::PointerButtonChanged& event) noexcept;
     void apply(const platform::PointerMoved& event) noexcept;
+
+    // Actions don't use these.
+    void apply(const platform::PointerWheel& /*event*/) noexcept {}
+    void apply(const platform::TextEntered& /*event*/) noexcept {}
     void release_all() noexcept;
 
 private:

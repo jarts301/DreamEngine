@@ -1,0 +1,11 @@
+<rml>
+<head>
+    <title>HUD</title>
+    <link type="text/rcss" href="style.rcss"/>
+</head>
+<body>
+    <div id="score_box">Score <span id="score">0</span> / 9</div>
+    <div id="hint">Tap or click to throw</div>
+    <button id="menu">Menu</button>
+</body>
+</rml>

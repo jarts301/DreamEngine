@@ -128,6 +128,8 @@ VkFormat to_vulkan(VertexFormat format) {
         return VK_FORMAT_R32G32B32_SFLOAT;
     case VertexFormat::Float4:
         return VK_FORMAT_R32G32B32A32_SFLOAT;
+    case VertexFormat::UByte4Norm:
+        return VK_FORMAT_R8G8B8A8_UNORM;
     }
     return VK_FORMAT_UNDEFINED;
 }
@@ -410,7 +412,16 @@ public:
             .depthWriteEnable = desc.depth_test && desc.depth_write ? VK_TRUE : VK_FALSE,
             .depthCompareOp = VK_COMPARE_OP_LESS,
         };
+        const bool blends = desc.blend != BlendMode::Opaque;
         const VkPipelineColorBlendAttachmentState blend_attachment{
+            .blendEnable = blends ? VK_TRUE : VK_FALSE,
+            .srcColorBlendFactor = desc.blend == BlendMode::Alpha ? VK_BLEND_FACTOR_SRC_ALPHA
+                                                                  : VK_BLEND_FACTOR_ONE,
+            .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+            .colorBlendOp = VK_BLEND_OP_ADD,
+            .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+            .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+            .alphaBlendOp = VK_BLEND_OP_ADD,
             .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                               VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
         };
@@ -1119,7 +1130,7 @@ private:
             const VkBufferCreateInfo vertex_info{
                 .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                 .size = k_max_frame_vertex_bytes,
-                .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
             };
             result = vmaCreateBuffer(m_allocator, &vertex_info, &uniform_allocation,
@@ -1647,6 +1658,53 @@ private:
         vkCmdDrawIndexed(m_recording, index_count, 1, first_index, 0, 0);
     }
 
+    // Copies data into this frame's vertex memory, four-byte aligned. Returns the offset, or nothing
+    // if it doesn't fit.
+    std::optional<VkDeviceSize> copy_to_frame(std::span<const std::byte> data) {
+        FrameResources& frame = m_frames[m_frame_index];
+        const VkDeviceSize offset = (frame.vertex_used + 3) & ~VkDeviceSize{3};
+        if (offset + data.size() > k_max_frame_vertex_bytes) {
+            return std::nullopt;
+        }
+        std::memcpy(frame.vertex_memory + offset, data.data(), data.size());
+        vmaFlushAllocation(m_allocator, frame.vertex_allocation, offset, data.size());
+        frame.vertex_used = offset + data.size();
+        return offset;
+    }
+
+    bool bind_frame_geometry(std::span<const std::byte> vertices,
+                             std::span<const std::uint32_t> indices) override {
+        FrameResources& frame = m_frames[m_frame_index];
+        const VkDeviceSize start = frame.vertex_used;
+        const std::optional<VkDeviceSize> vertex_offset = copy_to_frame(vertices);
+        const std::optional<VkDeviceSize> index_offset =
+            vertex_offset.has_value() ? copy_to_frame(std::as_bytes(indices)) : std::nullopt;
+        if (!index_offset.has_value()) {
+            frame.vertex_used = start;
+            return false;
+        }
+        vkCmdBindVertexBuffers(m_recording, 0, 1, &frame.vertex_buffer, &*vertex_offset);
+        vkCmdBindIndexBuffer(m_recording, frame.vertex_buffer, *index_offset, VK_INDEX_TYPE_UINT32);
+        return true;
+    }
+
+    void set_scissor(std::optional<ScissorRect> rect) override {
+        VkRect2D scissor{{0, 0}, m_extent};
+        if (rect.has_value()) {
+            // Clamped to the surface, which Vulkan requires.
+            const std::int64_t left = std::clamp<std::int64_t>(rect->x, 0, m_extent.width);
+            const std::int64_t top = std::clamp<std::int64_t>(rect->y, 0, m_extent.height);
+            const std::int64_t right =
+                std::clamp<std::int64_t>(std::int64_t{rect->x} + rect->width, left, m_extent.width);
+            const std::int64_t bottom = std::clamp<std::int64_t>(
+                std::int64_t{rect->y} + rect->height, top, m_extent.height);
+            scissor = VkRect2D{{static_cast<std::int32_t>(left), static_cast<std::int32_t>(top)},
+                               {static_cast<std::uint32_t>(right - left),
+                                static_cast<std::uint32_t>(bottom - top)}};
+        }
+        vkCmdSetScissor(m_recording, 0, 1, &scissor);
+    }
+
     bool draw_vertices(std::span<const std::byte> vertices, std::uint32_t vertex_count) override {
         DREAM_VERIFY(vertex_count == 0 || vertices.size() % vertex_count == 0,
                      "The vertex data doesn't divide into vertex_count vertices");
@@ -1654,18 +1712,12 @@ private:
             return true;
         }
 
-        // Every attribute is made of floats, so four-byte alignment is enough.
-        FrameResources& frame = m_frames[m_frame_index];
-        const VkDeviceSize offset = (frame.vertex_used + 3) & ~VkDeviceSize{3};
-        if (offset + vertices.size() > k_max_frame_vertex_bytes) {
+        const std::optional<VkDeviceSize> offset = copy_to_frame(vertices);
+        if (!offset.has_value()) {
             return false;
         }
-        std::memcpy(frame.vertex_memory + offset, vertices.data(), vertices.size());
-        vmaFlushAllocation(m_allocator, frame.vertex_allocation, offset, vertices.size());
-        frame.vertex_used = offset + vertices.size();
-
         flush_descriptors();
-        vkCmdBindVertexBuffers(m_recording, 0, 1, &frame.vertex_buffer, &offset);
+        vkCmdBindVertexBuffers(m_recording, 0, 1, &m_frames[m_frame_index].vertex_buffer, &*offset);
         vkCmdDraw(m_recording, vertex_count, 1, 0, 0);
         return true;
     }
