@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <string>
+#include <vector>
 
 using dream::core::Handle;
 using dream::core::HandlePool;
@@ -82,4 +83,25 @@ TEST_CASE("handles survive pool growth") {
     REQUIRE(pool.get(first) != nullptr);
     CHECK(*pool.get(first) == 100);
     CHECK(pool.size() == 1001);
+}
+
+TEST_CASE("for_each visits live objects in slot order and allows destroying the current one") {
+    HandlePool<int> pool;
+    const Handle<int> first = pool.create(1);
+    const Handle<int> second = pool.create(2);
+    const Handle<int> third = pool.create(3);
+    pool.destroy(second);
+
+    std::vector<int> seen;
+    pool.for_each([&](Handle<int> handle, int& value) {
+        seen.push_back(value);
+        if (handle == first) {
+            pool.destroy(handle);
+        }
+    });
+
+    CHECK(seen == std::vector<int>{1, 3});
+    CHECK_FALSE(pool.contains(first));
+    CHECK(pool.contains(third));
+    CHECK(pool.size() == 1);
 }

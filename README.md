@@ -41,7 +41,7 @@ Each preset also has a `-release` version. Output goes to `build/<preset>/`.
 After building, run the Vulkan cube on Windows. Space or a click toggles the spin, and Escape quits:
 
 ```bash
-build/windows-debug/samples/cube/dream_cube.exe
+build/windows-debug/samples/cube/dream_cube/dream_cube.exe
 ```
 
 To check the Vulkan backend with the Khronos validation layers, configure with

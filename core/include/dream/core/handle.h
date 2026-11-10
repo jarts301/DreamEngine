@@ -81,6 +81,19 @@ public:
         return m_size;
     }
 
+    // Calls visit(handle, object) for every live object, in slot order. The callback must not
+    // create objects; it may destroy the one it was given.
+    template <typename Visit> void for_each(Visit&& visit) {
+        for (std::size_t index = 0; index < m_slots.size(); ++index) {
+            Slot& slot = m_slots[index];
+            if (slot.value.has_value()) {
+                visit(Handle<T>{.index = static_cast<std::uint32_t>(index),
+                                .generation = slot.generation},
+                      *slot.value);
+            }
+        }
+    }
+
 private:
     struct Slot {
         std::optional<T> value;

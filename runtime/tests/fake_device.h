@@ -18,6 +18,7 @@ struct FakeDeviceState {
     std::optional<core::Error> begin_frame_error;
     platform::NativeWindow last_window;
     std::vector<std::byte> last_uniforms;
+    std::vector<std::byte> last_vertices;
 };
 
 class FakeDevice final : public rhi::Device, private rhi::CommandList {
@@ -109,6 +110,12 @@ private:
 
     void draw_indexed_range(std::uint32_t first, std::uint32_t count) override {
         m_state.calls.push_back(std::format("draw {}+{}", first, count));
+    }
+
+    bool draw_vertices(std::span<const std::byte> vertices, std::uint32_t count) override {
+        m_state.calls.push_back(std::format("vertices {}", count));
+        m_state.last_vertices.assign(vertices.begin(), vertices.end());
+        return true;
     }
 
     FakeDeviceState& m_state;

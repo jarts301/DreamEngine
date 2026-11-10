@@ -100,6 +100,12 @@ struct FrameResources {
     std::byte* uniform_memory = nullptr;
     VkDeviceSize uniform_used = 0;
 
+    // The same for CommandList::draw_vertices.
+    VkBuffer vertex_buffer = VK_NULL_HANDLE;
+    VmaAllocation vertex_allocation = VK_NULL_HANDLE;
+    std::byte* vertex_memory = nullptr;
+    VkDeviceSize vertex_used = 0;
+
     // One descriptor set per texture used this frame.
     VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
     std::map<std::uint64_t, VkDescriptorSet> descriptor_sets;
@@ -143,6 +149,9 @@ public:
                 vkDestroyDescriptorPool(m_device, frame.descriptor_pool, nullptr);
                 if (frame.uniform_buffer != VK_NULL_HANDLE) {
                     vmaDestroyBuffer(m_allocator, frame.uniform_buffer, frame.uniform_allocation);
+                }
+                if (frame.vertex_buffer != VK_NULL_HANDLE) {
+                    vmaDestroyBuffer(m_allocator, frame.vertex_buffer, frame.vertex_allocation);
                 }
             }
             destroy_texture_resource(m_white_texture);
@@ -374,7 +383,9 @@ public:
         };
         const VkPipelineInputAssemblyStateCreateInfo input_assembly{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-            .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            .topology = desc.topology == PrimitiveTopology::Lines
+                            ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST
+                            : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         };
         const VkPipelineViewportStateCreateInfo viewport{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
@@ -396,7 +407,7 @@ public:
         const VkPipelineDepthStencilStateCreateInfo depth{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
             .depthTestEnable = desc.depth_test ? VK_TRUE : VK_FALSE,
-            .depthWriteEnable = desc.depth_test ? VK_TRUE : VK_FALSE,
+            .depthWriteEnable = desc.depth_test && desc.depth_write ? VK_TRUE : VK_FALSE,
             .depthCompareOp = VK_COMPARE_OP_LESS,
         };
         const VkPipelineColorBlendAttachmentState blend_attachment{
@@ -516,6 +527,7 @@ public:
         vkResetDescriptorPool(m_device, frame.descriptor_pool, 0);
         frame.descriptor_sets.clear();
         frame.uniform_used = 0;
+        frame.vertex_used = 0;
         m_uniform_offset = 0;
         m_bound_texture = VK_NULL_HANDLE;
         m_bound_texture_key = 0;
@@ -1104,6 +1116,19 @@ private:
             }
             frame.uniform_memory = static_cast<std::byte*>(allocated.pMappedData);
 
+            const VkBufferCreateInfo vertex_info{
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = k_max_frame_vertex_bytes,
+                .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            };
+            result = vmaCreateBuffer(m_allocator, &vertex_info, &uniform_allocation,
+                                     &frame.vertex_buffer, &frame.vertex_allocation, &allocated);
+            if (result != VK_SUCCESS) {
+                return vulkan_error("Creating a per-frame vertex buffer", result);
+            }
+            frame.vertex_memory = static_cast<std::byte*>(allocated.pMappedData);
+
             const std::array pool_sizes{
                 VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
                                      k_max_descriptor_sets_per_frame},
@@ -1620,6 +1645,29 @@ private:
     void draw_indexed_range(std::uint32_t first_index, std::uint32_t index_count) override {
         flush_descriptors();
         vkCmdDrawIndexed(m_recording, index_count, 1, first_index, 0, 0);
+    }
+
+    bool draw_vertices(std::span<const std::byte> vertices, std::uint32_t vertex_count) override {
+        DREAM_VERIFY(vertex_count == 0 || vertices.size() % vertex_count == 0,
+                     "The vertex data doesn't divide into vertex_count vertices");
+        if (vertex_count == 0) {
+            return true;
+        }
+
+        // Every attribute is made of floats, so four-byte alignment is enough.
+        FrameResources& frame = m_frames[m_frame_index];
+        const VkDeviceSize offset = (frame.vertex_used + 3) & ~VkDeviceSize{3};
+        if (offset + vertices.size() > k_max_frame_vertex_bytes) {
+            return false;
+        }
+        std::memcpy(frame.vertex_memory + offset, vertices.data(), vertices.size());
+        vmaFlushAllocation(m_allocator, frame.vertex_allocation, offset, vertices.size());
+        frame.vertex_used = offset + vertices.size();
+
+        flush_descriptors();
+        vkCmdBindVertexBuffers(m_recording, 0, 1, &frame.vertex_buffer, &offset);
+        vkCmdDraw(m_recording, vertex_count, 1, 0, 0);
+        return true;
     }
 
     VkInstance m_instance = VK_NULL_HANDLE;

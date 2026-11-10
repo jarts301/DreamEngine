@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates the original models used by samples/render_demo as .glb files.
+"""Generates the original models shared by the samples, in samples/assets/models, as .glb files.
 
 Usage: python tools/make_sample_models.py
 
@@ -12,7 +12,7 @@ import struct
 import zlib
 from pathlib import Path
 
-OUTPUT = Path(__file__).resolve().parent.parent / "samples" / "render_demo" / "assets" / "models"
+OUTPUT = Path(__file__).resolve().parent.parent / "samples" / "assets" / "models"
 
 
 def png_bytes(width, height, pixel):

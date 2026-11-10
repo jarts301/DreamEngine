@@ -62,4 +62,43 @@ private:
     FrameTime m_frame;
 };
 
+// Turns variable frame times into a whole number of equal steps, for simulations whose results
+// shouldn't depend on the frame rate. Time left over carries into the next frame.
+class FixedTimestep {
+public:
+    // At most `max_steps` steps are run per frame. Time beyond that is dropped, so a device too slow
+    // to keep up runs the simulation slower instead of falling further behind each frame.
+    explicit FixedTimestep(double step_seconds = 1.0 / 60.0, int max_steps = 8) noexcept
+        : m_step(step_seconds), m_max_steps(max_steps) {}
+
+    // Adds a frame's time and returns how many steps to run now.
+    int advance(double delta_seconds) noexcept {
+        m_accumulated += std::max(delta_seconds, 0.0);
+        int steps = 0;
+        while (m_accumulated >= m_step && steps < m_max_steps) {
+            m_accumulated -= m_step;
+            ++steps;
+        }
+        if (steps == m_max_steps) {
+            m_accumulated = std::min(m_accumulated, m_step);
+        }
+        return steps;
+    }
+
+    [[nodiscard]] double step_seconds() const noexcept {
+        return m_step;
+    }
+
+    // How far the current frame is from the last step towards the next, from 0 to 1. Drawing objects
+    // this far between their last two simulated states keeps motion smooth at any frame rate.
+    [[nodiscard]] double alpha() const noexcept {
+        return std::clamp(m_accumulated / m_step, 0.0, 1.0);
+    }
+
+private:
+    double m_step;
+    int m_max_steps;
+    double m_accumulated = 0.0;
+};
+
 } // namespace dream::core

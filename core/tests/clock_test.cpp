@@ -49,3 +49,24 @@ TEST_CASE("Stopwatch time moves forward and restarts on reset") {
     watch.reset();
     CHECK(watch.elapsed_seconds() >= 0.0);
 }
+
+TEST_CASE("FixedTimestep runs whole steps and carries the remainder") {
+    dream::core::FixedTimestep steps(0.01);
+    CHECK(steps.step_seconds() == doctest::Approx(0.01));
+
+    CHECK(steps.advance(0.025) == 2);
+    CHECK(steps.alpha() == doctest::Approx(0.5));
+    CHECK(steps.advance(0.004) == 0);
+    CHECK(steps.alpha() == doctest::Approx(0.9));
+    CHECK(steps.advance(0.001) == 1);
+    CHECK(steps.alpha() == doctest::Approx(0.0).epsilon(1e-9));
+    CHECK(steps.advance(-1.0) == 0);
+}
+
+TEST_CASE("FixedTimestep drops time it can't catch up on") {
+    dream::core::FixedTimestep steps(0.01, 4);
+    CHECK(steps.advance(1.0) == 4);
+    CHECK(steps.alpha() == doctest::Approx(1.0));
+    CHECK(steps.advance(0.0) == 1);
+    CHECK(steps.advance(0.0) == 0);
+}

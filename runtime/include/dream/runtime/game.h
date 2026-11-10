@@ -24,6 +24,10 @@ public:
     // Called every frame, but never while paused or without a surface.
     virtual void on_update(App& app, const core::FrameTime& time) = 0;
 
+    // Called zero or more times per frame before on_update, so that over time it runs at the fixed
+    // rate set by `fixed_rate` under [app]. Simulation such as physics belongs here.
+    virtual void on_fixed_update(App& /*app*/, double /*step_seconds*/) {}
+
     // Called after on_update whenever the frame can be drawn. Projects without a graphics module
     // never get this.
     virtual void on_render(App& /*app*/, rhi::CommandList& /*commands*/) {}

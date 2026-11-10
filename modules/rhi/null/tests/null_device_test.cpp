@@ -112,6 +112,25 @@ TEST_CASE("Null device accepts textures and uniforms in a frame") {
     device->destroy_texture(texture);
 }
 
+TEST_CASE("Null device limits the vertex data drawn in one frame") {
+    const auto device = make_device();
+    REQUIRE(device->attach_surface({}, k_size).has_value());
+    const PipelineHandle pipeline = make_pipeline(*device);
+    const std::vector<std::byte> half(k_max_frame_vertex_bytes / 2);
+
+    for (int frame = 0; frame < 2; ++frame) {
+        CommandList* const commands = device->begin_frame().value();
+        REQUIRE(commands != nullptr);
+        commands->begin_render_pass(ClearColor{});
+        commands->bind_pipeline(pipeline);
+        CHECK(commands->draw_vertices(half, 2));
+        CHECK(commands->draw_vertices(half, 2));
+        CHECK_FALSE(commands->draw_vertices(k_bytes, 1));
+        commands->end_render_pass();
+        REQUIRE(device->end_frame().has_value());
+    }
+}
+
 TEST_CASE("Null device rejects textures whose pixels don't match their size") {
     const auto device = make_device();
 

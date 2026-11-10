@@ -6,6 +6,7 @@
 #include "dream/platform/event.h"
 #include "dream/rhi/rhi.h"
 #include "dream/runtime/asset_manager.h"
+#include "dream/runtime/debug_lines.h"
 #include "dream/runtime/model.h"
 #include "dream/runtime/world.h"
 
@@ -71,20 +72,38 @@ public:
     // loaded. Game::on_start is the place for it.
     [[nodiscard]] core::Result<void> initialize(App& app);
 
-    // Draws the world's first camera and light. Without a camera, this only clears the screen.
+    // Draws the world's first camera and light, then the debug lines, which it clears. Without a
+    // camera, this only clears the screen.
     void render(const World& world, rhi::CommandList& commands, platform::SurfaceSize size,
                 rhi::ClearColor clear_color = rhi::ClearColor{0.45f, 0.60f, 0.80f, 1.0f});
+
+    // Lines to draw over the next frame, such as Physics3D::debug_draw adds.
+    [[nodiscard]] DebugLines& debug_lines() noexcept {
+        return m_debug_lines;
+    }
 
     // How many parts of models were drawn in the last call to render.
     [[nodiscard]] std::uint32_t last_draw_count() const noexcept {
         return m_last_draw_count;
     }
 
+    // How many debug lines the last call to render drew.
+    [[nodiscard]] std::uint32_t last_line_count() const noexcept {
+        return m_last_line_count;
+    }
+
 private:
+    void draw_debug_lines(rhi::CommandList& commands);
+
     std::optional<GpuShader> m_vertex_shader;
     std::optional<GpuShader> m_fragment_shader;
     std::optional<GpuPipeline> m_pipeline;
+    std::optional<GpuShader> m_line_vertex_shader;
+    std::optional<GpuShader> m_line_fragment_shader;
+    std::optional<GpuPipeline> m_line_pipeline;
+    DebugLines m_debug_lines;
     std::uint32_t m_last_draw_count = 0;
+    std::uint32_t m_last_line_count = 0;
 };
 
 } // namespace dream::runtime

@@ -1,0 +1,36 @@
+# The scripted run on the real GPU, with Vulkan validation.
+[app]
+title = "Dream Physics Check"
+width = 960
+height = 540
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[rhi.vulkan]
+validation = true
+
+[input.actions]
+shoot = ["key:space"]
+switch = ["key:tab"]
+shapes = ["key:d"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["vulkan"]
+physics3d = ["jolt"]
+physics2d = ["box2d"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["vulkan"]
+physics3d = ["jolt"]
+physics2d = ["box2d"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["vulkan"]
+physics3d = ["jolt"]
+physics2d = ["box2d"]

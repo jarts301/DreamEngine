@@ -38,7 +38,8 @@ int run_program() {
         device = std::move(created_device.value().instance);
     }
 
-    App app(std::move(created.value().instance), project.value().config(), std::move(device));
+    App app(std::move(created.value().instance), project.value().config(), std::move(device),
+            &project.value());
 
     // Created after the App so it is destroyed first, while the GPU resources it holds are valid.
     const std::unique_ptr<Game> game = create_game();

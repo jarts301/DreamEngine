@@ -1,9 +1,9 @@
 # Runtime
 
-The engine layer that games talk to: the main loop, entities, scenes, assets, events, virtual files
-and input actions. It depends only on interfaces and Core, and never names a backend. See
-[ADR 0007](../docs/adr/0007-platform-and-game-loop.md) and
-[ADR 0009](../docs/adr/0009-world-assets-scenes.md).
+The engine layer that games talk to: the main loop, entities, scenes, assets, events, virtual files,
+input actions, the renderer and physics. It depends only on interfaces and Core, and never names a
+backend. See [ADR 0007](../docs/adr/0007-platform-and-game-loop.md),
+[ADR 0009](../docs/adr/0009-world-assets-scenes.md) and [ADR 0011](../docs/adr/0011-physics.md).
 
 ## Writing a game
 
@@ -23,3 +23,6 @@ dream_add_game(my_game
 [samples/scene_demo](../samples/scene_demo/src/scene_demo.cpp) adds scenes, assets and events, and
 [samples/render_demo](../samples/render_demo/src/render_demo.cpp) draws a scene with the renderer.
 For that, add `RENDERER` to `dream_add_game`. See [ADR 0010](../docs/adr/0010-renderer-v1.md).
+[samples/physics_demo](../samples/physics_demo/src/physics_demo.cpp) adds 3D and 2D physics with
+`runtime::Physics3D` and `runtime::Physics2D`, which need `physics3d` or `physics2d` listed under
+`[modules.<platform>]`.

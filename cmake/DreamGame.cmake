@@ -1,6 +1,6 @@
 # Builds a game for the current platform. See docs/adr/0007-platform-and-game-loop.md.
 #
-# Usage: dream_add_game(<name> SOURCES <files...> CONFIG <toml-file> [ASSETS <directory>]
+# Usage: dream_add_game(<name> SOURCES <files...> CONFIG <toml-file> [ASSETS <directories...>]
 #                       [SHADERS <slang-files...>] [RENDERER]
 #                       [APPLICATION_ID <id> DISPLAY_NAME <text>])
 #
@@ -12,11 +12,13 @@
 # On PC this creates an executable, with the assets copied next to it. On Android it creates
 # libmain.so and, if APPLICATION_ID is given and ANDROID_HOME is set, a <name>_apk target.
 function(dream_add_game name)
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "RENDERER" "CONFIG;ASSETS;APPLICATION_ID;DISPLAY_NAME"
-        "SOURCES;SHADERS")
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "RENDERER" "CONFIG;APPLICATION_ID;DISPLAY_NAME"
+        "SOURCES;SHADERS;ASSETS")
 
     if(ARG_RENDERER)
-        list(APPEND ARG_SHADERS "${DreamEngine_SOURCE_DIR}/runtime/shaders/forward.slang")
+        list(APPEND ARG_SHADERS
+            "${DreamEngine_SOURCE_DIR}/runtime/shaders/forward.slang"
+            "${DreamEngine_SOURCE_DIR}/runtime/shaders/debug_lines.slang")
     endif()
 
     if(ANDROID)
@@ -27,6 +29,10 @@ function(dream_add_game name)
             LIBRARY_OUTPUT_DIRECTORY "${native_dir}/${ANDROID_ABI}")
     else()
         add_executable(${name} ${ARG_SOURCES})
+        # Each game gets its own folder, because its assets are copied next to it: games sharing a
+        # folder would copy into the same assets folder at once, and fail at random.
+        set_target_properties(${name} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${name}")
     endif()
 
     target_sources(${name} PRIVATE "${DreamEngine_SOURCE_DIR}/runtime/entry/game_entry.cpp")
@@ -34,11 +40,12 @@ function(dream_add_game name)
     dream_configure_target(${name})
     dream_link_modules(${name} CONFIG "${ARG_CONFIG}")
 
+    # Each directory's contents are merged into the game's assets.
     set(asset_dirs "")
-    if(ARG_ASSETS)
-        cmake_path(ABSOLUTE_PATH ARG_ASSETS NORMALIZE)
-        list(APPEND asset_dirs "${ARG_ASSETS}")
-    endif()
+    foreach(asset_dir IN LISTS ARG_ASSETS)
+        cmake_path(ABSOLUTE_PATH asset_dir NORMALIZE)
+        list(APPEND asset_dirs "${asset_dir}")
+    endforeach()
     if(ARG_SHADERS)
         set(generated_assets "${CMAKE_CURRENT_BINARY_DIR}/${name}_generated_assets")
         _dream_compile_shaders(${name} "${generated_assets}/shaders" ${ARG_SHADERS})

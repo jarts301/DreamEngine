@@ -3,6 +3,7 @@
 #include "dream/core/module_registry.h"
 #include "dream/rhi/rhi.h"
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -102,6 +103,7 @@ public:
             return static_cast<CommandList*>(nullptr);
         }
         m_in_frame = true;
+        m_frame_vertex_bytes = 0;
         return static_cast<CommandList*>(this);
     }
 
@@ -160,6 +162,17 @@ private:
         DREAM_VERIFY(m_in_pass && m_pipeline_bound, "Drawing without a pass and pipeline");
     }
 
+    bool draw_vertices(std::span<const std::byte> vertices, std::uint32_t vertex_count) override {
+        DREAM_VERIFY(m_in_pass && m_pipeline_bound, "Drawing without a pass and pipeline");
+        DREAM_VERIFY(vertex_count == 0 || vertices.size() % vertex_count == 0,
+                     "The vertex data doesn't divide into vertex_count vertices");
+        if (m_frame_vertex_bytes + vertices.size() > k_max_frame_vertex_bytes) {
+            return false;
+        }
+        m_frame_vertex_bytes += vertices.size();
+        return true;
+    }
+
     core::HandlePool<Resource> m_textures;
     core::HandlePool<Resource> m_buffers;
     core::HandlePool<Resource> m_shaders;
@@ -170,6 +183,7 @@ private:
     bool m_in_frame = false;
     bool m_in_pass = false;
     bool m_pipeline_bound = false;
+    std::size_t m_frame_vertex_bytes = 0;
 };
 
 core::Result<std::unique_ptr<Device>> create(const core::Config& /*config*/) {

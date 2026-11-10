@@ -41,6 +41,8 @@ struct RenderFixture {
     RenderFixture() {
         state.assets["shaders/forward.vert.fake"] = fake_shader();
         state.assets["shaders/forward.frag.fake"] = fake_shader();
+        state.assets["shaders/debug_lines.vert.fake"] = fake_shader();
+        state.assets["shaders/debug_lines.frag.fake"] = fake_shader();
     }
 
     // Calls `body` from inside a frame, with everything set up.
@@ -287,4 +289,69 @@ TEST_CASE_FIXTURE(RenderFixture, "Renderer reports a mistake in a mesh component
         message = missing_model.error().message;
     });
     CHECK(message.find("'model'") != std::string::npos);
+}
+
+TEST_CASE_FIXTURE(RenderFixture, "Renderer draws debug lines once, after the models") {
+    const Calls calls = in_frame([](App& app, Renderer& renderer, rhi::CommandList& commands) {
+        World world;
+        add_camera(world);
+        add_model(app, world, 1, false);
+        world.update_transforms();
+
+        renderer.debug_lines().line(Vec3{}, Vec3{1.0f, 0.0f, 0.0f}, core::Vec4{1, 0, 0, 1});
+        renderer.debug_lines().box(Vec3{}, core::Quat{}, Vec3{1.0f, 1.0f, 1.0f},
+                                   core::Vec4{0, 1, 0, 1});
+        renderer.render(world, commands, k_size);
+        CHECK(renderer.last_line_count() == 13);
+        CHECK(renderer.debug_lines().empty());
+
+        // Nothing is left over for the next frame.
+        renderer.render(world, commands, k_size);
+        CHECK(renderer.last_line_count() == 0);
+    });
+
+    const auto lines = std::find(calls.begin(), calls.end(), "vertices 26");
+    REQUIRE(lines != calls.end());
+    CHECK(std::count(calls.begin(), calls.end(), "vertices 26") == 1);
+    const auto model = std::find(calls.begin(), calls.end(), "draw 0+3");
+    CHECK(model < lines);
+}
+
+TEST_CASE_FIXTURE(RenderFixture, "Renderer drops debug lines when there is no camera") {
+    const Calls calls = in_frame([](App&, Renderer& renderer, rhi::CommandList& commands) {
+        World world;
+        renderer.debug_lines().cross(Vec3{}, 1.0f, core::Vec4{1, 1, 1, 1});
+        renderer.render(world, commands, k_size);
+        CHECK(renderer.last_line_count() == 0);
+        CHECK(renderer.debug_lines().empty());
+    });
+    CHECK(std::none_of(calls.begin(), calls.end(),
+                       [](const std::string& call) { return call.starts_with("vertices"); }));
+}
+
+TEST_CASE("DebugLines builds shapes out of line pairs") {
+    DebugLines lines;
+    lines.box(Vec3{}, core::Quat{}, Vec3{1.0f, 2.0f, 3.0f}, core::Vec4{});
+    CHECK(lines.vertices().size() == 24);
+    for (const DebugVertex& vertex : lines.vertices()) {
+        CHECK(std::abs(vertex.position.x) == Approx(1.0f));
+        CHECK(std::abs(vertex.position.y) == Approx(2.0f));
+        CHECK(std::abs(vertex.position.z) == Approx(3.0f));
+    }
+
+    lines.clear();
+    lines.circle(Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}, 2.0f, core::Vec4{}, 8);
+    CHECK(lines.vertices().size() == 16);
+    for (const DebugVertex& vertex : lines.vertices()) {
+        CHECK(vertex.position.y == Approx(1.0f));
+        CHECK(core::length(vertex.position - Vec3{0.0f, 1.0f, 0.0f}) == Approx(2.0f));
+    }
+
+    lines.clear();
+    lines.sphere(Vec3{}, core::Quat{}, 1.0f, core::Vec4{});
+    lines.capsule(Vec3{}, core::Quat{}, 1.0f, 0.5f, core::Vec4{});
+    CHECK(lines.vertices().size() % 2 == 0);
+    for (const DebugVertex& vertex : lines.vertices()) {
+        CHECK(std::abs(vertex.position.y) <= 1.5f + 1e-4f);
+    }
 }

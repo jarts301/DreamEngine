@@ -1,0 +1,31 @@
+# The scripted run with the real physics backends and no GPU. One fixed step per frame, at most.
+[app]
+max_fps = 120
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[input.actions]
+shoot = ["key:space"]
+switch = ["key:tab"]
+shapes = ["key:d"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["jolt"]
+physics2d = ["box2d"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["jolt"]
+physics2d = ["box2d"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["jolt"]
+physics2d = ["box2d"]

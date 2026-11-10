@@ -12,7 +12,7 @@ A module depends only on interfaces and Core. See
 1. A `CMakeLists.txt` that calls `dream_add_module`, which is the only build setup required:
 
    ```cmake
-   dream_add_module(physics jolt SOURCES src/jolt_physics.cpp LIBRARIES Jolt::Jolt)
+   dream_add_module(physics3d jolt SOURCES src/jolt_physics.cpp LIBRARIES Jolt::Jolt)
    ```
 
 2. A source file that defines the registration function, named after the interface and backend:
@@ -20,8 +20,8 @@ A module depends only on interfaces and Core. See
    ```cpp
    namespace dream::modules {
 
-   core::Result<void> register_physics_jolt(core::ModuleRegistry& registry) {
-       return registry.add(core::ModuleDescriptor<physics::Physics>{
+   core::Result<void> register_physics3d_jolt(core::ModuleRegistry& registry) {
+       return registry.add(core::ModuleDescriptor<physics3d::PhysicsWorld>{
            .name = "jolt",
            .create = &create,
            .is_supported = &is_supported, // Optional.
@@ -32,3 +32,6 @@ A module depends only on interfaces and Core. See
    ```
 
 Then list it in a project's TOML file. Nothing else needs to change.
+
+Interfaces with more than one backend can share tests. Every physics backend passes the tests in
+`physics3d/tests` or `physics2d/tests`, which its own test program includes.

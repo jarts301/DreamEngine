@@ -7,4 +7,4 @@ are not part of a shipped game.
 |---|---|
 | `check_layers.py` | Fails if code breaks the layer rules. Needs Python 3 and runs in CI. |
 | `test_check_layers.py` | Tests for `check_layers.py`. |
-| `make_sample_models.py` | Generates the models used by `samples/render_demo`. |
+| `make_sample_models.py` | Generates the models in `samples/assets`, which the samples share. |

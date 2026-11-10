@@ -1,3 +1,5 @@
 add_subdirectory(greeter)
+add_subdirectory(physics2d)
+add_subdirectory(physics3d)
 add_subdirectory(platform)
 add_subdirectory(rhi)

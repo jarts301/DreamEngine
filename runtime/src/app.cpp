@@ -32,9 +32,9 @@ core::Result<std::uint32_t> read_setting(const core::Config& config, std::string
 } // namespace
 
 App::App(std::unique_ptr<platform::Platform> platform, const core::Config& config,
-         std::unique_ptr<rhi::Device> device)
+         std::unique_ptr<rhi::Device> device, const core::ModuleProject* modules)
     : m_platform(std::move(platform)), m_device(std::move(device)), m_config(config),
-      m_files(*m_platform), m_assets(m_files), m_scenes(m_files, m_assets) {}
+      m_modules(modules), m_files(*m_platform), m_assets(m_files), m_scenes(m_files, m_assets) {}
 
 core::Result<void> App::attach_surface() {
     if (m_device == nullptr || m_surface_attached) {
@@ -89,6 +89,15 @@ core::Result<void> App::run(Game& game) {
     if (!max_fps.has_value()) {
         return max_fps.error();
     }
+    const core::Result<std::uint32_t> fixed_rate = read_setting(m_config, "app.fixed_rate", 60, 1);
+    if (!fixed_rate.has_value()) {
+        return fixed_rate.error();
+    }
+    if (fixed_rate.value() > 1000) {
+        return core::Error{core::ErrorCode::InvalidArgument,
+                           "Setting 'app.fixed_rate' can be at most 1000"};
+    }
+    m_fixed_steps = core::FixedTimestep(1.0 / fixed_rate.value());
 
     const platform::WindowSettings window{
         .title = std::string(m_config.get_string("app.title").value_or("Dream Engine")),
@@ -127,7 +136,12 @@ core::Result<void> App::run(Game& game) {
         }
 
         m_events.flush();
-        game.on_update(*this, clock.tick());
+        const core::FrameTime time = clock.tick();
+        const int fixed_steps = m_fixed_steps.advance(time.delta_seconds);
+        for (int step = 0; step < fixed_steps; ++step) {
+            game.on_fixed_update(*this, m_fixed_steps.step_seconds());
+        }
+        game.on_update(*this, time);
 
         outcome = render_frame(game);
         if (!outcome.has_value()) {

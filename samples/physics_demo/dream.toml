@@ -1,0 +1,34 @@
+[app]
+organization = "DreamEngine"
+name = "DreamPhysics"
+title = "Dream Physics"
+width = 1280
+height = 720
+
+[demo]
+mode = "3d"           # Or "2d".
+show_shapes = false
+
+[input.actions]
+shoot = ["key:space", "mouse:left", "touch"]
+switch = ["key:tab"]
+shapes = ["key:d"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+physics3d = ["jolt"]
+physics2d = ["box2d"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+physics3d = ["jolt"]
+physics2d = ["box2d"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+physics3d = ["jolt"]
+physics2d = ["box2d"]

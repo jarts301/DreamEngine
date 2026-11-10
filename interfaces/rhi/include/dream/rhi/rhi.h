@@ -37,6 +37,9 @@ inline constexpr std::size_t k_max_push_constant_size = 128;
 // The largest block accepted by CommandList::set_uniforms.
 inline constexpr std::size_t k_max_uniform_size = 256;
 
+// How many bytes CommandList::draw_vertices can take in one frame, over all its calls.
+inline constexpr std::size_t k_max_frame_vertex_bytes = 2 * 1024 * 1024;
+
 enum class BufferUsage : std::uint8_t { Vertex, Index };
 
 // Both are four bytes per pixel. Srgb is for colors, and Unorm is for data such as normal maps.
@@ -53,6 +56,9 @@ enum class ShaderStage : std::uint8_t { Vertex, Fragment };
 enum class IndexFormat : std::uint8_t { UInt16, UInt32 };
 enum class VertexFormat : std::uint8_t { Float2, Float3, Float4 };
 
+// Lines draws each pair of vertices as a line one pixel wide.
+enum class PrimitiveTopology : std::uint8_t { Triangles, Lines };
+
 struct VertexAttribute {
     std::uint32_t location = 0;
     VertexFormat format = VertexFormat::Float3;
@@ -64,7 +70,11 @@ struct PipelineDesc {
     ShaderHandle fragment_shader;
     std::uint32_t vertex_stride = 0;
     std::span<const VertexAttribute> attributes;
+    PrimitiveTopology topology = PrimitiveTopology::Triangles;
     bool depth_test = true;
+
+    // Whether drawing updates the depth buffer. Ignored without depth_test.
+    bool depth_write = true;
 
     // Front faces are counter-clockwise, as seen in the engine's +Y-up clip space.
     bool cull_back_faces = true;
@@ -103,6 +113,12 @@ public:
 
     // Draws part of the bound index buffer.
     virtual void draw_indexed_range(std::uint32_t first_index, std::uint32_t index_count) = 0;
+
+    // Copies `vertices` into memory that lasts until the frame ends, binds it in place of the vertex
+    // buffer and draws it without indices. For data that changes every frame, such as debug lines.
+    // All calls in a frame share k_max_frame_vertex_bytes; a call that would go over it draws
+    // nothing and returns false.
+    virtual bool draw_vertices(std::span<const std::byte> vertices, std::uint32_t vertex_count) = 0;
 
 protected:
     ~CommandList() = default;

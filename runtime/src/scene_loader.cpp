@@ -2,6 +2,7 @@
 
 #include "dream/core/math/quaternion.h"
 
+#include <algorithm>
 #include <format>
 #include <utility>
 #include <vector>
@@ -62,6 +63,30 @@ core::Result<float> ComponentData::number(std::string_view key, float fallback) 
     return static_cast<float>(*value);
 }
 
+core::Result<bool> ComponentData::flag(std::string_view key, bool fallback) const {
+    const std::string name = full_key(key);
+    if (!m_config.contains(name)) {
+        return fallback;
+    }
+    const std::optional<bool> value = m_config.get_bool(name);
+    if (!value.has_value()) {
+        return scene_error(std::format("'{}' must be true or false", key));
+    }
+    return *value;
+}
+
+core::Result<core::Vec2> ComponentData::vec2(std::string_view key, core::Vec2 fallback) const {
+    const std::string name = full_key(key);
+    if (!m_config.contains(name)) {
+        return fallback;
+    }
+    const auto values = m_config.get_float_list(name);
+    if (!values.has_value() || values->size() != 2) {
+        return scene_error(std::format("'{}' must be a list of two numbers", key));
+    }
+    return core::Vec2{static_cast<float>((*values)[0]), static_cast<float>((*values)[1])};
+}
+
 core::Result<core::Vec3> ComponentData::vec3(std::string_view key, core::Vec3 fallback) const {
     const std::string name = full_key(key);
     if (!m_config.contains(name)) {
@@ -81,6 +106,27 @@ core::Result<std::string> ComponentData::text(std::string_view key) const {
         return scene_error(std::format("'{}' must be a string", key));
     }
     return std::string(*value);
+}
+
+core::Result<std::string> ComponentData::text(std::string_view key,
+                                              std::string_view fallback) const {
+    if (!has(key)) {
+        return std::string(fallback);
+    }
+    return text(key);
+}
+
+core::Result<void>
+ComponentData::check_keys(std::initializer_list<std::string_view> known) const {
+    for (const std::string_view key : m_config.keys_in(m_prefix)) {
+        if (std::find(known.begin(), known.end(), key) == known.end()) {
+            return scene_error(std::format("unknown setting '{}'", key));
+        }
+    }
+    if (const std::vector<std::string_view> tables = m_config.tables_in(m_prefix); !tables.empty()) {
+        return scene_error(std::format("unexpected table '{}'", tables.front()));
+    }
+    return {};
 }
 
 SceneLoader::SceneLoader(VirtualFileSystem& files, AssetManager& assets)

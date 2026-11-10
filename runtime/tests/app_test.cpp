@@ -419,3 +419,59 @@ TEST_CASE("App limits the frame rate when asked") {
     // Five frames at 10 ms each. Only the lower bound is reliable on a busy machine.
     CHECK(stopwatch.elapsed_seconds() >= 0.04);
 }
+
+TEST_CASE("App runs fixed updates at the configured rate, before each update") {
+    const auto config = core::Config::parse("[app]\nmax_fps = 0\nfixed_rate = 200");
+    REQUIRE(config.has_value());
+
+    class FixedGame final : public Game {
+    public:
+        void on_fixed_update(App& app, double step_seconds) override {
+            log.emplace_back("fixed");
+            step = step_seconds;
+            CHECK(app.fixed_step_seconds() == doctest::Approx(0.005));
+        }
+        void on_update(App& app, const core::FrameTime&) override {
+            log.emplace_back("update");
+            CHECK(app.fixed_step_alpha() >= 0.0);
+            CHECK(app.fixed_step_alpha() <= 1.0);
+            // Gives the next frame time for at least one fixed step.
+            const core::Stopwatch wait;
+            while (wait.elapsed_seconds() < 0.012) {
+            }
+        }
+        Log log;
+        double step = 0.0;
+    } game;
+
+    FakeState state;
+    state.script = {k_end_of_frame, k_end_of_frame, k_end_of_frame};
+    App app(std::make_unique<FakePlatform>(state), config.value());
+    REQUIRE(app.run(game).has_value());
+
+    // The first frame has no elapsed time, so no fixed step; later ones have at least two.
+    REQUIRE(game.log.size() >= 7);
+    CHECK(game.log[0] == "update");
+    CHECK(game.log[1] == "fixed");
+    CHECK(game.log[2] == "fixed");
+    CHECK(game.log.back() == "update");
+    CHECK(game.step == doctest::Approx(0.005));
+}
+
+TEST_CASE("App rejects a fixed rate it can't run") {
+    for (const char* text : {"[app]\nfixed_rate = 0", "[app]\nfixed_rate = 5000"}) {
+        const auto config = core::Config::parse(text);
+        REQUIRE(config.has_value());
+        Run run;
+        CHECK_FALSE(run.go({k_end_of_frame}, config.value()).has_value());
+        CHECK(run.game.log.empty());
+    }
+}
+
+TEST_CASE("App can only create modules when it has a module project") {
+    FakeState state;
+    App app(std::make_unique<FakePlatform>(state), k_config);
+    const auto created = app.create_module<platform::Platform>();
+    REQUIRE_FALSE(created.has_value());
+    CHECK(created.error().code == core::ErrorCode::NotFound);
+}

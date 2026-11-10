@@ -13,8 +13,11 @@ function(dream_configure_target target)
             target_compile_options(${target} PRIVATE /WX)
         endif()
     else()
+        # Engine structs give every field a default, so designated initializers name only the
+        # fields that differ, which Clang would otherwise warn about.
         target_compile_options(${target} PRIVATE
-            -Wall -Wextra -Wpedantic -Wconversion -Wshadow -fno-exceptions -fno-rtti)
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow -fno-exceptions -fno-rtti
+            -Wno-missing-designated-field-initializers)
         if(DREAM_WARNINGS_AS_ERRORS)
             target_compile_options(${target} PRIVATE -Werror)
         endif()

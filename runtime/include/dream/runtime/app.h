@@ -1,6 +1,8 @@
 #pragma once
 
+#include "dream/core/clock.h"
 #include "dream/core/config.h"
+#include "dream/core/module_project.h"
 #include "dream/core/result.h"
 #include "dream/platform/platform.h"
 #include "dream/runtime/asset_manager.h"
@@ -24,11 +26,14 @@ namespace dream::runtime {
 //     height = 720
 //     max_fps = 60     # 0 means no limit. Defaults to 60, or no limit with a graphics device,
 //                      # whose vertical sync already sets the pace.
+//     fixed_rate = 60  # How many times per second Game::on_fixed_update runs. Defaults to 60.
 class App {
 public:
     // `config` must outlive this object. `device` is null for a program that draws nothing.
+    // `modules`, which must also outlive it, lets engine systems such as physics create their
+    // backends. Without it they can still be given one directly.
     App(std::unique_ptr<platform::Platform> platform, const core::Config& config,
-        std::unique_ptr<rhi::Device> device = nullptr);
+        std::unique_ptr<rhi::Device> device = nullptr, const core::ModuleProject* modules = nullptr);
 
     App(const App&) = delete;
     App& operator=(const App&) = delete;
@@ -75,6 +80,29 @@ public:
         return m_surface_size;
     }
 
+    [[nodiscard]] double fixed_step_seconds() const noexcept {
+        return m_fixed_steps.step_seconds();
+    }
+
+    // How far this frame is between the last fixed update and the next, from 0 to 1.
+    [[nodiscard]] double fixed_step_alpha() const noexcept {
+        return m_fixed_steps.alpha();
+    }
+
+    // Creates the backend for `Interface` that the project configuration selects for this platform.
+    template <core::ModuleInterface Interface>
+    [[nodiscard]] core::Result<std::unique_ptr<Interface>> create_module() const {
+        if (m_modules == nullptr) {
+            return core::Error{core::ErrorCode::NotFound,
+                               "This program has no module project to create backends from"};
+        }
+        core::Result<core::CreatedModule<Interface>> created = m_modules->create<Interface>();
+        if (!created.has_value()) {
+            return created.error();
+        }
+        return std::move(created.value().instance);
+    }
+
 private:
     [[nodiscard]] bool can_update() const noexcept {
         return !m_paused && m_has_surface;
@@ -89,12 +117,14 @@ private:
     std::unique_ptr<platform::Platform> m_platform;
     std::unique_ptr<rhi::Device> m_device;
     const core::Config& m_config;
+    const core::ModuleProject* m_modules;
     VirtualFileSystem m_files;
     AssetManager m_assets;
     SceneLoader m_scenes;
     EventBus m_events;
     InputActions m_input;
     platform::SurfaceSize m_surface_size;
+    core::FixedTimestep m_fixed_steps;
     bool m_running = true;
     bool m_paused = false;
     bool m_has_surface = true;

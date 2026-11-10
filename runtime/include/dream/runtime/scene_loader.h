@@ -9,6 +9,7 @@
 #include "dream/runtime/world.h"
 
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <string>
@@ -28,10 +29,20 @@ public:
     }
 
     [[nodiscard]] core::Result<float> number(std::string_view key, float fallback) const;
+    [[nodiscard]] core::Result<bool> flag(std::string_view key, bool fallback) const;
+    [[nodiscard]] core::Result<core::Vec2> vec2(std::string_view key, core::Vec2 fallback) const;
     [[nodiscard]] core::Result<core::Vec3> vec3(std::string_view key, core::Vec3 fallback) const;
 
     // The value must be present.
     [[nodiscard]] core::Result<std::string> text(std::string_view key) const;
+
+    // The same, with a fallback for when it is absent.
+    [[nodiscard]] core::Result<std::string> text(std::string_view key,
+                                                 std::string_view fallback) const;
+
+    // Fails if the table has a setting not in `known`, which is usually a typo.
+    [[nodiscard]] core::Result<void>
+    check_keys(std::initializer_list<std::string_view> known) const;
 
 private:
     [[nodiscard]] std::string full_key(std::string_view key) const;

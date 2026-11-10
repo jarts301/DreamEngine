@@ -2,6 +2,7 @@
 
 #include "dream/runtime/app.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -166,6 +167,36 @@ core::Result<void> Renderer::initialize(App& app) {
     m_fragment_shader.emplace(std::move(fragment).value());
     m_pipeline.emplace(*device, pipeline.value());
 
+    core::Result<GpuShader> line_vertex =
+        load_shader(app, *device, "debug_lines.vert", rhi::ShaderStage::Vertex);
+    if (!line_vertex.has_value()) {
+        return line_vertex.error();
+    }
+    core::Result<GpuShader> line_fragment =
+        load_shader(app, *device, "debug_lines.frag", rhi::ShaderStage::Fragment);
+    if (!line_fragment.has_value()) {
+        return line_fragment.error();
+    }
+    constexpr std::array k_line_attributes{
+        rhi::VertexAttribute{0, rhi::VertexFormat::Float3, offsetof(DebugVertex, position)},
+        rhi::VertexAttribute{1, rhi::VertexFormat::Float4, offsetof(DebugVertex, color)},
+    };
+    const auto line_pipeline = device->create_pipeline(rhi::PipelineDesc{
+        .vertex_shader = line_vertex.value().get(),
+        .fragment_shader = line_fragment.value().get(),
+        .vertex_stride = sizeof(DebugVertex),
+        .attributes = k_line_attributes,
+        .topology = rhi::PrimitiveTopology::Lines,
+        .depth_test = false,
+        .cull_back_faces = false,
+    });
+    if (!line_pipeline.has_value()) {
+        return line_pipeline.error();
+    }
+    m_line_vertex_shader.emplace(std::move(line_vertex).value());
+    m_line_fragment_shader.emplace(std::move(line_fragment).value());
+    m_line_pipeline.emplace(*device, line_pipeline.value());
+
     app.assets().register_loader<ModelAsset>(
         [device](AssetLoadContext& context) -> core::Result<ModelAsset> {
             const auto file = context.files.read(context.path);
@@ -185,9 +216,29 @@ core::Result<void> Renderer::initialize(App& app) {
     return {};
 }
 
+void Renderer::draw_debug_lines(rhi::CommandList& commands) {
+    if (!m_line_pipeline.has_value() || m_debug_lines.empty()) {
+        return;
+    }
+    commands.bind_pipeline(m_line_pipeline->get());
+
+    // Drawn in pieces that fit the frame's vertex memory, until it is used up.
+    constexpr std::size_t k_vertices_per_draw = 8192;
+    const std::span<const DebugVertex> vertices = m_debug_lines.vertices();
+    for (std::size_t first = 0; first < vertices.size(); first += k_vertices_per_draw) {
+        const std::span<const DebugVertex> piece =
+            vertices.subspan(first, std::min(k_vertices_per_draw, vertices.size() - first));
+        if (!commands.draw_vertices(std::as_bytes(piece), static_cast<std::uint32_t>(piece.size()))) {
+            break;
+        }
+        m_last_line_count += static_cast<std::uint32_t>(piece.size() / 2);
+    }
+}
+
 void Renderer::render(const World& world, rhi::CommandList& commands, platform::SurfaceSize size,
                       rhi::ClearColor clear_color) {
     m_last_draw_count = 0;
+    m_last_line_count = 0;
     commands.begin_render_pass(clear_color);
 
     const Registry& registry = world.registry();
@@ -254,8 +305,11 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
                 ++m_last_draw_count;
             }
         }
+
+        draw_debug_lines(commands);
     }
 
+    m_debug_lines.clear();
     commands.end_render_pass();
 }
 

@@ -1,0 +1,31 @@
+# The scripted run with the null backends: no collisions, so only loading, stepping and drawing are checked.
+[app]
+max_fps = 120
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[input.actions]
+shoot = ["key:space"]
+switch = ["key:tab"]
+shapes = ["key:d"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["null"]
+physics2d = ["null"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["null"]
+physics2d = ["null"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["null"]
+physics2d = ["null"]
