@@ -5,8 +5,11 @@
 #include "decoder.h"
 
 #define DRWAV_API static
+#define DRWAV_PRIVATE static
 #define DRMP3_API static
+#define DRMP3_PRIVATE static
 #define DRFLAC_API static
+#define DRFLAC_PRIVATE static
 #define DR_WAV_IMPLEMENTATION
 #define DR_MP3_IMPLEMENTATION
 #define DR_FLAC_IMPLEMENTATION
