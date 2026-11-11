@@ -4,6 +4,9 @@
 
 #include "decoder.h"
 
+// Each *_PRIVATE macro must be defined along with its *_API macro: the headers define both in one
+// block that is skipped entirely when *_API is already defined, and newer dr_libs versions mark
+// their internal functions *_PRIVATE, which otherwise wouldn't compile.
 #define DRWAV_API static
 #define DRWAV_PRIVATE static
 #define DRMP3_API static

@@ -58,8 +58,12 @@ iterations. Touching bodies sleep together as islands. Settings are under `[phys
 ### portaudio
 
 The device callback calls the mixer, which resamples each voice by linear interpolation. The mixer
-takes a lock for each block it mixes, and the game's calls take the same lock. On Windows, WASAPI's
-default device is preferred over PortAudio's default, MME, whose delay can be heard.
+takes a lock for each block it mixes, and the game's calls take the same lock. On Windows, the
+default outputs of WASAPI, DirectSound and MME are tried in that order, and the first that opens is
+used: MME, PortAudio's own default, has a delay that can be heard. WASAPI streams ask Windows to
+convert them (`paWinWasapiAutoConvert`), because its shared mode otherwise only takes the exact
+format the device mixes in, which is often not stereo. Debug builds of PortAudio, such as vcpkg's,
+print a trace to stderr; on Windows the module sends it to the engine's log at the debug level.
 `[audio.portaudio] device = false` mixes only when asked, as miniaudio's setting does, so tests can
 check the samples.
 

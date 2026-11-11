@@ -7,6 +7,11 @@
 
 #include <mixer/mixer.h>
 #include <portaudio.h>
+// Only installed when PortAudio is built with WASAPI, as vcpkg's is.
+#if defined(_WIN32) && __has_include(<pa_win_wasapi.h>)
+#include <pa_win_wasapi.h>
+#define DREAM_PORTAUDIO_WASAPI 1
+#endif
 
 #include <algorithm>
 #include <cstddef>
@@ -17,6 +22,14 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+// Debug builds of PortAudio, such as vcpkg's Debug one, print a trace of their work to stderr:
+// "before paHostApiInitializers[0].", "PA - PlatformId = 0x2" and so on. This function sends that
+// trace elsewhere. It isn't in PortAudio's installed headers (it's in pa_debugprint.h), but every
+// Windows build exports it: the DLL's .def file lists it, and static libraries contain it.
+extern "C" void PaUtil_SetDebugPrintFunction(void (*callback)(const char* text));
+#endif
 
 namespace dream::modules {
 namespace {
@@ -35,6 +48,37 @@ constexpr std::size_t k_decode_chunk = 4096;
 
 core::Error audio_error(const std::string& what, PaError error) {
     return core::Error{core::ErrorCode::Unknown, what + ": " + Pa_GetErrorText(error)};
+}
+
+#if defined(_WIN32)
+// Receives PortAudio's debug trace, in pieces that aren't always whole lines, and logs each line at
+// the debug level, so it only shows when the engine's log asks for it. PortAudio's threads print
+// too, so each thread gathers its own line.
+void log_portaudio_trace(const char* text) {
+    thread_local std::string line;
+    for (const char* c = text; *c != '\0'; ++c) {
+        if (*c == '\n') {
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) {
+                line.pop_back();
+            }
+            if (!line.empty()) {
+                DREAM_LOG_DEBUG("PortAudio: {}", line);
+            }
+            line.clear();
+        } else {
+            line.push_back(*c);
+        }
+    }
+}
+#endif
+
+std::string device_name(PaDeviceIndex device) {
+    const PaDeviceInfo* const info = Pa_GetDeviceInfo(device);
+    const PaHostApiInfo* const api = info == nullptr ? nullptr : Pa_GetHostApiInfo(info->hostApi);
+    if (info == nullptr || api == nullptr) {
+        return "an unknown device";
+    }
+    return std::string("'") + info->name + "' through " + api->name;
 }
 
 mixer::Vec3 to_mixer(core::Vec3 v) {
@@ -109,39 +153,32 @@ public:
             return {};
         }
 
+#if defined(_WIN32)
+        PaUtil_SetDebugPrintFunction(&log_portaudio_trace);
+#endif
         if (const PaError error = Pa_Initialize(); error != paNoError) {
             return audio_error("Could not start PortAudio", error);
         }
         m_initialized = true;
 
-        const PaDeviceIndex device = output_device();
-        const PaDeviceInfo* const info = device == paNoDevice ? nullptr : Pa_GetDeviceInfo(device);
-        if (info == nullptr || info->maxOutputChannels < 2) {
-            return core::Error{core::ErrorCode::Unknown, "There is no stereo audio output device"};
+        // The first output that opens is used. Each failure is logged, and all of them are given
+        // back if none opens.
+        std::string failures;
+        for (const PaDeviceIndex device : output_devices()) {
+            const PaError error = start_output(device);
+            if (error == paNoError) {
+                DREAM_LOG_INFO("PortAudio: playing on {} at {} Hz", device_name(device),
+                               m_mixer->sample_rate());
+                return {};
+            }
+            const std::string failure = device_name(device) + ": " + Pa_GetErrorText(error);
+            DREAM_LOG_WARNING("PortAudio: could not open {}", failure);
+            failures += (failures.empty() ? "" : "; ") + failure;
         }
-
-        // Mixing at the device's own rate spares the system a conversion.
-        const auto rate = static_cast<unsigned>(info->defaultSampleRate);
-        m_mixer = std::make_unique<mixer::Mixer>(rate, k_bus_count, k_max_voices);
-
-        PaStreamParameters output{};
-        output.device = device;
-        output.channelCount = 2;
-        output.sampleFormat = paFloat32;
-        output.suggestedLatency = info->defaultLowOutputLatency;
-        if (const PaError error =
-                Pa_OpenStream(&m_stream, nullptr, &output, info->defaultSampleRate,
-                              paFramesPerBufferUnspecified, paClipOff, &on_audio, m_mixer.get());
-            error != paNoError) {
-            m_stream = nullptr;
-            return audio_error("Could not open the audio output", error);
+        if (failures.empty()) {
+            return core::Error{core::ErrorCode::Unknown, "There is no audio output device"};
         }
-        if (const PaError error = Pa_StartStream(m_stream); error != paNoError) {
-            return audio_error("Could not start the audio output", error);
-        }
-        DREAM_LOG_INFO("PortAudio: playing on '{}' through {} at {} Hz", info->name,
-                       Pa_GetHostApiInfo(info->hostApi)->name, rate);
-        return {};
+        return core::Error{core::ErrorCode::Unknown, "Could not open an audio output: " + failures};
     }
 
     core::Result<SoundHandle> create_sound(std::span<const std::byte> file, bool stream) override {
@@ -337,19 +374,78 @@ private:
         return paContinue;
     }
 
-    // PortAudio's default on Windows is MME, whose delay is long enough to hear, so WASAPI's
-    // default device is preferred when it is there.
-    static PaDeviceIndex output_device() {
+    // The outputs to try, best first. PortAudio's default on Windows is MME, whose delay is long
+    // enough to hear, so WASAPI's default device comes first, then DirectSound's, then MME's.
+    static std::vector<PaDeviceIndex> output_devices() {
+        std::vector<PaDeviceIndex> devices;
+        const auto add = [&](PaDeviceIndex device) {
+            if (device != paNoDevice &&
+                std::find(devices.begin(), devices.end(), device) == devices.end()) {
+                devices.push_back(device);
+            }
+        };
 #if defined(_WIN32)
-        const PaHostApiIndex wasapi = Pa_HostApiTypeIdToHostApiIndex(paWASAPI);
-        if (wasapi >= 0) {
-            const PaHostApiInfo* const api = Pa_GetHostApiInfo(wasapi);
-            if (api != nullptr && api->defaultOutputDevice != paNoDevice) {
-                return api->defaultOutputDevice;
+        for (const PaHostApiTypeId type : {paWASAPI, paDirectSound, paMME}) {
+            const PaHostApiIndex api = Pa_HostApiTypeIdToHostApiIndex(type);
+            if (const PaHostApiInfo* const info = api < 0 ? nullptr : Pa_GetHostApiInfo(api)) {
+                add(info->defaultOutputDevice);
             }
         }
 #endif
-        return Pa_GetDefaultOutputDevice();
+        add(Pa_GetDefaultOutputDevice());
+        return devices;
+    }
+
+    // Opens and starts a stereo output at the device's own rate, which spares the system a
+    // conversion, with a mixer for that rate. On failure, nothing is left open.
+    PaError start_output(PaDeviceIndex device) {
+        const PaDeviceInfo* const info = Pa_GetDeviceInfo(device);
+        if (info == nullptr) {
+            return paInvalidDevice;
+        }
+        if (info->maxOutputChannels < 2) {
+            return paInvalidChannelCount;
+        }
+
+        PaStreamParameters output{};
+        output.device = device;
+        output.channelCount = 2;
+        output.sampleFormat = paFloat32;
+        output.suggestedLatency = info->defaultLowOutputLatency;
+
+#if defined(DREAM_PORTAUDIO_WASAPI)
+        // WASAPI's shared mode only takes the exact format Windows mixes in, which is often not
+        // stereo (5.1 or 7.1 speakers, virtual surround headsets, HDMI receivers) and not
+        // always floats, and PortAudio then fails with "Invalid sample rate" or "Invalid number
+        // of channels". Auto-conversion has Windows convert this stream to that format instead.
+        PaWasapiStreamInfo wasapi{};
+        const PaHostApiInfo* const api = Pa_GetHostApiInfo(info->hostApi);
+        if (api != nullptr && api->type == paWASAPI) {
+            wasapi.size = sizeof(wasapi);
+            wasapi.hostApiType = paWASAPI;
+            wasapi.version = 1;
+            wasapi.flags = paWinWasapiAutoConvert;
+            output.hostApiSpecificStreamInfo = &wasapi;
+        }
+#endif
+
+        // The callback is given the mixer, so it must exist before the stream does.
+        auto mixer = std::make_unique<mixer::Mixer>(static_cast<unsigned>(info->defaultSampleRate),
+                                                    k_bus_count, k_max_voices);
+        PaStream* stream = nullptr;
+        const PaError error =
+            Pa_OpenStream(&stream, nullptr, &output, info->defaultSampleRate,
+                          paFramesPerBufferUnspecified, paClipOff, &on_audio, mixer.get());
+        if (error != paNoError) {
+            return error;
+        }
+        if (const PaError started = Pa_StartStream(stream); started != paNoError) {
+            Pa_CloseStream(stream);
+            return started;
+        }
+        m_mixer = std::move(mixer);
+        m_stream = stream;
+        return paNoError;
     }
 
     std::unique_ptr<mixer::Mixer> m_mixer;
