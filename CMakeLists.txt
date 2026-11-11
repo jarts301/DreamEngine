@@ -33,6 +33,7 @@ endif()
 
 add_subdirectory(core)
 add_subdirectory(interfaces)
+add_subdirectory(libraries)
 add_subdirectory(runtime)
 
 if(DREAM_BUILD_SAMPLES)

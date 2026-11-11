@@ -1,6 +1,7 @@
 # 0001. Layered architecture and module rules
 
-- Status: Accepted
+- Status: Accepted, extended by [0014](0014-more-backends-and-libraries.md), which adds the
+  `libraries/` layer below modules
 - Date: 2026-11-09
 
 ## Context

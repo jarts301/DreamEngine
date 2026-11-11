@@ -1,0 +1,25 @@
+# The scripted run of check.toml, with the other backend of each kind: the same game, and the
+# same outcome, with only this file changed. One fixed step per frame, at most.
+[app]
+max_fps = 120
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[audio.portaudio]
+device = false
+
+[input.actions]
+throw = ["key:space"]
+menu = ["key:escape"]
+debug = ["key:f1"]
+
+# Only built on Windows, so only its table is listed.
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["impulse"]
+audio = ["portaudio"]
+ui = ["markup"]
+debug_ui = ["imgui"]

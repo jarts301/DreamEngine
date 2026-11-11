@@ -6,11 +6,20 @@
   "dependencies": [
     "box2d",
     "cgltf",
+    {
+      "name": "chipmunk",
+      "platform": "!android"
+    },
     "doctest",
+    "drlibs",
     "entt",
     "imgui",
     "joltphysics",
     "miniaudio",
+    {
+      "name": "portaudio",
+      "platform": "!android"
+    },
     "rmlui",
     "sdl3",
     {

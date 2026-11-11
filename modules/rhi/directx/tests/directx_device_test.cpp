@@ -16,7 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <ostream>
+#include <ostream> // Needed for doctest to print std::string_view.
 #include <span>
 #include <string>
 #include <string_view>

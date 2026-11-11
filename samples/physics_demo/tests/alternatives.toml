@@ -1,0 +1,21 @@
+# The scripted run of physics.toml, with the other physics backends: the same game, and the
+# same outcome, with only this file changed.
+[app]
+max_fps = 120
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[input.actions]
+shoot = ["key:space"]
+switch = ["key:tab"]
+shapes = ["key:d"]
+quit = ["key:escape"]
+
+# Only built on Windows, so only its table is listed.
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["impulse"]
+physics2d = ["chipmunk"]

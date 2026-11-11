@@ -5,10 +5,10 @@ and never include platform or backend headers.
 
 | Sample | Shows |
 |---|---|
-| [arcade_demo](arcade_demo) | A small game using everything: physics, music and sounds, an RmlUi HUD and menu, and ImGui debug tools |
+| [arcade_demo](arcade_demo) | A small game using everything: physics, music and sounds, a HUD and menu, and ImGui debug tools. Its checks run it with Jolt, miniaudio and RmlUi, and again with impulse, PortAudio and markup |
 | [cube](cube) | A spinning cube drawn with Vulkan or DirectX on PC and Vulkan on Android, with Slang shaders |
 | [render_demo](render_demo) | A lit, textured 3D scene drawn by the engine's renderer from a scene file |
-| [physics_demo](physics_demo) | Jolt and Box2D physics from scene files, with shooting, sensors, joints and debug shapes |
+| [physics_demo](physics_demo) | 3D and 2D physics from scene files, with shooting, sensors, joints and debug shapes, checked with Jolt and Box2D and with impulse and Chipmunk |
 | [scene_demo](scene_demo) | Scenes in TOML files, built from components, using shared assets and events |
 | [hello_game](hello_game) | A complete game on PC and Android: window, lifecycle, files and input actions |
 | [module_demo](module_demo) | Choosing a backend from `dream.toml`, with no backend named in the code |

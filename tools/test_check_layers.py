@@ -136,6 +136,46 @@ class CheckLayersTest(unittest.TestCase):
             "must not link",
         )
 
+    def test_module_may_link_an_in_house_library(self):
+        self.assert_clean(
+            "modules/physics/impulse/CMakeLists.txt",
+            "dream_add_module(physics impulse LIBRARIES dream::library_impulse)\n",
+        )
+
+    def test_library_may_link_itself_for_its_tests(self):
+        self.assert_clean(
+            "libraries/impulse/CMakeLists.txt",
+            "dream_add_test(t LIBRARIES dream::library_impulse)\n",
+        )
+
+    def test_library_must_not_include_the_engine(self):
+        self.assert_violation(
+            "libraries/impulse/src/world.cpp",
+            '#include "dream/core/log.h"\n',
+            "libraries must not include",
+        )
+
+    def test_library_must_not_link_the_engine(self):
+        self.assert_violation(
+            "libraries/mixer/CMakeLists.txt",
+            "target_link_libraries(a PRIVATE dream::core)\n",
+            "libraries must not link",
+        )
+
+    def test_library_must_not_link_another_library(self):
+        self.assert_violation(
+            "libraries/mixer/CMakeLists.txt",
+            "target_link_libraries(a PRIVATE dream::library_impulse)\n",
+            "must not link",
+        )
+
+    def test_game_must_not_link_an_in_house_library(self):
+        self.assert_violation(
+            "samples/game/CMakeLists.txt",
+            "target_link_libraries(game PRIVATE dream::library_impulse)\n",
+            "must not link",
+        )
+
     def test_cmake_comments_are_ignored(self):
         self.assert_clean("core/CMakeLists.txt", "# Used by dream::runtime later.\n")
 

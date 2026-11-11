@@ -28,12 +28,28 @@ if(DREAM_BUILD_TESTS)
             CONFIG tests/directx.toml ASSETS assets ../assets RENDERER)
     endif()
 
+    # The check run with the other physics backends. Only its configuration differs, and the
+    # outcome must not.
+    if(WIN32)
+        dream_add_game(dream_physics_demo_alternatives_check SOURCES src/physics_demo.cpp
+            CONFIG tests/alternatives.toml ASSETS assets ../assets RENDERER)
+    endif()
+
     if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME dream_physics_demo_check COMMAND dream_physics_demo_check)
         set_tests_properties(dream_physics_demo_check PROPERTIES
             PASS_REGULAR_EXPRESSION
                 "bodies3d=20 bodies2d=9 pyramid=standing pendulum=held zone=[1-9][0-9]* stack2d=standing seesaw=tilted contacts2d=[1-9][0-9]* lines=drawn"
             ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+
+        if(WIN32)
+            add_test(NAME dream_physics_demo_alternatives_check
+                COMMAND dream_physics_demo_alternatives_check)
+            set_tests_properties(dream_physics_demo_alternatives_check PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "bodies3d=20 bodies2d=9 pyramid=standing pendulum=held zone=[1-9][0-9]* stack2d=standing seesaw=tilted contacts2d=[1-9][0-9]* lines=drawn"
+                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+        endif()
 
         add_test(NAME dream_physics_demo_null COMMAND dream_physics_demo_null)
         set_tests_properties(dream_physics_demo_null PROPERTIES

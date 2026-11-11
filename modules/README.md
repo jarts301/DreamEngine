@@ -44,5 +44,8 @@ dream_add_module(rhi directx SOURCES src/directx_device.cpp LIBRARIES d3d11 d3dc
 See [ADR 0013](../docs/adr/0013-directx-and-shader-formats.md) for the shader bindings every
 backend shares.
 
+When no MIT or Apache 2.0 library does the job, a backend can build on one of the engine's own in
+[libraries](../libraries/README.md), linked as `dream::library_<name>`, and stay a thin adapter.
+
 Interfaces with more than one backend can share tests. Every physics backend passes the tests in
 `physics3d/tests` or `physics2d/tests`, which its own test program includes.

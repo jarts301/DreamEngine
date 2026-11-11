@@ -28,12 +28,28 @@ if(DREAM_BUILD_TESTS)
             CONFIG tests/directx.toml ASSETS assets ../assets RENDERER)
     endif()
 
+    # The check run with the other physics, audio and interface backends. Only its configuration
+    # differs, and the outcome must not.
+    if(WIN32)
+        dream_add_game(dream_arcade_demo_alternatives_check SOURCES src/arcade_demo.cpp
+            CONFIG tests/alternatives.toml ASSETS assets ../assets RENDERER)
+    endif()
+
     if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME dream_arcade_demo_check COMMAND dream_arcade_demo_check)
         set_tests_properties(dream_arcade_demo_check PROPERTIES
             PASS_REGULAR_EXPRESSION
                 "score=[1-9] hits_heard=[1-9][0-9]* menu_opened=1 music_volume=0.25 debug_drawn=yes ui_commands=some"
             ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+
+        if(WIN32)
+            add_test(NAME dream_arcade_demo_alternatives_check
+                COMMAND dream_arcade_demo_alternatives_check)
+            set_tests_properties(dream_arcade_demo_alternatives_check PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "score=[1-9] hits_heard=[1-9][0-9]* menu_opened=1 music_volume=0.25 debug_drawn=yes ui_commands=some"
+                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+        endif()
 
         add_test(NAME dream_arcade_demo_null COMMAND dream_arcade_demo_null)
         set_tests_properties(dream_arcade_demo_null PROPERTIES

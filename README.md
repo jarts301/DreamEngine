@@ -90,16 +90,30 @@ Only the listed backends are compiled, and the first one that starts is used. To
 program with them, call `dream_link_modules(<target> CONFIG <file>)` in CMake and
 `core::ModuleProject::load` at startup. See [ADR 0006](docs/adr/0006-module-system.md).
 
-The graphics backends for PC are `vulkan` and `directx`, and `null` draws nothing. A game's shaders
-are compiled for whichever of them its list names, so switching is a one-line change:
+Graphics, physics, audio and the game interface each have two real backends, switched by
+editing a list:
+
+| Interface | Backends | Notes |
+|---|---|---|
+| `rhi` | `vulkan`, `directx`, `null` | `directx` is Windows only. A game's shaders are compiled for whichever its list names. |
+| `physics3d` | `jolt`, `impulse`, `null` | `impulse` is the engine's own library. |
+| `physics2d` | `box2d`, `chipmunk`, `null` | `chipmunk` is PC only, and has no continuous collision. |
+| `audio` | `miniaudio`, `portaudio`, `null` | `portaudio` is PC only. |
+| `ui` | `rmlui`, `markup`, `null` | Both read the same RML and RCSS files. `markup` is the engine's own library. |
+| `debug_ui` | `imgui`, `null` | |
+| `platform` | `sdl3`, `null` | |
 
 ```toml
 [modules.windows]
 rhi = ["directx", "vulkan", "null"]
+physics3d = ["impulse"]
+ui = ["markup"]
 ```
 
-Shaders declare their bindings for both APIs; see
-[ADR 0013](docs/adr/0013-directx-and-shader-formats.md).
+Shaders declare their bindings for both graphics APIs; see
+[ADR 0013](docs/adr/0013-directx-and-shader-formats.md). The engine's own backends are built on
+[libraries](libraries/README.md) of their own; see
+[ADR 0014](docs/adr/0014-more-backends-and-libraries.md).
 
 To check the layer rules locally (needs Python 3):
 

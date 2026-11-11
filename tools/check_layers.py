@@ -12,17 +12,19 @@ import sys
 from pathlib import Path
 
 SOURCE_SUFFIXES = {".h", ".hpp", ".inl", ".cpp", ".cc"}
-LAYER_DIRECTORIES = ("core", "interfaces", "modules", "runtime", "samples")
+LAYER_DIRECTORIES = ("core", "interfaces", "libraries", "modules", "runtime", "samples")
 
 INCLUDE = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]')
 LINKED_TARGET = re.compile(r"\bdream::(\w+)")
 
 # What each layer may use from the engine, as library names and target-name prefixes. Backends are
 # in no list: nothing may use a backend directly, and games get them through dream_link_modules.
+# In-house libraries use nothing from the engine, and only backends use them.
 ALLOWED = {
     "core": {"core"},
     "interfaces": {"core", "interface"},
-    "modules": {"core", "interface"},
+    "libraries": set(),
+    "modules": {"core", "interface", "library"},
     "runtime": {"core", "interface", "runtime"},
     "samples": {"core", "interface", "runtime"},
 }
@@ -46,14 +48,18 @@ def kind_of_target(name):
         return "interface"
     if name.startswith("module_"):
         return "module"
+    if name.startswith("library_"):
+        return "library"
     return name
 
 
-def own_module_target(relative):
-    """Returns the target name of the backend containing `relative`, if it is in one."""
+def own_target(relative):
+    """Returns the target name of the backend or library containing `relative`, if any."""
     parts = relative.parts
     if len(parts) >= 3 and parts[0] == "modules":
         return f"module_{parts[1]}_{parts[2]}"
+    if len(parts) >= 2 and parts[0] == "libraries":
+        return f"library_{parts[1]}"
     return None
 
 
@@ -99,8 +105,8 @@ def check_cmake(path, relative, layer):
     for number, line in enumerate(lines, start=1):
         code = line.split("#", 1)[0]
         for target in LINKED_TARGET.findall(code):
-            # A module's own tests have to link the module.
-            if target == own_module_target(relative):
+            # A module's or library's own tests have to link it.
+            if target == own_target(relative):
                 continue
             if kind_of_target(target) not in ALLOWED[layer]:
                 problems.append(

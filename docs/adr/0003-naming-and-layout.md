@@ -1,6 +1,7 @@
 # 0003. Naming and repository layout
 
-- Status: Accepted
+- Status: Accepted, extended by [0014](0014-more-backends-and-libraries.md), which adds
+  `libraries/<name>/`
 - Date: 2026-11-09
 
 ## Decision

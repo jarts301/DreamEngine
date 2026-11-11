@@ -24,6 +24,22 @@ function(dream_configure_target target)
     endif()
 endfunction()
 
+# Usage: dream_add_library(<name> SOURCES <files...> [LIBRARIES <third-party...>])
+#
+# An in-house library in libraries/<name>, which backends build on like any third-party library.
+# It uses nothing from the engine, only the C++ standard library and its own LIBRARIES, but it is
+# built with the engine's settings. Its public headers are in include/<name>/.
+function(dream_add_library name)
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "" "SOURCES;LIBRARIES")
+
+    set(target dream_library_${name})
+    add_library(${target} STATIC ${ARG_SOURCES})
+    add_library(dream::library_${name} ALIAS ${target})
+    target_include_directories(${target} PUBLIC include)
+    target_link_libraries(${target} PRIVATE ${ARG_LIBRARIES})
+    dream_configure_target(${target})
+endfunction()
+
 # Usage: dream_add_test(<name> SOURCES <files...> [LIBRARIES <targets...>])
 #
 # Tests are always compiled. They are registered with CTest only when the build machine can run
