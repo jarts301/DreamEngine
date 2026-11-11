@@ -1,0 +1,20 @@
+[app]
+title = "Dream Renderer DirectX Check"
+width = 960
+height = 540
+
+[demo]
+quit_after_frames = 600
+spin = false
+
+[rhi.directx]
+debug = true
+
+[input.actions]
+toggle_spin = ["key:space"]
+quit = ["key:escape"]
+
+# Only built on Windows, so only its table is listed.
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["directx"]

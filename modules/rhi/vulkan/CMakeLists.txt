@@ -6,6 +6,9 @@ find_package(VulkanMemoryAllocator CONFIG REQUIRED GLOBAL)
 dream_add_module(rhi vulkan
     SOURCES src/vulkan_device.cpp
     LIBRARIES Vulkan::Headers volk::volk_headers GPUOpen::VulkanMemoryAllocator ${CMAKE_DL_LIBS}
+    SHADER_SUFFIX .spv
+    SHADER_TARGET spirv
+    SHADER_PROFILE spirv_1_3
 )
 
 # Vulkan's structs have many optional fields, and leaving them zeroed is the normal way to use them.

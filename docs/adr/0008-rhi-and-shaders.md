@@ -1,6 +1,6 @@
 # 0008. Graphics interface and shaders
 
-- Status: Accepted
+- Status: Accepted, extended by [0013](0013-directx-and-shader-formats.md)
 - Date: 2026-11-09
 
 ## Decision

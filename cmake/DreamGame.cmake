@@ -8,6 +8,8 @@
 #
 # Each shader file must define vertex_main and fragment_main. They become the game assets
 # assets:/shaders/<file>.vert and .frag, plus the suffix given by rhi::Device::shader_file_suffix.
+# They are compiled once for each format that the game's graphics backends load, so the module
+# lists in CONFIG decide the formats; see dream_add_module.
 #
 # On PC this creates an executable, with the assets copied next to it. On Android it creates
 # libmain.so and, if APPLICATION_ID is given and ANDROID_HOME is set, a <name>_apk target.
@@ -48,9 +50,16 @@ function(dream_add_game name)
         list(APPEND asset_dirs "${asset_dir}")
     endforeach()
     if(ARG_SHADERS)
-        set(generated_assets "${CMAKE_CURRENT_BINARY_DIR}/${name}_generated_assets")
-        _dream_compile_shaders(${name} "${generated_assets}/shaders" ${ARG_SHADERS})
-        list(APPEND asset_dirs "${generated_assets}")
+        dream_module_shader_formats(${name} shader_formats)
+        if(shader_formats)
+            set(generated_assets "${CMAKE_CURRENT_BINARY_DIR}/${name}_generated_assets")
+            _dream_compile_shaders(${name} "${generated_assets}/shaders" "${shader_formats}"
+                ${ARG_SHADERS})
+            list(APPEND asset_dirs "${generated_assets}")
+        else()
+            message(STATUS "${name} has shaders, but none of its modules loads compiled shaders, "
+                           "so they are not compiled.")
+        endif()
     endif()
 
     if(ANDROID)
@@ -68,33 +77,47 @@ function(dream_add_game name)
     endif()
 endfunction()
 
-# Compiles Slang shaders on the build machine, so a game ships only the compiled result.
-function(_dream_compile_shaders target output_dir)
+# Compiles Slang shaders on the build machine, so a game ships only the compiled result. `formats`
+# is the list from dream_module_shader_formats, and every shader is compiled once per format.
+function(_dream_compile_shaders target output_dir formats)
     # vcpkg installs this for the build machine, in a folder named after that machine's triplet.
     file(GLOB slang_dirs "${VCPKG_INSTALLED_DIR}/*/tools/shader-slang")
     find_program(DREAM_SLANGC slangc HINTS ${slang_dirs}
         NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
 
-    set(outputs "")
-    foreach(source IN LISTS ARGN)
-        cmake_path(ABSOLUTE_PATH source NORMALIZE)
-        cmake_path(GET source STEM stem)
+    # Shaders give push constants a DirectX register next to [[vk::push_constant]] (ADR 0013). When
+    # compiling SPIR-V, Slang also reads that register as a Vulkan binding, as DXC would, and warns
+    # that it overlaps the texture's binding even though a push constant gets no binding at all.
+    # Warning 39001 is that false alarm, so it is turned off.
+    set(common_options -matrix-layout-column-major -warnings-disable 39001)
 
-        foreach(stage IN ITEMS vertex fragment)
-            string(SUBSTRING ${stage} 0 4 short_stage)
-            set(output "${output_dir}/${stem}.${short_stage}.spv")
-            add_custom_command(
-                OUTPUT "${output}"
-                COMMAND ${CMAKE_COMMAND} -E make_directory "${output_dir}"
-                COMMAND "${DREAM_SLANGC}" "${source}"
-                    -target spirv -profile spirv_1_3
-                    -matrix-layout-column-major
-                    -entry ${stage}_main -stage ${stage}
-                    -o "${output}"
-                DEPENDS "${source}"
-                COMMENT "Compiling ${stem} ${stage} shader"
-                VERBATIM)
-            list(APPEND outputs "${output}")
+    set(outputs "")
+    foreach(format IN LISTS formats)
+        string(REPLACE "|" ";" format "${format}")
+        list(GET format 0 suffix)
+        list(GET format 1 slang_target)
+        list(GET format 2 profile)
+
+        foreach(source IN LISTS ARGN)
+            cmake_path(ABSOLUTE_PATH source NORMALIZE)
+            cmake_path(GET source STEM stem)
+
+            foreach(stage IN ITEMS vertex fragment)
+                string(SUBSTRING ${stage} 0 4 short_stage)
+                set(output "${output_dir}/${stem}.${short_stage}${suffix}")
+                add_custom_command(
+                    OUTPUT "${output}"
+                    COMMAND ${CMAKE_COMMAND} -E make_directory "${output_dir}"
+                    COMMAND "${DREAM_SLANGC}" "${source}"
+                        -target ${slang_target} -profile ${profile}
+                        ${common_options}
+                        -entry ${stage}_main -stage ${stage}
+                        -o "${output}"
+                    DEPENDS "${source}"
+                    COMMENT "Compiling ${stem} ${stage} shader to ${suffix}"
+                    VERBATIM)
+                list(APPEND outputs "${output}")
+            endforeach()
         endforeach()
     endforeach()
 

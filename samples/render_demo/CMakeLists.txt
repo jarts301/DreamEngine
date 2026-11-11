@@ -12,6 +12,12 @@ if(DREAM_BUILD_TESTS)
     dream_add_game(dream_render_demo_vulkan_check SOURCES src/render_demo.cpp
         CONFIG tests/vulkan.toml ASSETS assets ../assets RENDERER)
 
+    # The same view on DirectX, which only Windows can build.
+    if(WIN32)
+        dream_add_game(dream_render_demo_directx_check SOURCES src/render_demo.cpp
+            CONFIG tests/directx.toml ASSETS assets ../assets RENDERER)
+    endif()
+
     # The whole path with no display or GPU: models load, and every part is drawn.
     dream_add_game(dream_render_demo_null SOURCES src/render_demo.cpp CONFIG tests/null.toml
         ASSETS assets ../assets RENDERER)

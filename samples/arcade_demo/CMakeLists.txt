@@ -22,6 +22,12 @@ if(DREAM_BUILD_TESTS)
     dream_add_game(dream_arcade_demo_vulkan_check SOURCES src/arcade_demo.cpp
         CONFIG tests/vulkan.toml ASSETS assets ../assets RENDERER)
 
+    # The same run on DirectX, which only Windows can build.
+    if(WIN32)
+        dream_add_game(dream_arcade_demo_directx_check SOURCES src/arcade_demo.cpp
+            CONFIG tests/directx.toml ASSETS assets ../assets RENDERER)
+    endif()
+
     if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME dream_arcade_demo_check COMMAND dream_arcade_demo_check)
         set_tests_properties(dream_arcade_demo_check PROPERTIES

@@ -1,0 +1,26 @@
+# The scripted run on the real GPU and sound hardware, with the Direct3D debug layer.
+[app]
+title = "Dream Arcade DirectX Check"
+width = 960
+height = 540
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[rhi.directx]
+debug = true
+
+[input.actions]
+throw = ["key:space"]
+menu = ["key:escape"]
+debug = ["key:f1"]
+
+# Only built on Windows, so only its table is listed.
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["directx"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]
+debug_ui = ["imgui"]

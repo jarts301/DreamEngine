@@ -3,8 +3,9 @@ struct Constants {
     float4 tint;
 };
 
+// Push constants are register b1 on DirectX; see runtime/shaders/forward.slang.
 [[vk::push_constant]]
-ConstantBuffer<Constants> constants;
+ConstantBuffer<Constants> constants : register(b1);
 
 struct VertexInput {
     [[vk::location(0)]] float3 position : POSITION;

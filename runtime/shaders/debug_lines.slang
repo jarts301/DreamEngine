@@ -6,7 +6,7 @@ struct FrameUniforms {
 };
 
 [[vk::binding(0, 0)]]
-ConstantBuffer<FrameUniforms> frame;
+ConstantBuffer<FrameUniforms> frame : register(b0);
 
 struct VertexInput {
     [[vk::location(0)]] float3 position : POSITION;

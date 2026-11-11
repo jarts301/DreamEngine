@@ -38,15 +38,22 @@ Each preset also has a `-release` version. Output goes to `build/<preset>/`.
 
 ## Run the cube
 
-After building, run the Vulkan cube on Windows. Space or a click toggles the spin, and Escape quits:
+After building, run the cube on Windows. Space or a click toggles the spin, and Escape quits:
 
 ```bash
 build/windows-debug/samples/cube/dream_cube/dream_cube.exe
 ```
 
+It draws with Vulkan, or with DirectX on a PC without a Vulkan driver, as its `dream.toml` lists.
+To see the same fixed view on each API, run `dream_cube_vulkan_check` and `dream_cube_directx_check`
+from their own folders next to it.
+
 To check the Vulkan backend with the Khronos validation layers, configure with
 `-DVCPKG_MANIFEST_FEATURES=vulkan-validation` and set `VK_LAYER_PATH` to the folder containing
 `VkLayer_khronos_validation.json` under `vcpkg_installed/`. Debug builds then turn validation on.
+
+The DirectX backend is Direct3D 11 and needs nothing installed. Debug builds turn its debug layer on
+when Windows' "Graphics Tools" feature is present, and the messages appear in the engine log.
 
 ## Android APK
 
@@ -82,6 +89,17 @@ greeter = ["english", "spanish"]
 Only the listed backends are compiled, and the first one that starts is used. To build your own
 program with them, call `dream_link_modules(<target> CONFIG <file>)` in CMake and
 `core::ModuleProject::load` at startup. See [ADR 0006](docs/adr/0006-module-system.md).
+
+The graphics backends for PC are `vulkan` and `directx`, and `null` draws nothing. A game's shaders
+are compiled for whichever of them its list names, so switching is a one-line change:
+
+```toml
+[modules.windows]
+rhi = ["directx", "vulkan", "null"]
+```
+
+Shaders declare their bindings for both APIs; see
+[ADR 0013](docs/adr/0013-directx-and-shader-formats.md).
 
 To check the layer rules locally (needs Python 3):
 

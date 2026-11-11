@@ -6,7 +6,7 @@ and never include platform or backend headers.
 | Sample | Shows |
 |---|---|
 | [arcade_demo](arcade_demo) | A small game using everything: physics, music and sounds, an RmlUi HUD and menu, and ImGui debug tools |
-| [cube](cube) | A spinning cube drawn with Vulkan on PC and Android, with Slang shaders |
+| [cube](cube) | A spinning cube drawn with Vulkan or DirectX on PC and Vulkan on Android, with Slang shaders |
 | [render_demo](render_demo) | A lit, textured 3D scene drawn by the engine's renderer from a scene file |
 | [physics_demo](physics_demo) | Jolt and Box2D physics from scene files, with shooting, sensors, joints and debug shapes |
 | [scene_demo](scene_demo) | Scenes in TOML files, built from components, using shared assets and events |

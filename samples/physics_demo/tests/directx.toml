@@ -1,0 +1,25 @@
+# The scripted run on the real GPU, with the Direct3D debug layer.
+[app]
+title = "Dream Physics DirectX Check"
+width = 960
+height = 540
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[rhi.directx]
+debug = true
+
+[input.actions]
+shoot = ["key:space"]
+switch = ["key:tab"]
+shapes = ["key:d"]
+quit = ["key:escape"]
+
+# Only built on Windows, so only its table is listed.
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["directx"]
+physics3d = ["jolt"]
+physics2d = ["box2d"]

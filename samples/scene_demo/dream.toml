@@ -11,7 +11,7 @@ quit = ["key:escape"]
 
 [modules.windows]
 platform = ["sdl3"]
-rhi = ["vulkan", "null"]
+rhi = ["vulkan", "directx", "null"]
 
 [modules.android]
 platform = ["sdl3"]

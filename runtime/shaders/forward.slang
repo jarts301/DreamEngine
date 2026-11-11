@@ -1,5 +1,9 @@
 // The renderer's standard opaque surface: one directional light, ambient light and a base color
 // texture. Output is linear, and the window's sRGB format encodes it.
+//
+// Every shader uses the same bindings, for both graphics APIs (ADR 0013): the uniform block is
+// binding 0 / register b0, the texture is binding 1 / registers t0 and s0, and the push constants
+// are register b1. Vertex inputs are declared in location order.
 
 struct FrameUniforms {
     float4x4 view_projection;
@@ -17,13 +21,13 @@ struct DrawConstants {
 };
 
 [[vk::binding(0, 0)]]
-ConstantBuffer<FrameUniforms> frame;
+ConstantBuffer<FrameUniforms> frame : register(b0);
 
 [[vk::binding(1, 0)]]
 Sampler2D base_color_texture;
 
 [[vk::push_constant]]
-ConstantBuffer<DrawConstants> draw;
+ConstantBuffer<DrawConstants> draw : register(b1);
 
 struct VertexInput {
     [[vk::location(0)]] float3 position : POSITION;

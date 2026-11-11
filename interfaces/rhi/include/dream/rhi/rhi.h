@@ -73,6 +73,8 @@ struct ScissorRect {
     std::uint32_t height = 0;
 };
 
+// Matched to the vertex shader's inputs by location. DirectX has no locations, so there the n-th
+// input the shader declares is location n (ADR 0013).
 struct VertexAttribute {
     std::uint32_t location = 0;
     VertexFormat format = VertexFormat::Float3;
@@ -113,15 +115,18 @@ public:
     virtual void bind_vertex_buffer(BufferHandle buffer) = 0;
     virtual void bind_index_buffer(BufferHandle buffer, IndexFormat format) = 0;
 
-    // At most k_max_push_constant_size bytes, visible to every shader stage.
+    // At most k_max_push_constant_size bytes, visible to every shader stage. Shaders read them
+    // from the push constant block on Vulkan and register b1 on DirectX (ADR 0013).
     virtual void push_constants(std::span<const std::byte> data) = 0;
 
-    // Sets the block that shaders read at binding 0 of set 0, for this and later draws. The data is
-    // copied, and it can change any number of times per frame. At most k_max_uniform_size bytes.
+    // Sets the block that shaders read at binding 0 of set 0, or register b0, for this and later
+    // draws. The data is copied, and it can change any number of times per frame. At most
+    // k_max_uniform_size bytes.
     virtual void set_uniforms(std::span<const std::byte> data) = 0;
 
-    // Sets the texture that shaders read at binding 1 of set 0, for this and later draws. Each
-    // frame starts with a plain white texture, which an invalid handle also selects.
+    // Sets the texture that shaders read at binding 1 of set 0, or registers t0 and s0, for this
+    // and later draws. Each frame starts with a plain white texture, which an invalid handle also
+    // selects.
     virtual void bind_texture(TextureHandle texture) = 0;
 
     virtual void draw_indexed(std::uint32_t index_count) = 0;

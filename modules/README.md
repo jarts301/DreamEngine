@@ -33,5 +33,16 @@ A module depends only on interfaces and Core. See
 
 Then list it in a project's TOML file. Nothing else needs to change.
 
+A graphics backend also declares the compiled shader format it loads, and `dream_add_game` compiles
+each game's shaders for every format its selected backends need:
+
+```cmake
+dream_add_module(rhi directx SOURCES src/directx_device.cpp LIBRARIES d3d11 d3dcompiler dxguid
+    SHADER_SUFFIX .dxbc SHADER_TARGET dxbc SHADER_PROFILE sm_5_0)
+```
+
+See [ADR 0013](../docs/adr/0013-directx-and-shader-formats.md) for the shader bindings every
+backend shares.
+
 Interfaces with more than one backend can share tests. Every physics backend passes the tests in
 `physics3d/tests` or `physics2d/tests`, which its own test program includes.

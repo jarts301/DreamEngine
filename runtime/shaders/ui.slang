@@ -13,7 +13,7 @@ struct UiConstants {
 Sampler2D ui_texture;
 
 [[vk::push_constant]]
-ConstantBuffer<UiConstants> constants;
+ConstantBuffer<UiConstants> constants : register(b1);
 
 struct VertexInput {
     [[vk::location(0)]] float2 position : POSITION;

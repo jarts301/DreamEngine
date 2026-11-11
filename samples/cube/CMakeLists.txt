@@ -12,6 +12,12 @@ if(DREAM_BUILD_TESTS)
     dream_add_game(dream_cube_vulkan_check SOURCES src/cube_game.cpp CONFIG tests/vulkan.toml
         SHADERS shaders/cube.slang)
 
+    # The same view on DirectX, which only Windows can build.
+    if(WIN32)
+        dream_add_game(dream_cube_directx_check SOURCES src/cube_game.cpp
+            CONFIG tests/directx.toml SHADERS shaders/cube.slang)
+    endif()
+
     # The whole path with no display or GPU: compiled shaders load, and every frame is recorded.
     dream_add_game(dream_cube_null SOURCES src/cube_game.cpp CONFIG tests/null.toml
         SHADERS shaders/cube.slang)

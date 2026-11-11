@@ -28,12 +28,20 @@ function(dream_add_interface name)
     target_compile_features(dream_interface_${name} INTERFACE cxx_std_20)
 endfunction()
 
-# Usage: dream_add_module(<interface> <backend> SOURCES <files...> [LIBRARIES <third-party...>])
+# Usage: dream_add_module(<interface> <backend> SOURCES <files...> [LIBRARIES <third-party...>]
+#                         [SHADER_SUFFIX <suffix> SHADER_TARGET <target> SHADER_PROFILE <profile>])
 #
 # The sources must define dream::modules::register_<interface>_<backend>, which the generated
 # registration code calls.
+#
+# A graphics backend loads one compiled shader format, and declares it with the three SHADER_
+# options: the suffix its Device::shader_file_suffix returns, and the slangc target and profile that
+# produce that format. dream_add_game compiles a game's shaders once for every format that the
+# game's selected backends load, so a project switches graphics backends by editing only its module
+# lists. See docs/adr/0013-directx-and-shader-formats.md.
 function(dream_add_module interface backend)
-    cmake_parse_arguments(PARSE_ARGV 2 ARG "" "" "SOURCES;LIBRARIES")
+    cmake_parse_arguments(PARSE_ARGV 2 ARG "" "SHADER_SUFFIX;SHADER_TARGET;SHADER_PROFILE"
+        "SOURCES;LIBRARIES")
 
     set(target dream_module_${interface}_${backend})
     add_library(${target} STATIC ${ARG_SOURCES})
@@ -42,6 +50,39 @@ function(dream_add_module interface backend)
         PUBLIC dream::core dream::interface_${interface}
         PRIVATE ${ARG_LIBRARIES})
     dream_configure_target(${target})
+
+    if(ARG_SHADER_SUFFIX OR ARG_SHADER_TARGET OR ARG_SHADER_PROFILE)
+        if(NOT (ARG_SHADER_SUFFIX AND ARG_SHADER_TARGET AND ARG_SHADER_PROFILE))
+            message(FATAL_ERROR "dream_add_module(${interface} ${backend}) needs SHADER_SUFFIX, "
+                                "SHADER_TARGET and SHADER_PROFILE together.")
+        endif()
+        set_target_properties(${target} PROPERTIES
+            DREAM_SHADER_SUFFIX "${ARG_SHADER_SUFFIX}"
+            DREAM_SHADER_TARGET "${ARG_SHADER_TARGET}"
+            DREAM_SHADER_PROFILE "${ARG_SHADER_PROFILE}")
+    endif()
+endfunction()
+
+# Usage: dream_module_shader_formats(<target> <out-var>)
+#
+# Lists the shader formats that the modules linked into <target> by dream_link_modules load. Each
+# entry is "<suffix>|<slangc target>|<slangc profile>", and each format appears once even when
+# several backends share it.
+function(dream_module_shader_formats target out_var)
+    get_target_property(module_targets ${target} DREAM_MODULE_TARGETS)
+    set(formats "")
+    if(module_targets)
+        foreach(module_target IN LISTS module_targets)
+            get_target_property(suffix ${module_target} DREAM_SHADER_SUFFIX)
+            if(suffix)
+                get_target_property(slang_target ${module_target} DREAM_SHADER_TARGET)
+                get_target_property(profile ${module_target} DREAM_SHADER_PROFILE)
+                list(APPEND formats "${suffix}|${slang_target}|${profile}")
+            endif()
+        endforeach()
+        list(REMOVE_DUPLICATES formats)
+    endif()
+    set(${out_var} "${formats}" PARENT_SCOPE)
 endfunction()
 
 # Usage: dream_link_modules(<target> CONFIG <toml-file>)
@@ -71,6 +112,7 @@ function(dream_link_modules target)
     set(DREAM_MODULE_DECLARATIONS "")
     set(DREAM_MODULE_CALLS "")
     set(module_targets "")
+    set(module_libraries "")
     set(module_dirs "")
 
     foreach(interface IN LISTS config_INTERFACES)
@@ -95,11 +137,15 @@ function(dream_link_modules target)
                 "    if (Result<void> result = modules::${function_name}(registry); !result) {\n"
                 "        return result;\n"
                 "    }\n")
-            list(APPEND module_targets dream::module_${interface}_${backend})
+            list(APPEND module_targets dream_module_${interface}_${backend})
+            list(APPEND module_libraries dream::module_${interface}_${backend})
             list(APPEND module_dirs "${DreamEngine_SOURCE_DIR}/modules/${interface}/${backend}")
         endforeach()
     endforeach()
-    set_target_properties(${target} PROPERTIES DREAM_MODULE_DIRS "${module_dirs}")
+    # Other build steps, such as shader compilation and APK packaging, adapt to the selection.
+    set_target_properties(${target} PROPERTIES
+        DREAM_MODULE_TARGETS "${module_targets}"
+        DREAM_MODULE_DIRS "${module_dirs}")
 
     file(READ "${ARG_CONFIG}" DREAM_MODULE_CONFIG_TEXT)
     set(DREAM_MODULE_CONFIG_PATH "${ARG_CONFIG}")
@@ -108,5 +154,5 @@ function(dream_link_modules target)
     configure_file("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/module_registration.cpp.in" "${generated}"
         @ONLY)
     target_sources(${target} PRIVATE "${generated}")
-    target_link_libraries(${target} PRIVATE dream::core ${module_targets})
+    target_link_libraries(${target} PRIVATE dream::core ${module_libraries})
 endfunction()
