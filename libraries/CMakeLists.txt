@@ -3,3 +3,4 @@
 add_subdirectory(impulse)
 add_subdirectory(markup)
 add_subdirectory(mixer)
+add_subdirectory(timeline)

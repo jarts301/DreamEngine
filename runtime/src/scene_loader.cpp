@@ -1,6 +1,7 @@
 #include "dream/runtime/scene_loader.h"
 
 #include "dream/core/math/quaternion.h"
+#include "dream/core/profile.h"
 
 #include <algorithm>
 #include <format>
@@ -139,6 +140,7 @@ void SceneLoader::register_component(std::string name, ComponentReader reader) {
 }
 
 core::Result<std::unique_ptr<World>> SceneLoader::load(std::string_view path) {
+    DREAM_PROFILE_ZONE_DETAIL("Load scene", path);
     const auto bytes = m_files.read(path);
     if (!bytes.has_value()) {
         return bytes.error();

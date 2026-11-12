@@ -19,6 +19,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0012](0012-audio-and-ui.md) | Audio, game and debug interfaces drawn by the renderer |
 | [0013](0013-directx-and-shader-formats.md) | DirectX backend, shader formats per backend and shader bindings |
 | [0014](0014-more-backends-and-libraries.md) | Second physics, audio and interface backends, and in-house libraries |
+| [0015](0015-profiling.md) | Profiling zones in Core, a swappable profiler and Chrome trace files |
 
 ## Template
 

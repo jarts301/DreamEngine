@@ -8,6 +8,11 @@ height = 720
 [demo]
 debug_tools = false
 
+# On PC, each run saves a profile here, in the folder the game was started from. Open it at
+# https://ui.perfetto.dev. Listing profiler = ["null"] instead turns profiling off.
+[profiler.timeline]
+path = "dream_arcade_trace.json"
+
 [input.actions]
 throw = ["key:space", "mouse:left", "touch"]
 menu = ["key:escape", "key:back"]
@@ -20,6 +25,7 @@ physics3d = ["impulse", "jolt"]
 audio = ["portaudio", "miniaudio", "null"]
 ui = ["markup", "rmlui"]
 debug_ui = ["imgui"]
+profiler = ["timeline"]
 
 [modules.android]
 platform = ["sdl3"]
@@ -36,3 +42,4 @@ physics3d = ["jolt"]
 audio = ["miniaudio", "null"]
 ui = ["rmlui"]
 debug_ui = ["imgui"]
+profiler = ["timeline"]

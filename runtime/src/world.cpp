@@ -1,5 +1,7 @@
 #include "dream/runtime/world.h"
 
+#include "dream/core/profile.h"
+
 #include <unordered_set>
 #include <vector>
 
@@ -92,6 +94,7 @@ core::Result<void> World::set_parent(Entity child, Entity parent) {
 }
 
 void World::update_transforms() {
+    DREAM_PROFILE_ZONE("Update transforms");
     const auto roots = m_registry.view<const Transform, WorldTransform>(entt::exclude<Parent>);
     for (const auto [entity, transform, world] : roots.each()) {
         world.matrix = local_matrix(transform);

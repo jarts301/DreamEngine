@@ -30,3 +30,10 @@ For that, add `RENDERER` to `dream_add_game`. See [ADR 0010](../docs/adr/0010-re
 [samples/arcade_demo](../samples/arcade_demo/src/arcade_demo.cpp) adds `runtime::Audio`,
 `runtime::UserInterface` and `runtime::DebugOverlay`, which need `audio`, `ui` and `debug_ui`
 listed the same way.
+
+## Profiling
+
+A game needs no code to be profiled: listing `profiler` under `[modules.<platform>]` makes
+`run_program` start a `runtime::ProfilerSession`, and the runtime's own zones show the main loop and
+each system. Add the game's own with the macros in `dream/core/profile.h`. See
+[ADR 0015](../docs/adr/0015-profiling.md).

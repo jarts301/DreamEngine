@@ -1,5 +1,6 @@
 #include "dream/runtime/ui.h"
 
+#include "dream/core/profile.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/renderer.h"
 
@@ -143,6 +144,7 @@ core::Result<void> UserInterface::initialize(App& app, Renderer& renderer,
 }
 
 void UserInterface::update(App& app, float delta_seconds) {
+    DREAM_PROFILE_ZONE("Interface update");
     m_renderer->release_ui_textures();
     m_backend->update(frame_info(app, delta_seconds, m_origin));
     // Copied first, because a listener may change the interface.

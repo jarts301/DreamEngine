@@ -10,6 +10,7 @@ could serve any program. Backends in `modules/` adapt them to the engine's inter
 | [impulse](impulse) | 3D rigid-body physics: boxes, spheres and capsules, joints, queries, sleeping | `physics3d/impulse` |
 | [markup](markup) | Game interfaces from RML documents and RCSS style sheets, as RmlUi reads them | `ui/markup` |
 | [mixer](mixer) | Mixing voices of decoded or streamed audio into stereo | `audio/portaudio` |
+| [timeline](timeline) | Recording timed events from many threads, saved as a Chrome trace | `profiler/timeline` |
 
 A library's CMakeLists.txt calls `dream_add_library`, which builds it with the engine's settings as
 `dream::library_<name>`. Public headers go in `include/<name>/`, and tests in `tests/`. Libraries are

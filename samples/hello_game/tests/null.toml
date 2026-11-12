@@ -10,9 +10,11 @@ quit = ["key:escape"]
 
 [modules.windows]
 platform = ["null"]
+profiler = ["null"]
 
 [modules.android]
 platform = ["null"]
 
 [modules.linux]
 platform = ["null"]
+profiler = ["null"]

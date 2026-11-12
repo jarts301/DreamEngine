@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dream/core/profile.h"
 #include "dream/core/result.h"
 #include "dream/runtime/virtual_file_system.h"
 
@@ -76,6 +77,8 @@ public:
                                std::format("The asset '{}' depends on itself", path)};
         }
 
+        // Only loads that happen are measured; finding a loaded asset is too quick to matter.
+        DREAM_PROFILE_ZONE_DETAIL("Load asset", path);
         AssetLoadContext context{path, m_files, *this};
         core::Result<T> loaded = (*static_cast<const AssetLoader<T>*>(loader->second.get()))(context);
         end_loading();

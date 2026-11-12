@@ -102,6 +102,7 @@ editing a list:
 | `ui` | `rmlui`, `markup`, `null` | Both read the same RML and RCSS files. `markup` is the engine's own library. |
 | `debug_ui` | `imgui`, `null` | |
 | `platform` | `sdl3`, `null` | |
+| `profiler` | `timeline`, `null` | PC only for now. `timeline` saves a trace to open in Perfetto; see [Profiling](#profiling). |
 
 ```toml
 [modules.windows]
@@ -114,6 +115,37 @@ Shaders declare their bindings for both graphics APIs; see
 [ADR 0013](docs/adr/0013-directx-and-shader-formats.md). The engine's own backends are built on
 [libraries](libraries/README.md) of their own; see
 [ADR 0014](docs/adr/0014-more-backends-and-libraries.md).
+
+## Profiling
+
+List a profiler for a platform, and the game saves a trace of each run when it ends. Open the file
+at [ui.perfetto.dev](https://ui.perfetto.dev) or in Chrome's `chrome://tracing`:
+
+```toml
+[modules.windows]
+profiler = ["timeline"]
+
+[profiler.timeline]
+path = "trace.json"   # Relative to the folder the game is started from.
+start_frame = 0       # Frames to skip before recording, such as while loading.
+frames = 0            # How many frames to record. 0 means until the end.
+```
+
+The engine already measures its main loop, physics, rendering, audio, loading and jobs. Games and
+backends add their own zones with the macros in `dream/core/profile.h`:
+
+```cpp
+#include "dream/core/profile.h"
+
+void Enemies::update() {
+    DREAM_PROFILE_ZONE("Enemies");               // Measures the rest of the scope.
+    DREAM_PROFILE_VALUE("Enemies alive", count); // Drawn as a graph over time.
+}
+```
+
+`samples/arcade_demo` saves `dream_arcade_trace.json` this way on Windows and Linux. Configuring
+with `-DDREAM_PROFILING=OFF` removes the zones from the build entirely. See
+[ADR 0015](docs/adr/0015-profiling.md).
 
 To check the layer rules locally (needs Python 3):
 

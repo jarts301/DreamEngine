@@ -13,6 +13,7 @@ add_library(dream_core STATIC
     src/module_project.cpp
     src/module_registry.cpp
     src/pool_allocator.cpp
+    src/profile.cpp
     src/version.cpp
 )
 add_library(dream::core ALIAS dream_core)
@@ -29,6 +30,9 @@ target_compile_definitions(dream_core PRIVATE
     DREAM_VERSION_PATCH=${PROJECT_VERSION_PATCH}
 )
 dream_configure_target(dream_core)
+if(NOT DREAM_PROFILING)
+    target_compile_definitions(dream_core PUBLIC DREAM_DISABLE_PROFILING)
+endif()
 
 if(DREAM_BUILD_TESTS)
     dream_add_test(dream_core_tests
@@ -44,6 +48,8 @@ if(DREAM_BUILD_TESTS)
             tests/math_test.cpp
             tests/memory_test.cpp
             tests/module_test.cpp
+            tests/profile_disabled_test.cpp
+            tests/profile_test.cpp
             tests/result_test.cpp
             tests/version_test.cpp
         LIBRARIES

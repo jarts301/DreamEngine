@@ -1,11 +1,13 @@
 // A small target-practice game: throw balls at towers of crates. It brings the engine's parts
 // together: physics moves things, audio plays music and hits, a game interface shows the score and
 // a pause menu, and debug tools show what's going on. Which backend does each comes from dream.toml.
+// On PC it also saves a profile of each run, with the game's own zones, to open in Perfetto.
 //
 // Controls: a click, a tap or Space throws a ball. Escape (or Back on Android) or the Menu button
 // pauses, and F1 shows the debug tools.
 
 #include "dream/core/log.h"
+#include "dream/core/profile.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/audio.h"
 #include "dream/runtime/game.h"
@@ -168,11 +170,15 @@ public:
 
         // The interface sees input first, so its buttons can take a click before the game does.
         m_interface.update(app, delta);
-        if (m_scripted) {
-            run_script(app);
-        } else {
-            handle_input(app);
+        {
+            DREAM_PROFILE_ZONE("Arcade input");
+            if (m_scripted) {
+                run_script(app);
+            } else {
+                handle_input(app);
+            }
         }
+        DREAM_PROFILE_VALUE("Arcade score", m_score);
         if (m_score != m_shown_score) {
             m_shown_score = m_score;
             (void)m_interface.ui().set_text(m_hud, "score", std::to_string(m_score));
@@ -181,7 +187,10 @@ public:
         m_physics.update_transforms(static_cast<float>(app.fixed_step_alpha()));
         m_world->update_transforms();
         m_audio.update(m_world.get());
-        draw_debug_tools(app, delta);
+        {
+            DREAM_PROFILE_ZONE("Arcade debug tools");
+            draw_debug_tools(app, delta);
+        }
 
         if (m_script_done) {
             app.request_quit();

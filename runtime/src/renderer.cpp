@@ -1,6 +1,7 @@
 #include "dream/runtime/renderer.h"
 
 #include "dream/core/assert.h"
+#include "dream/core/profile.h"
 #include "dream/runtime/app.h"
 
 #include <algorithm>
@@ -455,6 +456,7 @@ void Renderer::draw_debug_lines(rhi::CommandList& commands) {
 
 void Renderer::render(const World& world, rhi::CommandList& commands, platform::SurfaceSize size,
                       rhi::ClearColor clear_color) {
+    DREAM_PROFILE_ZONE("Draw scene");
     m_last_draw_count = 0;
     m_last_line_count = 0;
     m_last_ui_command_count = 0;
@@ -531,6 +533,7 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
     m_debug_lines.clear();
     draw_ui(commands, size);
     commands.end_render_pass();
+    DREAM_PROFILE_VALUE("Draw calls", m_last_draw_count);
 }
 
 } // namespace dream::runtime

@@ -2,6 +2,7 @@
 
 #include "dream/core/log.h"
 #include "dream/core/math/matrix.h"
+#include "dream/core/profile.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/scene_loader.h"
 
@@ -164,6 +165,7 @@ void Audio::update(const World* world) {
     if (m_device == nullptr) {
         return;
     }
+    DREAM_PROFILE_ZONE("Audio update");
 
     // Voices started for another world's sources are stopped.
     if (world != m_last_world) {

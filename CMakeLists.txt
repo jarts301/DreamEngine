@@ -5,6 +5,9 @@ project(DreamEngine VERSION 0.1.0 LANGUAGES CXX)
 option(DREAM_BUILD_TESTS "Build the engine's tests" ${PROJECT_IS_TOP_LEVEL})
 option(DREAM_BUILD_SAMPLES "Build the sample programs" ${PROJECT_IS_TOP_LEVEL})
 option(DREAM_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+# Which profiler records the zones is chosen in the project configuration. OFF removes the zones
+# from the engine and games altogether, for builds that ship. See docs/adr/0015-profiling.md.
+option(DREAM_PROFILING "Compile profiling zones into the engine and games" ON)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 

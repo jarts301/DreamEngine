@@ -96,7 +96,7 @@ private:
 
     void enqueue(const Job& job);
     void execute(Job& job);
-    void worker_loop();
+    void worker_loop(std::uint32_t index);
 
     std::mutex m_mutex;
     std::condition_variable m_wake;

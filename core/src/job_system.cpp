@@ -1,5 +1,9 @@
 #include "dream/core/job_system.h"
 
+#include "dream/core/profile.h"
+
+#include <format>
+
 namespace dream::core {
 
 std::uint32_t JobSystem::default_worker_count() noexcept {
@@ -9,7 +13,7 @@ std::uint32_t JobSystem::default_worker_count() noexcept {
 JobSystem::JobSystem(std::uint32_t worker_count) {
     m_workers.reserve(worker_count);
     for (std::uint32_t i = 0; i < worker_count; ++i) {
-        m_workers.emplace_back([this] { worker_loop(); });
+        m_workers.emplace_back([this, i] { worker_loop(i); });
     }
 }
 
@@ -42,7 +46,11 @@ void JobSystem::enqueue(const Job& job) {
 }
 
 void JobSystem::execute(Job& job) {
-    job.invoke(job.storage);
+    // The zone ends before the counter does, so no zone is open once wait() has returned.
+    {
+        DREAM_PROFILE_ZONE("Job");
+        job.invoke(job.storage);
+    }
 
     if (job.counter->m_pending.fetch_sub(1, std::memory_order_acq_rel) == 1) {
         // Taking the lock ensures a thread inside wait() is either already asleep and receives
@@ -68,7 +76,9 @@ void JobSystem::wait(JobCounter& counter) {
     }
 }
 
-void JobSystem::worker_loop() {
+void JobSystem::worker_loop(std::uint32_t index) {
+    DREAM_PROFILE_THREAD(std::format("Job worker {}", index + 1));
+
     std::unique_lock lock(m_mutex);
     while (true) {
         m_wake.wait(lock, [this] { return m_stopping || !m_queue.empty(); });

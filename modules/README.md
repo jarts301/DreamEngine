@@ -48,4 +48,5 @@ When no MIT or Apache 2.0 library does the job, a backend can build on one of th
 [libraries](../libraries/README.md), linked as `dream::library_<name>`, and stay a thin adapter.
 
 Interfaces with more than one backend can share tests. Every physics backend passes the tests in
-`physics3d/tests` or `physics2d/tests`, which its own test program includes.
+`physics3d/tests` or `physics2d/tests`, and every profiler backend those in `profiler/tests`, which
+its own test program includes.

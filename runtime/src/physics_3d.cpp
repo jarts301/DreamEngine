@@ -1,6 +1,7 @@
 #include "dream/runtime/physics_3d.h"
 
 #include "dream/core/log.h"
+#include "dream/core/profile.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/event_bus.h"
 #include "dream/runtime/scene_loader.h"
@@ -428,6 +429,7 @@ void Physics3D::step(float step_seconds) {
     if (m_backend == nullptr || m_world == nullptr || !(step_seconds > 0.0f)) {
         return;
     }
+    DREAM_PROFILE_ZONE("Physics 3D step");
     remove_stale();
     create_bodies();
     create_joints();
@@ -441,7 +443,11 @@ void Physics3D::step(float step_seconds) {
         }
     }
 
-    m_backend->step(step_seconds);
+    {
+        DREAM_PROFILE_ZONE("Physics 3D simulate");
+        m_backend->step(step_seconds);
+    }
+    DREAM_PROFILE_VALUE("Physics 3D bodies", m_bodies.size());
 
     for (const auto [entity, body, pose] : registry.view<const RigidBody3D, PhysicsPose3D>().each()) {
         if (const std::optional<BodyState> state = m_backend->body_state(body.body)) {

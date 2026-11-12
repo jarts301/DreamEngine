@@ -13,6 +13,7 @@ add_library(dream_runtime STATIC
     src/model_loader.cpp
     src/physics_2d.cpp
     src/physics_3d.cpp
+    src/profiling.cpp
     src/program.cpp
     src/renderer.cpp
     src/scene_loader.cpp
@@ -28,7 +29,7 @@ target_include_directories(dream_runtime SYSTEM PRIVATE
 target_link_libraries(dream_runtime PUBLIC
     dream::core dream::interface_platform dream::interface_rhi dream::interface_physics2d
     dream::interface_physics3d dream::interface_audio dream::interface_ui
-    dream::interface_debug_ui EnTT::EnTT)
+    dream::interface_debug_ui dream::interface_profiler EnTT::EnTT)
 dream_configure_target(dream_runtime)
 
 if(DREAM_BUILD_TESTS)
@@ -42,6 +43,7 @@ if(DREAM_BUILD_TESTS)
             tests/input_actions_test.cpp
             tests/model_loader_test.cpp
             tests/physics_test.cpp
+            tests/profiling_test.cpp
             tests/renderer_test.cpp
             tests/scene_loader_test.cpp
             tests/ui_test.cpp

@@ -1,8 +1,9 @@
 // The smallest complete game: it opens a window, reads an asset, saves a file between runs, reacts
 // to input actions and logs what the operating system does to it. It draws nothing yet, because
-// the renderer arrives in a later phase.
+// the renderer arrives in a later phase. It also marks a zone and a value for the profiler.
 
 #include "dream/core/log.h"
+#include "dream/core/profile.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/game.h"
 
@@ -36,7 +37,9 @@ public:
         const auto asset = app.files().read("assets:/hello.txt");
         m_asset = asset.has_value() ? to_text(asset.value()) : "<missing>";
 
-        // Counts how many times the game has run, to show that user files persist.
+        // Counts how many times the game has run, to show that user files persist. A zone shows how
+        // long this takes when the project lists a profiler.
+        DREAM_PROFILE_ZONE("Count runs");
         const auto previous = app.files().read("user:/run_count.txt");
         if (previous.has_value()) {
             const std::string text = to_text(previous.value());
@@ -50,6 +53,7 @@ public:
 
     void on_update(runtime::App& app, const core::FrameTime& /*time*/) override {
         ++m_frames;
+        DREAM_PROFILE_VALUE("Hello frames", m_frames);
 
         if (app.input().was_pressed("confirm")) {
             const auto pointer = app.input().pointer_position();

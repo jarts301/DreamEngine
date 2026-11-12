@@ -6,6 +6,7 @@
 #include "dream/rhi/rhi.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/game.h"
+#include "dream/runtime/profiling.h"
 
 #include <memory>
 #include <utility>
@@ -17,6 +18,14 @@ int run_program() {
         core::ModuleProject::load(core::generated_module_project());
     if (!project.has_value()) {
         DREAM_LOG_ERROR("{}", project.error().message);
+        return 1;
+    }
+
+    // Started before everything else and ended after it, so it sees every zone, including those of
+    // threads that other systems start and stop. Ending it saves the profile.
+    const core::Result<ProfilerSession> profiling = ProfilerSession::start(project.value());
+    if (!profiling.has_value()) {
+        DREAM_LOG_ERROR("{}", profiling.error().message);
         return 1;
     }
 
