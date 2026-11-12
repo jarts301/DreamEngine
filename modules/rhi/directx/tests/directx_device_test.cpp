@@ -191,7 +191,7 @@ TEST_CASE("DirectX device rejects invalid resources") {
     CHECK_FALSE(device->create_shader(ShaderStage::Vertex, {}).has_value());
     CHECK_FALSE(device->create_shader(ShaderStage::Vertex, k_constants).has_value());
     CHECK_FALSE(
-        device->create_texture(TextureDesc{.width = 2, .height = 2}, k_constants).has_value());
+        device->create_texture(TextureDesc{.width = 1, .height = 1}, k_constants).has_value());
     CHECK_FALSE(device->create_texture(TextureDesc{.width = 0, .height = 1}, {}).has_value());
 
     SUBCASE("a pipeline before any surface") {
