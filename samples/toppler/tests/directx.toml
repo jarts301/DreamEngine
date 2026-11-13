@@ -1,0 +1,25 @@
+# The same on Direct3D, which only Windows has.
+[app]
+organization = "DreamEngine"
+name = "TopplerCheck"       # Its own storage, apart from a player's saved progress.
+title = "Toppler DirectX Check"
+width = 960
+height = 540
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[rhi.directx]
+debug = true
+
+[input.actions]
+throw = ["mouse:left"]
+menu = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["directx"]
+physics3d = ["impulse"]
+audio = ["portaudio"]
+ui = ["markup"]

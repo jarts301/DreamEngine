@@ -75,6 +75,11 @@ public:
         return std::nullopt;
     }
 
+    core::Result<void> set_value(DocumentHandle document, std::string_view /*element_id*/,
+                                 std::string_view /*value*/) override {
+        return exists(document);
+    }
+
     bool handle_event(const platform::Event& /*event*/) override {
         return false;
     }

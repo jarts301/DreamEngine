@@ -88,4 +88,4 @@ jobs:
 
       - name: Package the samples as APKs
         run: cmake --build --preset ${{ matrix.preset }} --target dream_hello_game_apk dream_cube_apk dream_render_demo_apk
-          dream_physics_demo_apk dream_arcade_demo_apk
+          dream_physics_demo_apk dream_arcade_demo_apk dream_toppler_apk

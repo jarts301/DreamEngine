@@ -100,9 +100,34 @@ def make_music():
     write("music.wav", [s / peak * 0.7 for s in samples])
 
 
+def jingle(name, notes, step):
+    # A few bright notes in a row, for winning or losing a level.
+    samples = [0.0] * int((len(notes) * step + 0.6) * RATE)
+    for index, midi in enumerate(notes):
+        frequency = 440.0 * 2 ** ((midi - 69) / 12)
+        first = int(index * step * RATE)
+        for i in range(int(0.6 * RATE)):
+            t = i / RATE
+            tone = math.sin(2 * math.pi * frequency * t) + 0.3 * math.sin(4 * math.pi * frequency * t)
+            samples[first + i] += tone * envelope(t, 0.005, 0.18) * 0.35
+    write(name, samples)
+
+
+def make_win():
+    # Rising: C, E, G, then C an octave up.
+    jingle("win.wav", [72, 76, 79, 84], 0.11)
+
+
+def make_lose():
+    # Falling: G, E flat, C, in a lower register.
+    jingle("lose.wav", [67, 63, 60], 0.16)
+
+
 if __name__ == "__main__":
     OUTPUT.mkdir(parents=True, exist_ok=True)
     make_throw()
     make_hit()
     make_click()
     make_music()
+    make_win()
+    make_lose()

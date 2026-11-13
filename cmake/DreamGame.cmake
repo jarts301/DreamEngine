@@ -76,12 +76,27 @@ function(dream_add_game name)
                 "${ARG_DISPLAY_NAME}")
         endif()
     else()
+        # A target of its own that runs on every build, so a changed asset is copied even when the
+        # program itself is up to date. It names the program's folder directly, since naming the
+        # program would make each target wait for the other.
+        set(game_dir "${CMAKE_CURRENT_BINARY_DIR}/${name}")
+        get_property(multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+        if(multi_config)
+            string(APPEND game_dir "/$<CONFIG>")
+        endif()
+        set(copy_commands "")
         foreach(asset_dir IN LISTS asset_dirs)
-            add_custom_command(TARGET ${name} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_directory "${asset_dir}"
-                    "$<TARGET_FILE_DIR:${name}>/assets"
-                VERBATIM)
+            list(APPEND copy_commands COMMAND ${CMAKE_COMMAND} -E copy_directory "${asset_dir}"
+                "${game_dir}/assets")
         endforeach()
+        if(copy_commands)
+            add_custom_target(${name}_assets ${copy_commands} VERBATIM)
+            add_dependencies(${name} ${name}_assets)
+            # Compiled shaders are among the assets.
+            if(TARGET ${name}_shaders)
+                add_dependencies(${name}_assets ${name}_shaders)
+            endif()
+        endif()
     endif()
 endfunction()
 

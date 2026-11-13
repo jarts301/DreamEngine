@@ -1,0 +1,24 @@
+<rml>
+<head>
+    <title>Levels</title>
+    <link type="text/rcss" href="style.rcss"/>
+</head>
+<body class="screen">
+    <div class="panel wide">
+        <h1>Levels</h1>
+        <div class="levels">
+            <div class="cell"><button id="level1">1</button><div class="stars"><div id="star1_1" class="star"></div><div id="star1_2" class="star"></div><div id="star1_3" class="star"></div></div></div>
+            <div class="cell"><button id="level2">2</button><div class="stars"><div id="star2_1" class="star"></div><div id="star2_2" class="star"></div><div id="star2_3" class="star"></div></div></div>
+            <div class="cell"><button id="level3">3</button><div class="stars"><div id="star3_1" class="star"></div><div id="star3_2" class="star"></div><div id="star3_3" class="star"></div></div></div>
+            <div class="cell"><button id="level4">4</button><div class="stars"><div id="star4_1" class="star"></div><div id="star4_2" class="star"></div><div id="star4_3" class="star"></div></div></div>
+            <div class="cell"><button id="level5">5</button><div class="stars"><div id="star5_1" class="star"></div><div id="star5_2" class="star"></div><div id="star5_3" class="star"></div></div></div>
+            <div class="cell"><button id="level6">6</button><div class="stars"><div id="star6_1" class="star"></div><div id="star6_2" class="star"></div><div id="star6_3" class="star"></div></div></div>
+            <div class="cell"><button id="level7">7</button><div class="stars"><div id="star7_1" class="star"></div><div id="star7_2" class="star"></div><div id="star7_3" class="star"></div></div></div>
+            <div class="cell"><button id="level8">8</button><div class="stars"><div id="star8_1" class="star"></div><div id="star8_2" class="star"></div><div id="star8_3" class="star"></div></div></div>
+            <div class="cell"><button id="level9">9</button><div class="stars"><div id="star9_1" class="star"></div><div id="star9_2" class="star"></div><div id="star9_3" class="star"></div></div></div>
+            <div class="cell"><button id="level10">10</button><div class="stars"><div id="star10_1" class="star"></div><div id="star10_2" class="star"></div><div id="star10_3" class="star"></div></div></div>
+        </div>
+        <button id="back">Back</button>
+    </div>
+</body>
+</rml>

@@ -1,0 +1,221 @@
+/* Toppler's screens. RmlUi starts with no styles at all, so even block layout is declared here, and
+   only what both interface backends support is used. Sizes use dp, which the engine scales with the
+   screen's density. */
+
+body {
+    width: 100%;
+    height: 100%;
+    font-family: LatoLatin;
+    font-size: 18dp;
+    color: #ffffff;
+}
+
+div, h1, h2, p {
+    display: block;
+}
+
+h1 {
+    font-size: 30dp;
+    font-weight: bold;
+    margin-bottom: 14dp;
+    text-align: center;
+}
+
+p {
+    margin: 8dp 0dp;
+    text-align: center;
+}
+
+button {
+    display: block;
+    padding: 10dp 18dp;
+    margin: 6dp 0dp;
+    background-color: #2d4f7ccc;
+    border-radius: 8dp;
+    text-align: center;
+    font-weight: bold;
+}
+
+button:hover {
+    background-color: #4874b0e6;
+}
+
+button:active {
+    background-color: #6a9be0;
+}
+
+.hidden {
+    display: none;
+}
+
+/* A dark panel in the middle of the screen. */
+
+body.screen {
+    background-color: #00000088;
+}
+
+.panel {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 300dp;
+    margin-left: -170dp;
+    margin-top: -190dp;
+    padding: 20dp;
+    background-color: #1b2333ee;
+    border-radius: 12dp;
+}
+
+/* The title screen. */
+
+.title {
+    font-size: 54dp;
+    color: #ffd75e;
+    margin-bottom: 4dp;
+}
+
+.tagline {
+    margin-bottom: 18dp;
+    color: #ffffffcc;
+}
+
+/* The level select: two rows of five, each level a button with its stars under it. */
+
+.wide {
+    width: 340dp;
+    margin-left: -190dp;
+}
+
+.levels {
+    margin: 4dp 0dp 10dp 0dp;
+    height: 150dp;
+}
+
+/* Five cells fit in the panel on an upright phone, about 410dp wide. */
+.cell {
+    display: inline-block;
+    width: 62dp;
+    height: 72dp;
+    margin-left: 6dp;
+}
+
+.cell button {
+    margin: 0dp;
+    padding: 8dp 0dp;
+    width: 58dp;
+    font-size: 20dp;
+}
+
+.cell button.locked {
+    background-color: #ffffff22;
+    color: #ffffff55;
+}
+
+.stars {
+    margin-top: 4dp;
+    margin-left: 8dp;
+    height: 14dp;
+}
+
+.star {
+    display: inline-block;
+    width: 11dp;
+    height: 11dp;
+    margin-right: 3dp;
+    border-radius: 5dp;
+    background-color: #ffffff33;
+}
+
+.star.on {
+    background-color: #ffd75e;
+}
+
+/* The heads-up display. */
+
+.box {
+    position: absolute;
+    top: 16dp;
+    padding: 8dp 14dp;
+    background-color: #00000080;
+    border-radius: 8dp;
+    font-size: 20dp;
+}
+
+#level_box {
+    left: 16dp;
+}
+
+/* Under the level's name, so the three fit across an upright phone too. */
+#count_box {
+    left: 16dp;
+    top: 66dp;
+}
+
+.number {
+    font-weight: bold;
+    color: #ffd75e;
+}
+
+#hint {
+    position: absolute;
+    left: 16dp;
+    bottom: 16dp;
+    color: #ffffffcc;
+}
+
+#menu {
+    position: absolute;
+    right: 16dp;
+    top: 16dp;
+    margin: 0dp;
+}
+
+/* The pause menu's volume sliders. */
+
+.row {
+    margin: 10dp 0dp;
+    height: 30dp;
+}
+
+.row label {
+    display: inline-block;
+    width: 90dp;
+}
+
+input.range {
+    display: inline-block;
+    width: 190dp;
+    height: 24dp;
+}
+
+input.range slidertrack {
+    margin-top: 10dp;
+    height: 4dp;
+    background-color: #ffffff55;
+}
+
+input.range sliderbar {
+    width: 18dp;
+    height: 24dp;
+    background-color: #ffd75e;
+    border-radius: 9dp;
+}
+
+input.range sliderarrowdec, input.range sliderarrowinc {
+    width: 0dp;
+    height: 0dp;
+}
+
+/* The result: three big stars. */
+
+.result_stars {
+    margin: 6dp 0dp 14dp 78dp;
+    height: 34dp;
+}
+
+.result_stars .star {
+    width: 30dp;
+    height: 30dp;
+    margin-right: 12dp;
+    border-radius: 15dp;
+}

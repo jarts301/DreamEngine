@@ -19,7 +19,6 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <deque>
@@ -49,35 +48,6 @@ core::Result<void> read_target(runtime::ComponentContext& context) {
     }
     context.world.registry().emplace<Target>(context.entity);
     return {};
-}
-
-struct Ray {
-    Vec3 origin;
-    Vec3 direction;
-};
-
-// The ray from the world's camera through a pixel.
-std::optional<Ray> pointer_ray(const runtime::World& world, platform::SurfaceSize size, float x,
-                               float y) {
-    const runtime::Registry& registry = world.registry();
-    const runtime::Entity entity = registry.view<const runtime::Camera>().front();
-    if (entity == runtime::k_no_entity || size.width == 0 || size.height == 0) {
-        return std::nullopt;
-    }
-    const runtime::Camera& camera = registry.get<const runtime::Camera>(entity);
-    const Vec3 eye = registry.get<const runtime::Transform>(entity).position;
-    const Vec3 forward = core::normalized(camera.target.value_or(eye - Vec3{0.0f, 0.0f, 1.0f}) - eye);
-    const Vec3 right = core::normalized(core::cross(forward, Vec3{0.0f, 1.0f, 0.0f}));
-    const Vec3 up = core::cross(right, forward);
-
-    const float aspect = static_cast<float>(size.width) / static_cast<float>(size.height);
-    const float fov =
-        runtime::fitted_vertical_fov(core::radians(camera.vertical_fov_degrees), aspect);
-    const float half_height = std::tan(fov * 0.5f);
-    const float ndc_x = 2.0f * x / static_cast<float>(size.width) - 1.0f;
-    const float ndc_y = 1.0f - 2.0f * y / static_cast<float>(size.height);
-    return Ray{eye, core::normalized(forward + right * (ndc_x * half_height * aspect) +
-                                     up * (ndc_y * half_height))};
 }
 
 float parse_volume(const std::string& text, float fallback) {
@@ -320,7 +290,7 @@ private:
     }
 
     void throw_ball(platform::SurfaceSize size, float x, float y) {
-        const std::optional<Ray> ray = pointer_ray(*m_world, size, x, y);
+        const std::optional<runtime::CameraRay> ray = runtime::camera_ray(*m_world, size, {x, y});
         if (!ray.has_value()) {
             return;
         }

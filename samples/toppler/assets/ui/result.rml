@@ -1,0 +1,18 @@
+<rml>
+<head>
+    <title>Result</title>
+    <link type="text/rcss" href="style.rcss"/>
+</head>
+<body class="screen">
+    <div class="panel">
+        <h1 id="result_title">Cleared</h1>
+        <div class="result_stars">
+            <div id="result_star1" class="star"></div><div id="result_star2" class="star"></div><div id="result_star3" class="star"></div>
+        </div>
+        <p id="result_detail"></p>
+        <button id="next">Next level</button>
+        <button id="retry">Try again</button>
+        <button id="levels">Levels</button>
+    </div>
+</body>
+</rml>

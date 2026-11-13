@@ -1,0 +1,39 @@
+# Plays every level on the real GPU and sound hardware. Not a CTest, as build servers have neither.
+[app]
+organization = "DreamEngine"
+name = "TopplerCheck"       # Its own storage, apart from a player's saved progress.
+title = "Toppler Vulkan Check"
+width = 960
+height = 540
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[rhi.vulkan]
+validation = true
+
+[input.actions]
+throw = ["mouse:left"]
+menu = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["vulkan"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["vulkan"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["vulkan"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]

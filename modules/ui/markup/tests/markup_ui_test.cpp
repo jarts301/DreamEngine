@@ -137,6 +137,19 @@ TEST_CASE_FIXTURE(Fixture, "markup reports clicks and changes by element id") {
     CHECK(ui->events().empty());
 }
 
+TEST_CASE_FIXTURE(Fixture, "markup sets values without reporting a change") {
+    ui->show(menu);
+    frame();
+    CHECK(ui->set_value(menu, "volume", "0.8").has_value());
+    CHECK(ui->set_value(menu, "name", "Bea").has_value());
+    CHECK_FALSE(ui->set_value(menu, "missing", "1").has_value());
+    frame();
+    frame();
+    CHECK(ui->events().empty());
+    CHECK(std::stof(ui->value(menu, "volume").value()) == doctest::Approx(0.8f));
+    CHECK(ui->value(menu, "name") == "Bea");
+}
+
 TEST_CASE_FIXTURE(Fixture, "markup changes text, classes and reads values") {
     ui->show(menu);
     CHECK(ui->set_text(menu, "score", "42 <points>").has_value());

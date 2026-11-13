@@ -55,10 +55,24 @@ To check the Vulkan backend with the Khronos validation layers, configure with
 The DirectX backend is Direct3D 11 and needs nothing installed. Debug builds turn its debug layer on
 when Windows' "Graphics Tools" feature is present, and the messages appear in the engine log.
 
+## Play Toppler
+
+Toppler is a small physics puzzle built on the engine: knock every gold crate down within each
+level's throws, by tapping or clicking where a ball should land. Escape, or Back on Android, pauses.
+After building, run it on Windows:
+
+```bash
+build/windows-debug/samples/toppler/dream_toppler/dream_toppler.exe
+```
+
+On Android, its APK target is `dream_toppler_apk`. Its levels are scene files in
+`samples/toppler/assets/levels/`, and its progress is saved in the engine's user storage. See
+[ADR 0020](docs/adr/0020-first-game.md).
+
 ## Android APK
 
-The targets are `dream_cube_apk` and `dream_hello_game_apk`. Build a game's APK, then install it on
-a phone connected by USB with debugging enabled:
+The targets are `dream_cube_apk`, `dream_hello_game_apk` and `dream_toppler_apk`, among others.
+Build a game's APK, then install it on a phone connected by USB with debugging enabled:
 
 ```bash
 cmake --build --preset android-arm64-debug --target dream_hello_game_apk

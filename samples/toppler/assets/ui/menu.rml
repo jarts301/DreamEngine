@@ -1,0 +1,20 @@
+<rml>
+<head>
+    <title>Menu</title>
+    <link type="text/rcss" href="style.rcss"/>
+</head>
+<body class="screen">
+    <div class="panel">
+        <h1>Paused</h1>
+        <button id="resume">Resume</button>
+        <button id="restart">Restart level</button>
+        <button id="levels">Levels</button>
+        <div class="row">
+            <label>Music</label><input id="music" type="range" min="0" max="1" step="0.05" value="0.6"/>
+        </div>
+        <div class="row">
+            <label>Effects</label><input id="effects" type="range" min="0" max="1" step="0.05" value="1"/>
+        </div>
+    </div>
+</body>
+</rml>

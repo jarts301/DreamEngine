@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <ostream> // Needed for doctest to print std::string.
 #include <string>
 #include <vector>
@@ -122,6 +123,43 @@ TEST_CASE("fitted_vertical_fov leaves landscape alone and widens portrait") {
     const float fitted = fitted_vertical_fov(fov, aspect);
     CHECK(fitted > fov);
     CHECK(std::tan(fitted * 0.5f) * aspect == Approx(std::tan(fov * 0.5f)));
+}
+
+TEST_CASE("camera_ray goes from the eye through the pixel, as the camera draws it") {
+    World world;
+    const platform::SurfaceSize size{800, 600};
+    CHECK_FALSE(camera_ray(world, size, {400.0f, 300.0f}).has_value());
+
+    const Entity entity = add_camera(world);
+    world.registry().get<Transform>(entity).position = Vec3{0.0f, 2.0f, 10.0f};
+    world.registry().get<Camera>(entity).target = Vec3{0.0f, 2.0f, 0.0f};
+    world.update_transforms();
+    CHECK_FALSE(camera_ray(world, platform::SurfaceSize{0, 0}, {0.0f, 0.0f}).has_value());
+
+    const std::optional<CameraRay> middle = camera_ray(world, size, {400.0f, 300.0f});
+    REQUIRE(middle.has_value());
+    CHECK(middle->origin.y == Approx(2.0f));
+    CHECK(middle->origin.z == Approx(10.0f));
+    CHECK(middle->direction.x == Approx(0.0f).epsilon(1e-4));
+    CHECK(middle->direction.y == Approx(0.0f).epsilon(1e-4));
+    CHECK(middle->direction.z == Approx(-1.0f));
+
+    // The top edge is half the vertical field of view up, and the right edge is to the right.
+    const std::optional<CameraRay> top = camera_ray(world, size, {400.0f, 0.0f});
+    REQUIRE(top.has_value());
+    const float half_fov = core::radians(world.registry().get<Camera>(entity).vertical_fov_degrees) *
+                           0.5f;
+    CHECK(std::atan2(top->direction.y, -top->direction.z) == Approx(half_fov));
+    const std::optional<CameraRay> right = camera_ray(world, size, {800.0f, 300.0f});
+    REQUIRE(right.has_value());
+    CHECK(right->direction.x > 0.5f);
+    CHECK(core::length(right->direction) == Approx(1.0f));
+
+    // Without a target, it looks along its own -Z.
+    world.registry().get<Camera>(entity).target.reset();
+    const std::optional<CameraRay> ahead = camera_ray(world, size, {400.0f, 300.0f});
+    REQUIRE(ahead.has_value());
+    CHECK(ahead->direction.z == Approx(-1.0f));
 }
 
 TEST_CASE_FIXTURE(RenderFixture, "Renderer only clears the screen without a camera") {

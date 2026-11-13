@@ -1,0 +1,38 @@
+# Plays every level with no graphics device or sound hardware, as CTest does.
+[app]
+organization = "DreamEngine"
+name = "TopplerCheck"       # Its own storage, apart from a player's saved progress.
+title = "Toppler Check"
+max_fps = 120
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[audio.miniaudio]
+device = false
+
+[input.actions]
+throw = ["mouse:left"]
+menu = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]

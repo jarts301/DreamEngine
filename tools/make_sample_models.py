@@ -148,33 +148,44 @@ def checker_pixel(x, y):
     return (168, 178, 160) if light else (92, 104, 88)
 
 
-def make_crate():
-    faces = [
-        ((1, 0, 0), (0, 0, -1), (0, 1, 0)),
-        ((-1, 0, 0), (0, 0, 1), (0, 1, 0)),
-        ((0, 1, 0), (1, 0, 0), (0, 0, -1)),
-        ((0, -1, 0), (1, 0, 0), (0, 0, 1)),
-        ((0, 0, 1), (1, 0, 0), (0, 1, 0)),
-        ((0, 0, -1), (-1, 0, 0), (0, 1, 0)),
-    ]
+CUBE_FACES = [
+    ((1, 0, 0), (0, 0, -1), (0, 1, 0)),
+    ((-1, 0, 0), (0, 0, 1), (0, 1, 0)),
+    ((0, 1, 0), (1, 0, 0), (0, 0, -1)),
+    ((0, -1, 0), (1, 0, 0), (0, 0, 1)),
+    ((0, 0, 1), (1, 0, 0), (0, 1, 0)),
+    ((0, 0, -1), (-1, 0, 0), (0, 1, 0)),
+]
+
+
+def block_pixel(x, y):
+    """White with a slightly darker rim, so a tinted block keeps its edges."""
+    edge = min(x, y, 63 - x, 63 - y)
+    shade = 255 if edge >= 5 else 200
+    return (shade, shade, shade)
+
+
+def cube(path, image):
+    """A cube 2 m across, with the image on each face."""
     corners = [(-1, -1, (0, 1)), (1, -1, (1, 1)), (1, 1, (1, 0)), (-1, 1, (0, 0))]
     positions, normals, uvs, indices = [], [], [], []
-    for normal, u, v in faces:
+    for normal, u, v in CUBE_FACES:
         first = len(positions)
         for su, sv, uv in corners:
             positions.append(tuple(normal[i] + su * u[i] + sv * v[i] for i in range(3)))
             normals.append(normal)
             uvs.append(uv)
         indices += [first, first + 1, first + 2, first, first + 2, first + 3]
-    write_glb(
-        OUTPUT / "crate.glb",
-        positions,
-        normals,
-        uvs,
-        indices,
-        (1, 1, 1, 1),
-        png_bytes(64, 64, wood_pixel),
-    )
+    write_glb(path, positions, normals, uvs, indices, (1, 1, 1, 1), image)
+
+
+def make_block():
+    # Nearly white, so scenes can give each block any color with a tint.
+    cube(OUTPUT / "block.glb", png_bytes(64, 64, block_pixel))
+
+
+def make_crate():
+    cube(OUTPUT / "crate.glb", png_bytes(64, 64, wood_pixel))
 
 
 def make_ground():
@@ -215,5 +226,6 @@ def make_ball():
 if __name__ == "__main__":
     OUTPUT.mkdir(parents=True, exist_ok=True)
     make_crate()
+    make_block()
     make_ground()
     make_ball()

@@ -1,0 +1,14 @@
+<rml>
+<head>
+    <title>Title</title>
+    <link type="text/rcss" href="style.rcss"/>
+</head>
+<body class="screen">
+    <div class="panel">
+        <h1 class="title">Toppler</h1>
+        <p class="tagline">Knock every gold crate down.</p>
+        <button id="play">Play</button>
+        <button id="quit">Quit</button>
+    </div>
+</body>
+</rml>

@@ -1,0 +1,12 @@
+<rml>
+<head>
+    <title>HUD</title>
+    <link type="text/rcss" href="style.rcss"/>
+</head>
+<body>
+    <div id="level_box" class="box"><span id="level_name">Level</span></div>
+    <div id="count_box" class="box">Gold <span id="targets" class="number">0</span>   Throws <span id="throws" class="number">0</span></div>
+    <div id="hint">Tap a crate to throw at it</div>
+    <button id="menu">Menu</button>
+</body>
+</rml>

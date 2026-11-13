@@ -73,6 +73,12 @@ public:
     [[nodiscard]] virtual std::optional<std::string> value(DocumentHandle document,
                                                            std::string_view element_id) const = 0;
 
+    // Sets a form control's value, such as a slider's, to show a saved setting. No Change event
+    // follows, since the player didn't change it. Fails if there is no such element.
+    [[nodiscard]] virtual core::Result<void> set_value(DocumentHandle document,
+                                                       std::string_view element_id,
+                                                       std::string_view value) = 0;
+
     // Returns true if the interface used the event, so the game can ignore it.
     virtual bool handle_event(const platform::Event& event) = 0;
 

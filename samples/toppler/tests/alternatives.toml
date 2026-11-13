@@ -1,0 +1,24 @@
+# The same with the other physics, audio and interface backends. Only the outcome matters.
+[app]
+organization = "DreamEngine"
+name = "TopplerCheck"       # Its own storage, apart from a player's saved progress.
+title = "Toppler Check"
+max_fps = 120
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[audio.portaudio]
+device = false
+
+[input.actions]
+throw = ["mouse:left"]
+menu = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["null"]
+physics3d = ["impulse"]
+audio = ["portaudio"]
+ui = ["markup"]

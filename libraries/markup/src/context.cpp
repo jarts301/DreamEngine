@@ -625,6 +625,41 @@ std::optional<std::string> Context::value(DocumentId id, std::string_view elemen
     }
 }
 
+bool Context::set_value(DocumentId id, std::string_view element_id, std::string_view value) {
+    Document* const document = m_impl->find(id);
+    Element* const element = document != nullptr ? find_id(*document->body, element_id) : nullptr;
+    if (element == nullptr) {
+        m_impl->error = "No element with id '" + std::string(element_id) + "'";
+        return false;
+    }
+    switch (control_of(*element)) {
+    case Control::Checkbox:
+    case Control::Radio:
+        element->checked = !value.empty();
+        break;
+    case Control::Range: {
+        const float low = number(element->attribute("min", "0"), 0.0f);
+        const float high = number(element->attribute("max", "100"), 100.0f);
+        const float step = number(element->attribute("step", "1"), 1.0f);
+        float number_value = number(std::string(value), low);
+        if (step > 0.0f) {
+            number_value = low + std::round((number_value - low) / step) * step;
+        }
+        element->value =
+            format_number(std::clamp(number_value, std::min(low, high), std::max(low, high)));
+        break;
+    }
+    case Control::Text:
+    case Control::Password:
+        element->value = value;
+        break;
+    default:
+        element->attributes["value"] = std::string(value);
+        break;
+    }
+    return true;
+}
+
 bool Context::pointer_moved(float x, float y) {
     Impl& impl = *m_impl;
     impl.pointer_x = x;

@@ -151,6 +151,9 @@ public:
     std::optional<std::string> value(ui::DocumentHandle, std::string_view) const override {
         return std::nullopt;
     }
+    core::Result<void> set_value(ui::DocumentHandle, std::string_view, std::string_view) override {
+        return {};
+    }
     bool handle_event(const platform::Event& event) override {
         ++events_seen;
         if (const auto* moved = std::get_if<platform::PointerMoved>(&event)) {

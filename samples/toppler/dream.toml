@@ -1,0 +1,31 @@
+[app]
+organization = "DreamEngine"
+name = "Toppler"
+title = "Toppler"
+width = 1280
+height = 720
+
+[input.actions]
+throw = ["mouse:left", "touch"]
+menu = ["key:escape", "key:back"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["vulkan", "directx", "null"]
+physics3d = ["jolt", "impulse"]
+audio = ["miniaudio", "portaudio", "null"]
+ui = ["rmlui", "markup"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+physics3d = ["jolt", "impulse"]
+audio = ["miniaudio", "null"]
+ui = ["rmlui", "markup"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]
+physics3d = ["jolt", "impulse"]
+audio = ["miniaudio", "null"]
+ui = ["rmlui", "markup"]

@@ -50,6 +50,26 @@ struct DirectionalLight {
 // portrait screen this widens the view, so a scene framed for landscape isn't cropped at the sides.
 [[nodiscard]] float fitted_vertical_fov(float vertical_fov_radians, float aspect) noexcept;
 
+// How the world's first camera sees it on a surface of `size`, as Renderer::render draws it.
+struct CameraView {
+    core::Mat4 view_projection;
+    core::Vec3 eye;
+};
+
+// Nothing without a camera, or before the camera has a WorldTransform, or for an empty surface.
+[[nodiscard]] std::optional<CameraView> camera_view(const World& world, platform::SurfaceSize size);
+
+// A line from the camera's eye out through a pixel. `direction` has length 1.
+struct CameraRay {
+    core::Vec3 origin;
+    core::Vec3 direction;
+};
+
+// The ray through `pixel`, in pixels from the surface's top left, such as the pointer's position.
+// Pass it to Physics3D::cast_ray to find what the player pointed at.
+[[nodiscard]] std::optional<CameraRay> camera_ray(const World& world, platform::SurfaceSize size,
+                                                  core::Vec2 pixel);
+
 // Draws a World: opaque models, one directional light and a camera. Games call render from
 // Game::on_render, between nothing else: it starts and ends the render pass itself.
 //

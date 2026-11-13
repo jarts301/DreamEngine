@@ -163,6 +163,12 @@ public:
     [[nodiscard]] std::optional<std::string> value(DocumentId document,
                                                    std::string_view element_id) const;
 
+    // Sets a form control's value, or another element's value attribute, without a Change event.
+    // A slider's is kept to its range and step, and a check box is checked by any value but "".
+    // False if there is no such element.
+    [[nodiscard]] bool set_value(DocumentId document, std::string_view element_id,
+                                 std::string_view value);
+
     // Input. Each returns true if the interface used it.
     bool pointer_moved(float x, float y);
     bool pointer_button(Button button, bool pressed);

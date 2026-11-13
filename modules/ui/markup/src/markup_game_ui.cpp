@@ -161,6 +161,14 @@ public:
         return m_context->value(to_markup(document), element_id);
     }
 
+    core::Result<void> set_value(DocumentHandle document, std::string_view element_id,
+                                 std::string_view value) override {
+        if (!m_context->set_value(to_markup(document), element_id, value)) {
+            return core::Error{core::ErrorCode::NotFound, m_context->last_error()};
+        }
+        return {};
+    }
+
     bool handle_event(const platform::Event& event) override {
         if (m_context == nullptr) {
             return false;

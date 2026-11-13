@@ -407,6 +407,22 @@ public:
         return element->GetAttribute<Rml::String>("value", "");
     }
 
+    core::Result<void> set_value(DocumentHandle document, std::string_view element_id,
+                                 std::string_view value) override {
+        Rml::Element* const element = find_element(document, element_id);
+        if (element == nullptr) {
+            return missing(element_id);
+        }
+        // RmlUi announces the change, now or in the next update, as if the player made it.
+        m_quiet_changes.push_back(element);
+        if (auto* const control = rmlui_dynamic_cast<Rml::ElementFormControl*>(element)) {
+            control->SetValue(std::string(value));
+        } else {
+            element->SetAttribute("value", std::string(value));
+        }
+        return {};
+    }
+
     bool handle_event(const platform::Event& event) override {
         if (m_context == nullptr) {
             return false;
@@ -459,6 +475,7 @@ public:
                                                static_cast<int>(frame.size.height)));
         m_context->SetDensityIndependentPixelRatio(std::clamp(frame.display_scale, 0.5f, 6.0f));
         m_context->Update();
+        m_quiet_changes.clear();
     }
 
     std::span<const UiEvent> events() const override {
@@ -529,6 +546,10 @@ private:
             result.kind = UiEvent::Kind::Click;
             break;
         case Rml::EventId::Change:
+            if (std::ranges::find(m_quiet_changes, event.GetTargetElement()) !=
+                m_quiet_changes.end()) {
+                return;
+            }
             result.kind = UiEvent::Kind::Change;
             result.value = event.GetParameter<Rml::String>("value", "");
             break;
@@ -573,6 +594,8 @@ private:
     std::unordered_map<Rml::ElementDocument*, DocumentHandle> m_by_element;
     std::vector<UiEvent> m_pending;
     std::vector<UiEvent> m_events;
+    // Controls set_value changed, whose Change events are the game's own.
+    std::vector<Rml::Element*> m_quiet_changes;
     int m_modifiers = 0;
     bool m_initialised = false;
     bool m_has_font = false;

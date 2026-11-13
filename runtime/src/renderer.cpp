@@ -310,6 +310,52 @@ float fitted_vertical_fov(float vertical_fov_radians, float aspect) noexcept {
     return 2.0f * std::atan(std::tan(vertical_fov_radians * 0.5f) / aspect);
 }
 
+std::optional<CameraView> camera_view(const World& world, platform::SurfaceSize size) {
+    const Registry& registry = world.registry();
+    const auto cameras = registry.view<const Camera, const WorldTransform>();
+    const Entity camera_entity = cameras.front();
+    if (camera_entity == k_no_entity || size.width == 0 || size.height == 0) {
+        return std::nullopt;
+    }
+    const Camera& camera = cameras.get<const Camera>(camera_entity);
+    const Mat4& camera_world = cameras.get<const WorldTransform>(camera_entity).matrix;
+    const Vec3 eye = core::transform_point(camera_world, Vec3{});
+
+    Mat4 view;
+    if (camera.target.has_value()) {
+        view = core::look_at(eye, *camera.target, Vec3{0.0f, 1.0f, 0.0f});
+    } else if (const std::optional<Mat4> inverted = core::inverse(camera_world)) {
+        view = *inverted;
+    }
+
+    const float aspect = static_cast<float>(size.width) / static_cast<float>(size.height);
+    const float fov = fitted_vertical_fov(core::radians(camera.vertical_fov_degrees), aspect);
+    const Mat4 projection = core::perspective(fov, aspect, camera.z_near, camera.z_far);
+    return CameraView{.view_projection = projection * view, .eye = eye};
+}
+
+std::optional<CameraRay> camera_ray(const World& world, platform::SurfaceSize size,
+                                    core::Vec2 pixel) {
+    const std::optional<CameraView> camera = camera_view(world, size);
+    if (!camera.has_value()) {
+        return std::nullopt;
+    }
+    const std::optional<Mat4> clip_to_world = core::inverse(camera->view_projection);
+    if (!clip_to_world.has_value()) {
+        return std::nullopt;
+    }
+    // Two points under the pixel, at the near plane and halfway into the depth range, which differ
+    // only in distance from the eye.
+    const float x = 2.0f * pixel.x / static_cast<float>(size.width) - 1.0f;
+    const float y = 1.0f - 2.0f * pixel.y / static_cast<float>(size.height);
+    const auto unproject = [&](float depth) {
+        const Vec4 point = *clip_to_world * Vec4{x, y, depth, 1.0f};
+        return Vec3{point.x, point.y, point.z} * (1.0f / point.w);
+    };
+    const Vec3 direction = core::normalized(unproject(0.5f) - unproject(0.0f));
+    return CameraRay{.origin = camera->eye, .direction = direction};
+}
+
 core::Result<void> Renderer::initialize(App& app) {
     rhi::Device* const device = app.device();
     if (device == nullptr) {
@@ -463,28 +509,12 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
     commands.begin_render_pass(clear_color);
 
     const Registry& registry = world.registry();
-    const auto cameras = registry.view<const Camera, const WorldTransform>();
-    const Entity camera_entity = cameras.front();
+    const std::optional<CameraView> camera = camera_view(world, size);
 
-    if (camera_entity != k_no_entity && size.width > 0 && size.height > 0 && m_pipeline.has_value()) {
-        const Camera& camera = cameras.get<const Camera>(camera_entity);
-        const Mat4& camera_world = cameras.get<const WorldTransform>(camera_entity).matrix;
-        const Vec3 eye = core::transform_point(camera_world, Vec3{});
-
-        Mat4 view;
-        if (camera.target.has_value()) {
-            view = core::look_at(eye, *camera.target, Vec3{0.0f, 1.0f, 0.0f});
-        } else if (const std::optional<Mat4> inverted = core::inverse(camera_world)) {
-            view = *inverted;
-        }
-
-        const float aspect = static_cast<float>(size.width) / static_cast<float>(size.height);
-        const float fov = fitted_vertical_fov(core::radians(camera.vertical_fov_degrees), aspect);
-        const Mat4 projection = core::perspective(fov, aspect, camera.z_near, camera.z_far);
-
+    if (camera.has_value() && m_pipeline.has_value()) {
         FrameUniforms uniforms{
-            .view_projection = projection * view,
-            .camera_position = extend(eye, 1.0f),
+            .view_projection = camera->view_projection,
+            .camera_position = extend(camera->eye, 1.0f),
             .direction_to_light = Vec4{0.0f, 1.0f, 0.0f, 0.0f},
             .light_color_and_ambient = Vec4{0.0f, 0.0f, 0.0f, 0.2f},
         };
