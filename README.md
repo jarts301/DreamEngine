@@ -91,18 +91,19 @@ program with them, call `dream_link_modules(<target> CONFIG <file>)` in CMake an
 `core::ModuleProject::load` at startup. See [ADR 0006](docs/adr/0006-module-system.md).
 
 Graphics, physics, audio and the game interface each have two real backends, switched by
-editing a list:
+editing a list. Each one below runs the arcade sample to the same result on the platforms marked,
+checked on a PC and a phone as described in [Backends](docs/reports/backends.md):
 
-| Interface | Backends | Notes |
-|---|---|---|
-| `rhi` | `vulkan`, `directx`, `null` | `directx` is Windows only. A game's shaders are compiled for whichever its list names. |
-| `physics3d` | `jolt`, `impulse`, `null` | `impulse` is the engine's own library. |
-| `physics2d` | `box2d`, `chipmunk`, `null` | `chipmunk` is PC only, and has no continuous collision. |
-| `audio` | `miniaudio`, `portaudio`, `null` | `portaudio` is PC only. |
-| `ui` | `rmlui`, `markup`, `null` | Both read the same RML and RCSS files. `markup` is the engine's own library. |
-| `debug_ui` | `imgui`, `null` | |
-| `platform` | `sdl3`, `null` | |
-| `profiler` | `timeline`, `null` | PC only for now. `timeline` saves a trace to open in Perfetto; see [Profiling](#profiling). |
+| Interface | Backends | Windows | Android | Notes |
+|---|---|---|---|---|
+| `rhi` | `vulkan`, `directx`, `null` | all | `vulkan`, `null` | A game's shaders are compiled for whichever its list names. |
+| `physics3d` | `jolt`, `impulse`, `null` | all | all | `impulse` is the engine's own library. |
+| `physics2d` | `box2d`, `chipmunk`, `null` | all | all | `chipmunk` has no continuous collision. |
+| `audio` | `miniaudio`, `portaudio`, `null` | all | `miniaudio`, `null` | PortAudio has no Android output. |
+| `ui` | `rmlui`, `markup`, `null` | all | all | Both read the same RML and RCSS files. `markup` is the engine's own library. |
+| `debug_ui` | `imgui`, `null` | all | all | |
+| `platform` | `sdl3`, `null` | all | all | |
+| `profiler` | `timeline`, `null` | all | all | `timeline` saves a trace to open in Perfetto; see [Profiling](#profiling). |
 
 ```toml
 [modules.windows]
@@ -126,7 +127,7 @@ at [ui.perfetto.dev](https://ui.perfetto.dev) or in Chrome's `chrome://tracing`:
 profiler = ["timeline"]
 
 [profiler.timeline]
-path = "trace.json"   # Relative to the folder the game is started from.
+path = "trace.json"   # Relative to the starting folder; on Android, the app's files folder.
 start_frame = 0       # Frames to skip before recording, such as while loading.
 frames = 0            # How many frames to record. 0 means until the end.
 ```

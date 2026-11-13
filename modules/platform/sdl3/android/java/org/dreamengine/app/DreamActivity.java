@@ -15,4 +15,14 @@ public class DreamActivity extends SDLActivity {
     protected String getMainFunction() {
         return "dream_android_main";
     }
+
+    /**
+     * The app's private files folder, which the game makes its working directory, since the one
+     * Android starts it in can't be written. Files written to relative paths, such as profiles,
+     * land there.
+     */
+    @Override
+    protected String[] getArguments() {
+        return new String[] {getFilesDir().getAbsolutePath()};
+    }
 }

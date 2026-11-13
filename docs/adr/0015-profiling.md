@@ -117,5 +117,6 @@ one whole. `Begin GPU frame` is where the CPU waits for the GPU or the display.
 - Only CPU time is measured. GPU timing would need timestamp queries in the graphics interface.
 - Work inside third-party libraries, such as Jolt's worker threads, shows only as the runtime's
   zone around it.
-- Android is not covered yet. The `timeline` backend writes to an ordinary path, which Android would
-  need to point at the app's storage, and no Android module list includes a profiler.
+- Android was not covered at first. Since Phase 10, the game's working directory there is the
+  app's files folder, so `timeline` saves its trace there, but no Android module list includes a
+  profiler by default. Heap counting is still left out of Android builds.

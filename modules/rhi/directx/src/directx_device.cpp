@@ -163,6 +163,7 @@ public:
     DirectXDevice& operator=(const DirectXDevice&) = delete;
 
     ~DirectXDevice() override {
+        warn_about_leftovers();
         if (m_context) {
             m_context->ClearState();
             m_context->Flush();
@@ -944,6 +945,17 @@ private:
             return directx_error("Resizing the window's buffers", result);
         }
         return create_targets();
+    }
+
+    // Objects still alive when the device closes were never destroyed, which over a long session
+    // or repeated loads is a leak. Their COM references release them afterwards.
+    void warn_about_leftovers() const {
+        if (m_textures.size() + m_buffers.size() + m_shaders.size() + m_pipelines.size() > 0) {
+            DREAM_LOG_WARNING("The graphics device closed with objects the game never destroyed: "
+                              "{} textures, {} buffers, {} shaders and {} pipelines",
+                              m_textures.size(), m_buffers.size(), m_shaders.size(),
+                              m_pipelines.size());
+        }
     }
 
     // Forwards what the debug layer has to say, since it has no callback of its own.

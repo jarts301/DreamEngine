@@ -6,10 +6,7 @@
   "dependencies": [
     "box2d",
     "cgltf",
-    {
-      "name": "chipmunk",
-      "platform": "!android"
-    },
+    "chipmunk",
     "doctest",
     "drlibs",
     "entt",

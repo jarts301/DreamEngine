@@ -148,8 +148,26 @@ public:
     VulkanDevice& operator=(const VulkanDevice&) = delete;
 
     ~VulkanDevice() override {
+        warn_about_leftovers();
         if (m_device != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(m_device);
+            // Whatever the game left is freed here, so the allocator and device close cleanly.
+            m_pipelines.for_each([this](core::Handle<PipelineResource> /*handle*/,
+                                        const PipelineResource& pipeline) {
+                vkDestroyPipeline(m_device, pipeline.pipeline, nullptr);
+            });
+            m_shaders.for_each(
+                [this](core::Handle<ShaderResource> /*handle*/, const ShaderResource& shader) {
+                    vkDestroyShaderModule(m_device, shader.module, nullptr);
+                });
+            m_textures.for_each(
+                [this](core::Handle<TextureResource> /*handle*/, const TextureResource& texture) {
+                    destroy_texture_resource(texture);
+                });
+            m_buffers.for_each(
+                [this](core::Handle<BufferResource> /*handle*/, const BufferResource& buffer) {
+                    vmaDestroyBuffer(m_allocator, buffer.buffer, buffer.allocation);
+                });
             detach_surface();
             for (FrameResources& frame : m_frames) {
                 vkDestroyCommandPool(m_device, frame.pool, nullptr);
@@ -664,6 +682,17 @@ public:
     }
 
 private:
+    // Objects still alive when the device closes were never destroyed, which over a long session
+    // or repeated loads is a leak.
+    void warn_about_leftovers() const {
+        if (m_textures.size() + m_buffers.size() + m_shaders.size() + m_pipelines.size() > 0) {
+            DREAM_LOG_WARNING("The graphics device closed with objects the game never destroyed: "
+                              "{} textures, {} buffers, {} shaders and {} pipelines",
+                              m_textures.size(), m_buffers.size(), m_shaders.size(),
+                              m_pipelines.size());
+        }
+    }
+
     core::Result<void> create_instance(const core::Config& config) {
         std::uint32_t api_version = VK_API_VERSION_1_0;
         if (vkEnumerateInstanceVersion != nullptr) {

@@ -94,6 +94,7 @@ The samples list each new backend after the existing one for Windows.
   twelve boxes need more iterations.
 - markup has no scrolling, animation, transitions, transforms, tables, flexbox or decorators, and
   slider arrows are not drawn. Documents that use them lay out in a simpler way than with RmlUi.
-- PortAudio doesn't support Android, and vcpkg installs it, and Chipmunk, only for other platforms.
-  The Android module lists are unchanged.
+- PortAudio doesn't support Android, and vcpkg installs it only for other platforms. Chipmunk,
+  first left out of Android too, was installed there and checked in Phase 10; see
+  [Backends](../reports/backends.md). The Android module lists are unchanged.
 - Three in-house libraries are now the engine's to maintain.

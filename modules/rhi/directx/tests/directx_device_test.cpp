@@ -3,6 +3,7 @@
 // are compiled by its own build.
 
 #include "dream/core/config.h"
+#include "dream/core/log.h"
 #include "dream/core/module_registry.h"
 #include "dream/rhi/rhi.h"
 
@@ -184,6 +185,44 @@ TEST_CASE("DirectX device starts on WARP and loads DXBC shaders") {
     const auto frame = device->begin_frame();
     REQUIRE(frame.has_value());
     CHECK(frame.value() == nullptr);
+}
+
+TEST_CASE("DirectX device warns when it closes with objects never destroyed") {
+    struct Warnings final : core::LogSink {
+        void write(const core::LogMessage& message) override {
+            if (message.level == core::LogLevel::Warning) {
+                texts.emplace_back(message.text);
+            }
+        }
+        std::vector<std::string> texts;
+    };
+    constexpr std::array k_pixel{std::byte{255}, std::byte{255}, std::byte{255}, std::byte{255}};
+    Warnings warnings;
+    core::add_log_sink(warnings);
+
+    SUBCASE("left behind") {
+        auto device = make_device();
+        REQUIRE(device->create_texture(TextureDesc{.width = 1, .height = 1}, k_pixel).has_value());
+        REQUIRE(device->create_buffer(BufferUsage::Vertex, k_pixel).has_value());
+        device.reset();
+        const bool warned = std::ranges::any_of(warnings.texts, [](const std::string& text) {
+            return text.find("never destroyed: 1 textures, 1 buffers, 0 shaders and 0 pipelines") !=
+                   std::string::npos;
+        });
+        CHECK(warned);
+    }
+    SUBCASE("all destroyed") {
+        auto device = make_device();
+        const auto texture = device->create_texture(TextureDesc{.width = 1, .height = 1}, k_pixel);
+        REQUIRE(texture.has_value());
+        device->destroy_texture(texture.value());
+        device.reset();
+        const bool warned = std::ranges::any_of(warnings.texts, [](const std::string& text) {
+            return text.find("never destroyed") != std::string::npos;
+        });
+        CHECK_FALSE(warned);
+    }
+    core::remove_log_sink(warnings);
 }
 
 TEST_CASE("DirectX device rejects invalid resources") {
