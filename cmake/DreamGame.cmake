@@ -43,6 +43,14 @@ function(dream_add_game name)
     dream_configure_target(${name})
     dream_link_modules(${name} CONFIG "${ARG_CONFIG}")
 
+    # A game that lists a profiler counts its heap allocations, which costs a little on every one,
+    # so games that don't list one are left alone. See docs/adr/0016-profiling-resources.md.
+    get_target_property(module_targets ${name} DREAM_MODULE_TARGETS)
+    list(FILTER module_targets INCLUDE REGEX "^dream_module_profiler_")
+    if(module_targets)
+        target_sources(${name} PRIVATE "${DreamEngine_SOURCE_DIR}/runtime/entry/heap_counting.cpp")
+    endif()
+
     # Each directory's contents are merged into the game's assets.
     set(asset_dirs "")
     foreach(asset_dir IN LISTS ARG_ASSETS)

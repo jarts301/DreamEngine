@@ -8,6 +8,7 @@
 #include <d3d11sdklayers.h>
 #include <d3dcompiler.h>
 #include <dxgi1_2.h>
+#include <dxgi1_4.h>
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -239,6 +240,19 @@ public:
 
     std::string_view shader_file_suffix() const override {
         return ".dxbc";
+    }
+
+    // The system's own count of this program's dedicated video memory, and its budget, which
+    // shrinks when other programs need the GPU.
+    std::optional<MemoryUsage> memory_usage() override {
+        if (!m_adapter) {
+            return std::nullopt;
+        }
+        DXGI_QUERY_VIDEO_MEMORY_INFO local{};
+        if (FAILED(m_adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &local))) {
+            return std::nullopt;
+        }
+        return MemoryUsage{.used_bytes = local.CurrentUsage, .budget_bytes = local.Budget};
     }
 
     core::Result<BufferHandle> create_buffer(BufferUsage usage,
@@ -492,6 +506,10 @@ private:
         if (FAILED(result)) {
             return directx_error("Finding the DXGI factory", result);
         }
+
+        // Windows 10's adapters report the video memory the program uses, for memory_usage. Without
+        // it, there is simply nothing to report.
+        static_cast<void>(adapter.As(&m_adapter));
 
         DXGI_ADAPTER_DESC adapter_desc{};
         adapter->GetDesc(&adapter_desc);
@@ -1077,7 +1095,9 @@ private:
         m_context->RSSetScissorRects(1, &scissor);
     }
 
-    // Released in reverse order, so the device outlives everything made from it.
+    // Released in reverse order, so the device outlives everything made from it, and the adapter
+    // outlives the device.
+    ComPtr<IDXGIAdapter3> m_adapter;
     ComPtr<ID3D11Device> m_device;
     ComPtr<ID3D11DeviceContext> m_context;
     ComPtr<ID3D11InfoQueue> m_info_queue;

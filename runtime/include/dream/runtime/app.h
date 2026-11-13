@@ -27,6 +27,12 @@ namespace dream::runtime {
 //     max_fps = 60     # 0 means no limit. Defaults to 60, or no limit with a graphics device,
 //                      # whose vertical sync already sets the pace.
 //     fixed_rate = 60  # How many times per second Game::on_fixed_update runs. Defaults to 60.
+//
+// With a profiler installed, it also records frame timing and resources (see
+// docs/adr/0016-profiling-resources.md), sampling memory and CPU use this often:
+//
+//     [profiler]
+//     sample_rate = 10  # Times per second. Frame timing and the heap are recorded every frame.
 class App {
 public:
     // `config` must outlive this object. `device` is null for a program that draws nothing.
@@ -127,7 +133,8 @@ private:
     void pump_events(Game& game);
     void handle_event(Game& game, const platform::Event& event);
     [[nodiscard]] core::Result<void> attach_surface();
-    [[nodiscard]] core::Result<void> render_frame(Game& game);
+    // Adds the time spent waiting on the device to `wait_seconds`.
+    [[nodiscard]] core::Result<void> render_frame(Game& game, double& wait_seconds);
 
     // Declared in this order so the device is destroyed before the window it draws to.
     std::unique_ptr<platform::Platform> m_platform;

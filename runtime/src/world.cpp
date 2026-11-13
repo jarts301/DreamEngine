@@ -2,6 +2,7 @@
 
 #include "dream/core/profile.h"
 
+#include <cstddef>
 #include <unordered_set>
 #include <vector>
 
@@ -95,15 +96,20 @@ core::Result<void> World::set_parent(Entity child, Entity parent) {
 
 void World::update_transforms() {
     DREAM_PROFILE_ZONE("Update transforms");
+    std::size_t updated = 0;
     const auto roots = m_registry.view<const Transform, WorldTransform>(entt::exclude<Parent>);
     for (const auto [entity, transform, world] : roots.each()) {
         world.matrix = local_matrix(transform);
+        ++updated;
     }
 
     std::unordered_set<Entity> done;
     for (const auto entity : m_registry.view<Parent, Transform, WorldTransform>()) {
         resolve(m_registry, entity, done);
+        ++updated;
     }
+    // Every entity with a Transform, which in practice is every entity.
+    DREAM_PROFILE_VALUE("World transforms", updated);
 }
 
 } // namespace dream::runtime

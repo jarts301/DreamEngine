@@ -1,6 +1,7 @@
 # 0015. Profiling
 
-- Status: Accepted
+- Status: Accepted, extended by [0016](0016-profiling-resources.md), which adds frame timing,
+  memory and counters
 - Date: 2026-11-12
 
 ## Context

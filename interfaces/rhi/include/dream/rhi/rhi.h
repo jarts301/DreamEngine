@@ -154,6 +154,15 @@ protected:
     ~CommandList() = default;
 };
 
+// Video memory, as a backend that can tell reports it.
+struct MemoryUsage {
+    // What this program uses in the GPU's own memory.
+    std::uint64_t used_bytes = 0;
+    // How much the system lets it use before performance suffers, as other programs need some too.
+    // Zero when unknown.
+    std::uint64_t budget_bytes = 0;
+};
+
 // A graphics device and the window surface it presents to.
 //
 // All functions must be called from one thread. Resources outlive the surface: only attach_surface
@@ -204,6 +213,12 @@ public:
     [[nodiscard]] virtual core::Result<CommandList*> begin_frame() = 0;
 
     [[nodiscard]] virtual core::Result<void> end_frame() = 0;
+
+    // An optional capability, for profiling: nothing when the backend can't tell, which is the
+    // default. It may ask the driver, so call it a few times a second at most, outside a frame.
+    [[nodiscard]] virtual std::optional<MemoryUsage> memory_usage() {
+        return std::nullopt;
+    }
 };
 
 } // namespace dream::rhi

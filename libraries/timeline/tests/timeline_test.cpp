@@ -411,3 +411,72 @@ TEST_CASE("a trace can be written while other threads record") {
     }
     CHECK(other_data(document, "recorded_events") == static_cast<double>(stats.recorded_events));
 }
+
+TEST_CASE("values are summed up with nearest-rank percentiles, across threads") {
+    const FakeClock clock;
+    Recorder recorder(Settings{.clock = clock.function()});
+
+    // 1 to 100, the first 60 on this thread and the rest on another, under the same name stored
+    // at a different address.
+    static const char k_same_name[] = "Frame time (ms)";
+    for (int i = 1; i <= 60; ++i) {
+        clock.set(i * 1000);
+        recorder.record_value("Frame time (ms)", i);
+    }
+    std::thread other([&recorder, &clock] {
+        for (int i = 61; i <= 100; ++i) {
+            // The clock goes back here, so the most recent sample is 60, from the first thread.
+            clock.set(i);
+            recorder.record_value(k_same_name, i);
+        }
+    });
+    other.join();
+    recorder.record_value("Other", 5.0);
+
+    const std::vector<ValueSummary> summaries = recorder.summarize_values();
+    REQUIRE(summaries.size() == 2);
+    const ValueSummary& frame = summaries[0];
+    CHECK(frame.name == "Frame time (ms)");
+    CHECK(frame.samples == 100);
+    CHECK(frame.minimum == 1.0);
+    CHECK(frame.maximum == 100.0);
+    CHECK(frame.mean == doctest::Approx(50.5));
+    CHECK(frame.p50 == 50.0);
+    CHECK(frame.p95 == 95.0);
+    CHECK(frame.p99 == 99.0);
+    CHECK(frame.last == 60.0);
+    CHECK(summaries[1].name == "Other");
+    CHECK(summaries[1].p99 == 5.0);
+}
+
+TEST_CASE("the trace carries the summaries of its values") {
+    Recorder recorder;
+    REQUIRE(parse(recorder).find("otherData")->find("values") != nullptr);
+    CHECK(parse(recorder).find("otherData")->find("values")->keys.empty());
+
+    recorder.record_value("Memory \"resident\" (MB)", 512.0);
+    recorder.record_value("Memory \"resident\" (MB)", 256.0);
+    const json::Value document = parse(recorder);
+    const json::Value* const summary =
+        document.find("otherData")->find("values")->find("Memory \"resident\" (MB)");
+    REQUIRE(summary != nullptr);
+    CHECK(summary->number_of("samples") == 2.0);
+    CHECK(summary->number_of("min") == 256.0);
+    CHECK(summary->number_of("mean") == 384.0);
+    CHECK(summary->number_of("p50") == 256.0);
+    CHECK(summary->number_of("p95") == 512.0);
+    CHECK(summary->number_of("max") == 512.0);
+    CHECK(summary->number_of("last") == 256.0);
+}
+
+TEST_CASE("values outside the frame window are left out of the summaries") {
+    Recorder recorder(Settings{.start_frame = 1, .frame_count = 1});
+    for (int frame = 0; frame < 3; ++frame) {
+        recorder.record_value("Frame", frame);
+        recorder.mark_frame();
+    }
+    const std::vector<ValueSummary> summaries = recorder.summarize_values();
+    REQUIRE(summaries.size() == 1);
+    CHECK(summaries[0].samples == 1);
+    CHECK(summaries[0].last == 1.0);
+}

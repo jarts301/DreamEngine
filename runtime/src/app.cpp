@@ -4,11 +4,14 @@
 #include "dream/core/log.h"
 #include "dream/core/profile.h"
 
+#include "resource_monitor.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <format>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -30,6 +33,10 @@ core::Result<std::uint32_t> read_setting(const core::Config& config, std::string
     return static_cast<std::uint32_t>(value);
 }
 
+double seconds_since(core::TimePoint start) {
+    return std::chrono::duration<double>(core::now() - start).count();
+}
+
 } // namespace
 
 App::App(std::unique_ptr<platform::Platform> platform, const core::Config& config,
@@ -47,7 +54,7 @@ core::Result<void> App::attach_surface() {
     return attached;
 }
 
-core::Result<void> App::render_frame(Game& game) {
+core::Result<void> App::render_frame(Game& game, double& wait_seconds) {
     if (m_device == nullptr) {
         return {};
     }
@@ -59,10 +66,12 @@ core::Result<void> App::render_frame(Game& game) {
     }
 
     // Where the CPU waits for the GPU, or for the display, as the device starts a frame.
+    const core::TimePoint begin_start = core::now();
     const core::Result<rhi::CommandList*> frame = [this] {
         DREAM_PROFILE_ZONE("Begin GPU frame");
         return m_device->begin_frame();
     }();
+    wait_seconds += seconds_since(begin_start);
     if (!frame.has_value()) {
         return frame.error();
     }
@@ -74,8 +83,12 @@ core::Result<void> App::render_frame(Game& game) {
         DREAM_PROFILE_ZONE("Render");
         game.on_render(*this, *frame.value());
     }
+    // Presenting can also wait for the display, so it counts as waiting too.
     DREAM_PROFILE_ZONE("Submit and present");
-    return m_device->end_frame();
+    const core::TimePoint end_start = core::now();
+    core::Result<void> ended = m_device->end_frame();
+    wait_seconds += seconds_since(end_start);
+    return ended;
 }
 
 core::Result<void> App::run(Game& game) {
@@ -107,6 +120,15 @@ core::Result<void> App::run(Game& game) {
                            "Setting 'app.fixed_rate' can be at most 1000"};
     }
     m_fixed_steps = core::FixedTimestep(1.0 / fixed_rate.value());
+    const core::Result<std::uint32_t> sample_rate =
+        read_setting(m_config, "profiler.sample_rate", 10, 1);
+    if (!sample_rate.has_value()) {
+        return sample_rate.error();
+    }
+    if (sample_rate.value() > 1000) {
+        return core::Error{core::ErrorCode::InvalidArgument,
+                           "Setting 'profiler.sample_rate' can be at most 1000"};
+    }
 
     const platform::WindowSettings window{
         .title = std::string(m_config.get_string("app.title").value_or("Dream Engine")),
@@ -140,6 +162,8 @@ core::Result<void> App::run(Game& game) {
     core::Clock clock;
     core::TimePoint next_frame = core::now();
     core::Result<void> outcome;
+    ResourceMonitor resources(sample_rate.value());
+    std::optional<core::TimePoint> previous_frame_end;
 
     while (m_running) {
         m_input.begin_frame();
@@ -150,9 +174,15 @@ core::Result<void> App::run(Game& game) {
         }
 
         if (!m_running || !can_update()) {
+            // Time spent paused belongs to no frame.
+            previous_frame_end.reset();
             continue;
         }
+        if (!previous_frame_end.has_value()) {
+            previous_frame_end = core::now();
+        }
 
+        FrameTiming timing;
         {
             DREAM_PROFILE_ZONE("Frame");
             {
@@ -161,6 +191,7 @@ core::Result<void> App::run(Game& game) {
             }
             const core::FrameTime time = clock.tick();
             const int fixed_steps = m_fixed_steps.advance(time.delta_seconds);
+            timing.fixed_steps = fixed_steps;
             for (int step = 0; step < fixed_steps; ++step) {
                 DREAM_PROFILE_ZONE("Fixed update");
                 game.on_fixed_update(*this, m_fixed_steps.step_seconds());
@@ -170,7 +201,7 @@ core::Result<void> App::run(Game& game) {
                 game.on_update(*this, time);
             }
 
-            outcome = render_frame(game);
+            outcome = render_frame(game, timing.wait_seconds);
             if (!outcome.has_value()) {
                 break;
             }
@@ -178,11 +209,19 @@ core::Result<void> App::run(Game& game) {
             // Stops the loop using a whole CPU core when nothing else sets the pace.
             if (frame_period > Duration::zero()) {
                 DREAM_PROFILE_ZONE("Frame limit");
+                const core::TimePoint sleep_start = core::now();
                 next_frame = std::max(next_frame + frame_period, core::now());
                 std::this_thread::sleep_until(next_frame);
+                timing.wait_seconds += seconds_since(sleep_start);
             }
         }
-        // After the frame's zone has ended, so a profiler that records a range of frames gets
+        const core::TimePoint frame_end = core::now();
+        timing.frame_seconds =
+            std::chrono::duration<double>(frame_end - *previous_frame_end).count();
+        previous_frame_end = frame_end;
+        resources.end_frame(timing, m_device.get());
+
+        // After the frame's zone and values, so a profiler that records a range of frames gets
         // each one whole.
         DREAM_PROFILE_FRAME();
     }

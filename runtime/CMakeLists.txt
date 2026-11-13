@@ -16,6 +16,7 @@ add_library(dream_runtime STATIC
     src/profiling.cpp
     src/program.cpp
     src/renderer.cpp
+    src/resource_monitor.cpp
     src/scene_loader.cpp
     src/ui.cpp
     src/virtual_file_system.cpp
@@ -40,6 +41,7 @@ if(DREAM_BUILD_TESTS)
             tests/asset_manager_test.cpp
             tests/audio_test.cpp
             tests/event_bus_test.cpp
+            tests/heap_counting_test.cpp
             tests/input_actions_test.cpp
             tests/model_loader_test.cpp
             tests/physics_test.cpp
@@ -49,6 +51,8 @@ if(DREAM_BUILD_TESTS)
             tests/ui_test.cpp
             tests/virtual_file_system_test.cpp
             tests/world_test.cpp
+            # Profiled games count their allocations with this, so the tests run on top of it too.
+            entry/heap_counting.cpp
         LIBRARIES
             dream::runtime
     )

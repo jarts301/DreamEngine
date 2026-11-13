@@ -250,6 +250,31 @@ public:
         return ".spv";
     }
 
+    // The device-local heaps, as the allocator sees them. With VK_EXT_memory_budget, usage is the
+    // driver's figure for the whole program, swapchain included; without it, only what the
+    // allocator itself holds, and the budget is its own estimate.
+    std::optional<MemoryUsage> memory_usage() override {
+        if (m_allocator == VK_NULL_HANDLE) {
+            return std::nullopt;
+        }
+        // Setting the frame index is what makes the allocator fetch a fresh budget.
+        vmaSetCurrentFrameIndex(m_allocator, ++m_memory_query_index);
+
+        const VkPhysicalDeviceMemoryProperties* properties = nullptr;
+        vmaGetMemoryProperties(m_allocator, &properties);
+        std::array<VmaBudget, VK_MAX_MEMORY_HEAPS> budgets{};
+        vmaGetHeapBudgets(m_allocator, budgets.data());
+
+        MemoryUsage usage;
+        for (std::uint32_t heap = 0; heap < properties->memoryHeapCount; ++heap) {
+            if ((properties->memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0) {
+                usage.used_bytes += budgets[heap].usage;
+                usage.budget_bytes += budgets[heap].budget;
+            }
+        }
+        return usage;
+    }
+
     core::Result<BufferHandle> create_buffer(BufferUsage usage,
                                              std::span<const std::byte> contents) override {
         if (contents.empty()) {
@@ -735,12 +760,16 @@ private:
     }
 
     [[nodiscard]] static bool supports_swapchain(VkPhysicalDevice device) {
+        return has_extension(device, VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    }
+
+    [[nodiscard]] static bool has_extension(VkPhysicalDevice device, std::string_view name) {
         std::uint32_t count = 0;
         vkEnumerateDeviceExtensionProperties(device, nullptr, &count, nullptr);
         std::vector<VkExtensionProperties> extensions(count);
         vkEnumerateDeviceExtensionProperties(device, nullptr, &count, extensions.data());
-        return std::ranges::any_of(extensions, [](const VkExtensionProperties& extension) {
-            return std::string_view(extension.extensionName) == VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+        return std::ranges::any_of(extensions, [name](const VkExtensionProperties& extension) {
+            return std::string_view(extension.extensionName) == name;
         });
     }
 
@@ -752,13 +781,20 @@ private:
             .queueCount = 1,
             .pQueuePriorities = &priority,
         };
-        const char* const extension = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+        // The memory budget extension is optional. It lets memory_usage report what the driver
+        // says the program uses, for profiling.
+        std::vector<const char*> extensions{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+        const bool has_memory_budget =
+            has_extension(m_physical_device, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+        if (has_memory_budget) {
+            extensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+        }
         const VkDeviceCreateInfo info{
             .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
             .queueCreateInfoCount = 1,
             .pQueueCreateInfos = &queue,
-            .enabledExtensionCount = 1,
-            .ppEnabledExtensionNames = &extension,
+            .enabledExtensionCount = static_cast<std::uint32_t>(extensions.size()),
+            .ppEnabledExtensionNames = extensions.data(),
         };
         if (const VkResult result = vkCreateDevice(m_physical_device, &info, nullptr, &m_device);
             result != VK_SUCCESS) {
@@ -772,6 +808,9 @@ private:
             .vkGetDeviceProcAddr = vkGetDeviceProcAddr,
         };
         const VmaAllocatorCreateInfo allocator{
+            .flags = has_memory_budget ? static_cast<VmaAllocatorCreateFlags>(
+                                             VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT)
+                                       : VmaAllocatorCreateFlags{0},
             .physicalDevice = m_physical_device,
             .device = m_device,
             .pVulkanFunctions = &functions,
@@ -1729,6 +1768,7 @@ private:
     VkQueue m_queue = VK_NULL_HANDLE;
     std::uint32_t m_queue_family = 0;
     VmaAllocator m_allocator = VK_NULL_HANDLE;
+    std::uint32_t m_memory_query_index = 0;
     VkDescriptorSetLayout m_descriptor_layout = VK_NULL_HANDLE;
     VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;
     VkRenderPass m_render_pass = VK_NULL_HANDLE;

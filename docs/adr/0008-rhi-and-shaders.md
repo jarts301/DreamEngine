@@ -1,6 +1,7 @@
 # 0008. Graphics interface and shaders
 
-- Status: Accepted, extended by [0013](0013-directx-and-shader-formats.md)
+- Status: Accepted, extended by [0013](0013-directx-and-shader-formats.md) and
+  [0016](0016-profiling-resources.md), which adds the optional `memory_usage` query
 - Date: 2026-11-09
 
 ## Decision

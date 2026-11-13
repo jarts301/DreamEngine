@@ -19,6 +19,8 @@ struct FakeDeviceState {
     platform::NativeWindow last_window;
     std::vector<std::byte> last_uniforms;
     std::vector<std::byte> last_vertices;
+    // What memory_usage reports. Nothing, like a backend that can't tell, unless a test sets it.
+    std::optional<rhi::MemoryUsage> memory;
 };
 
 class FakeDevice final : public rhi::Device, private rhi::CommandList {
@@ -47,6 +49,10 @@ public:
 
     std::string_view shader_file_suffix() const override {
         return ".fake";
+    }
+
+    std::optional<rhi::MemoryUsage> memory_usage() override {
+        return m_state.memory;
     }
 
     core::Result<rhi::BufferHandle> create_buffer(rhi::BufferUsage,

@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -16,6 +17,7 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace dream::modules {
 namespace {
@@ -142,6 +144,7 @@ public:
         DREAM_LOG_INFO("Profile saved to '{}' (events: {}, frames: {}). Open it at "
                        "https://ui.perfetto.dev.",
                        path_to_utf8(error ? m_path : shown), stats.recorded_events, stats.frames);
+        log_summary();
         if (stats.dropped_events > 0) {
             DREAM_LOG_WARNING("The profile is missing {} events beyond the limit of {}. Raise "
                               "'profiler.timeline.max_events', or record fewer frames with "
@@ -152,6 +155,22 @@ public:
     }
 
 private:
+    // The values at a glance, such as frame times and memory, without opening the trace.
+    void log_summary() const {
+        const std::vector<timeline::ValueSummary> summaries = m_recorder.summarize_values();
+        if (summaries.empty()) {
+            return;
+        }
+        std::string text = "Profile values (samples: min / mean / p95 / p99 / max):";
+        for (const timeline::ValueSummary& summary : summaries) {
+            std::format_to(std::back_inserter(text),
+                           "\n  {}: {}: {:.4g} / {:.4g} / {:.4g} / {:.4g} / {:.4g}", summary.name,
+                           summary.samples, summary.minimum, summary.mean, summary.p95,
+                           summary.p99, summary.maximum);
+        }
+        DREAM_LOG_INFO("{}", text);
+    }
+
     [[nodiscard]] static core::Error io_error(std::string message) {
         return core::Error{core::ErrorCode::IoError,
                            std::format("Profile not saved. {}", std::move(message))};

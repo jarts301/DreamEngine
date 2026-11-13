@@ -1,5 +1,6 @@
 # Runs a program whose project uses the timeline profiler, then checks the trace it saved: that it
-# is valid JSON in the Chrome trace format, with the zones, values, threads and frames expected.
+# is valid JSON in the Chrome trace format, with the zones, values, threads and frames expected, and
+# a summary of each expected value.
 #
 # Usage: cmake -DPROGRAM=<executable> -DTRACE=<json-file> [-DZONES=<a|b|...>] [-DVALUES=<a|b|...>]
 #              [-DTHREADS=<a|b|...>] [-DFRAMES=<count>] -P check_trace.cmake
@@ -69,6 +70,25 @@ endfunction()
 expect_all(zone "${ZONES}" "${zones}")
 expect_all(value "${VALUES}" "${values}")
 expect_all(thread "${THREADS}" "${threads}")
+
+# Each expected value is summed up in otherData, with as many samples as the trace holds.
+string(REPLACE "|" ";" expected_values "${VALUES}")
+foreach(value IN LISTS expected_values)
+    string(JSON samples ERROR_VARIABLE error GET "${trace}" otherData values "${value}" samples)
+    if(error)
+        message(FATAL_ERROR "${TRACE} has no summary of '${value}': ${error}")
+    endif()
+    set(found_samples 0)
+    foreach(name IN LISTS values)
+        if(name STREQUAL value)
+            math(EXPR found_samples "${found_samples} + 1")
+        endif()
+    endforeach()
+    if(NOT samples EQUAL found_samples)
+        message(FATAL_ERROR "The summary of '${value}' counts ${samples} samples, but the trace "
+                            "has ${found_samples}")
+    endif()
+endforeach()
 
 string(JSON frames GET "${trace}" otherData frames)
 if(DEFINED FRAMES AND NOT frames EQUAL FRAMES)

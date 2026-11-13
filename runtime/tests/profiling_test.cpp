@@ -10,6 +10,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <format>
 #include <memory>
 #include <mutex>
@@ -42,6 +43,28 @@ struct ProfilerLog {
     [[nodiscard]] std::size_t count(std::string_view event) {
         const std::lock_guard lock(mutex);
         return static_cast<std::size_t>(std::count(events.begin(), events.end(), event));
+    }
+
+    // The numbers recorded for a value, in order.
+    [[nodiscard]] std::vector<double> values(std::string_view name) {
+        const std::string prefix = std::format("value {}=", name);
+        const std::lock_guard lock(mutex);
+        std::vector<double> found;
+        for (const std::string& event : events) {
+            if (event.starts_with(prefix)) {
+                found.push_back(std::strtod(event.c_str() + prefix.size(), nullptr));
+            }
+        }
+        return found;
+    }
+
+    // The position of the first event starting with `prefix`, or the number of events.
+    [[nodiscard]] std::size_t find_prefix(std::string_view prefix) {
+        const std::lock_guard lock(mutex);
+        return static_cast<std::size_t>(
+            std::find_if(events.begin(), events.end(),
+                         [prefix](const std::string& event) { return event.starts_with(prefix); }) -
+            events.begin());
     }
 
     // The position of the first `event`, or the number of events if there is none.
@@ -307,6 +330,101 @@ TEST_CASE("The main loop measures waiting for, rendering and presenting each fra
     CHECK(present < frame_end);
     CHECK(frame_end < log.events.size());
     CHECK(log.count("end Submit and present") == 1);
+}
+
+TEST_CASE("The main loop records frame timing, the heap, and memory from the system and GPU") {
+    ProfilerLog log;
+    FakeState state;
+    state.script = {k_end_of_frame, k_end_of_frame, k_end_of_frame};
+    FakeDeviceState device;
+    device.memory = rhi::MemoryUsage{.used_bytes = 256 << 20, .budget_bytes = 1024 << 20};
+    ScriptedGame game;
+    const core::Config config = core::Config::parse("[app]\nmax_fps = 0\n").value();
+    {
+        const ProfilerSession session(std::make_unique<RecordingProfiler>(log));
+        App app(std::make_unique<FakePlatform>(state), config,
+                std::make_unique<FakeDevice>(device));
+        REQUIRE(app.run(game).has_value());
+    }
+
+    // Every frame.
+    const std::vector<double> frame_times = log.values("Frame time (ms)");
+    const std::vector<double> work_times = log.values("Frame CPU work (ms)");
+    REQUIRE(frame_times.size() == 3);
+    REQUIRE(work_times.size() == 3);
+    for (std::size_t frame = 0; frame < frame_times.size(); ++frame) {
+        CHECK(work_times[frame] >= 0.0);
+        CHECK(work_times[frame] <= frame_times[frame]);
+    }
+    CHECK(log.values("Fixed steps per frame").size() == 3);
+    // The test program counts its heap, as profiled games do. The first frame has no earlier one
+    // to compare with.
+    CHECK(log.values("Heap allocations per frame").size() == 2);
+    CHECK(log.values("Heap allocated per frame (KB)").size() == 2);
+    CHECK(log.values("Heap in use (MB)").size() == 3);
+
+    // Sampled, starting with the first frame.
+    CHECK(log.values("GPU memory (MB)").front() == 256.0);
+    CHECK(log.values("GPU memory budget (MB)").front() == 1024.0);
+    CHECK(log.count("begin Profiler sampling") >= 1);
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+    REQUIRE_FALSE(log.values("Memory resident (MB)").empty());
+    CHECK(log.values("Memory resident (MB)").front() > 0.0);
+    CHECK(log.values("Memory private (MB)").front() > 0.0);
+#endif
+
+    // A frame's values come after its zone and before its mark, so a profiler recording a range
+    // of frames keeps them with their frame.
+    const std::size_t first_value = log.find_prefix("value Frame time (ms)=");
+    CHECK(log.find("end Frame") < first_value);
+    CHECK(first_value < log.find("frame"));
+}
+
+TEST_CASE("Frame CPU work leaves out waiting for the frame limiter, and CPU use is sampled") {
+    ProfilerLog log;
+    FakeState state;
+    state.script = {k_end_of_frame, k_end_of_frame, k_end_of_frame};
+    ScriptedGame game;
+    // A 10 ms frame, almost all of it asleep, sampled every time.
+    const core::Config config =
+        core::Config::parse("[app]\nmax_fps = 100\n\n[profiler]\nsample_rate = 1000\n").value();
+    {
+        const ProfilerSession session(std::make_unique<RecordingProfiler>(log));
+        App app(std::make_unique<FakePlatform>(state), config);
+        REQUIRE(app.run(game).has_value());
+    }
+
+    const std::vector<double> frame_times = log.values("Frame time (ms)");
+    const std::vector<double> work_times = log.values("Frame CPU work (ms)");
+    REQUIRE(frame_times.size() == 3);
+    REQUIRE(work_times.size() == 3);
+    for (std::size_t frame = 0; frame < frame_times.size(); ++frame) {
+        CHECK(frame_times[frame] >= 9.0);
+        CHECK(work_times[frame] + 5.0 < frame_times[frame]);
+    }
+
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+    // Each sample after the first measures the CPU use since the one before.
+    const std::vector<double> cpu = log.values("CPU usage (%)");
+    CHECK(cpu.size() == 2);
+    for (const double percent : cpu) {
+        CHECK(percent >= 0.0);
+    }
+#endif
+}
+
+TEST_CASE("The profiler's sample rate must be sensible") {
+    for (const std::string_view rate : {"0", "1001", "-3"}) {
+        FakeState state;
+        state.script = {k_end_of_frame};
+        ScriptedGame game;
+        const core::Config config =
+            core::Config::parse(std::format("[profiler]\nsample_rate = {}\n", rate)).value();
+        App app(std::make_unique<FakePlatform>(state), config);
+        const core::Result<void> result = app.run(game);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error().message.find("profiler.sample_rate") != std::string::npos);
+    }
 }
 
 TEST_CASE("Loading an asset is measured, with its path") {

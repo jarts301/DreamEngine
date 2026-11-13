@@ -227,6 +227,7 @@ void Audio::update(const World* world) {
     }
 
     m_device->update();
+    DREAM_PROFILE_VALUE("Audio voices", m_device->voice_count());
 }
 
 audio::VoiceHandle Audio::play(const AssetRef<SoundAsset>& sound, const audio::PlayDesc& desc) {

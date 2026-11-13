@@ -35,5 +35,7 @@ listed the same way.
 
 A game needs no code to be profiled: listing `profiler` under `[modules.<platform>]` makes
 `run_program` start a `runtime::ProfilerSession`, and the runtime's own zones show the main loop and
-each system. Add the game's own with the macros in `dream/core/profile.h`. See
-[ADR 0015](../docs/adr/0015-profiling.md).
+each system. Frame timing, memory, CPU use and counts such as draw calls are recorded too. Add
+the game's own zones and values with the macros in `dream/core/profile.h`. See
+[ADR 0015](../docs/adr/0015-profiling.md), [ADR 0016](../docs/adr/0016-profiling-resources.md) and
+[Reading profiles](../docs/reports/reading-profiles.md).

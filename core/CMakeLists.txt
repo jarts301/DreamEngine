@@ -13,6 +13,7 @@ add_library(dream_core STATIC
     src/module_project.cpp
     src/module_registry.cpp
     src/pool_allocator.cpp
+    src/process_stats.cpp
     src/profile.cpp
     src/version.cpp
 )
@@ -23,6 +24,9 @@ target_include_directories(dream_core SYSTEM PRIVATE ${DREAM_TOMLPLUSPLUS_INCLUD
 target_link_libraries(dream_core PUBLIC Threads::Threads)
 if(ANDROID)
     target_link_libraries(dream_core PRIVATE log)
+elseif(WIN32)
+    # GetProcessMemoryInfo, for process_stats.cpp.
+    target_link_libraries(dream_core PRIVATE psapi)
 endif()
 target_compile_definitions(dream_core PRIVATE
     DREAM_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
@@ -48,6 +52,7 @@ if(DREAM_BUILD_TESTS)
             tests/math_test.cpp
             tests/memory_test.cpp
             tests/module_test.cpp
+            tests/process_stats_test.cpp
             tests/profile_disabled_test.cpp
             tests/profile_test.cpp
             tests/result_test.cpp

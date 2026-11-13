@@ -20,6 +20,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0013](0013-directx-and-shader-formats.md) | DirectX backend, shader formats per backend and shader bindings |
 | [0014](0014-more-backends-and-libraries.md) | Second physics, audio and interface backends, and in-house libraries |
 | [0015](0015-profiling.md) | Profiling zones in Core, a swappable profiler and Chrome trace files |
+| [0016](0016-profiling-resources.md) | Frame timing, memory, CPU and engine counters in profiles |
 
 ## Template
 

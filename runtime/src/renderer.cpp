@@ -534,6 +534,8 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
     draw_ui(commands, size);
     commands.end_render_pass();
     DREAM_PROFILE_VALUE("Draw calls", m_last_draw_count);
+    DREAM_PROFILE_VALUE("Debug lines", m_last_line_count);
+    DREAM_PROFILE_VALUE("UI draw commands", m_last_ui_command_count);
 }
 
 } // namespace dream::runtime

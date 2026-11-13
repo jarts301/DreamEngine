@@ -7,6 +7,8 @@
 #include <cmath>
 #include <format>
 #include <iterator>
+#include <limits>
+#include <map>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -101,6 +103,15 @@ public:
         nanoseconds = std::max<std::int64_t>(nanoseconds, 0);
         std::format_to(std::back_inserter(m_buffer), "{}.{:03}", nanoseconds / 1000,
                        nanoseconds % 1000);
+    }
+
+    // JSON has no infinity or NaN, so those become null.
+    void number(double value) {
+        if (std::isfinite(value)) {
+            std::format_to(std::back_inserter(m_buffer), "{}", value);
+        } else {
+            m_buffer += "null";
+        }
     }
 
     template <typename... Args> void format(std::format_string<Args...> text, Args&&... args) {
@@ -348,35 +359,98 @@ Stats Recorder::stats() const {
     return stats;
 }
 
-bool Recorder::write_json(const std::function<bool(std::string_view)>& output,
-                          std::string_view process_name) const {
-    // A copy of each thread's published events, so writing doesn't hold up the threads recording.
-    struct Snapshot {
-        std::uint32_t id = 0;
-        std::string name;
-        std::vector<Event> events;
-        std::vector<std::string> texts;
-    };
-    std::vector<Snapshot> threads;
-    std::uint64_t dropped = 0;
-    {
-        const std::lock_guard lock(m_threads_mutex);
-        threads.reserve(m_threads.size());
-        for (const std::unique_ptr<ThreadBuffer>& buffer : m_threads) {
-            Snapshot& snapshot = threads.emplace_back();
-            snapshot.id = buffer->id;
-            dropped += buffer->dropped.load(std::memory_order_relaxed);
+struct Recorder::Snapshot {
+    std::uint32_t id = 0;
+    std::string name;
+    std::vector<Event> events;
+    std::vector<std::string> texts;
+};
 
-            const std::lock_guard buffer_lock(buffer->mutex);
-            snapshot.name = buffer->name;
-            snapshot.texts = buffer->texts;
-            const std::size_t count = buffer->count.load(std::memory_order_acquire);
-            snapshot.events.reserve(count);
-            for (std::size_t i = 0; i < count; ++i) {
-                snapshot.events.push_back(buffer->blocks[i / k_block_events][i % k_block_events]);
+std::vector<Recorder::Snapshot> Recorder::snapshot(std::uint64_t& dropped) const {
+    std::vector<Snapshot> threads;
+    dropped = 0;
+    const std::lock_guard lock(m_threads_mutex);
+    threads.reserve(m_threads.size());
+    for (const std::unique_ptr<ThreadBuffer>& buffer : m_threads) {
+        Snapshot& snapshot = threads.emplace_back();
+        snapshot.id = buffer->id;
+        dropped += buffer->dropped.load(std::memory_order_relaxed);
+
+        const std::lock_guard buffer_lock(buffer->mutex);
+        snapshot.name = buffer->name;
+        snapshot.texts = buffer->texts;
+        const std::size_t count = buffer->count.load(std::memory_order_acquire);
+        snapshot.events.reserve(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            snapshot.events.push_back(buffer->blocks[i / k_block_events][i % k_block_events]);
+        }
+    }
+    return threads;
+}
+
+std::vector<ValueSummary> Recorder::summarize(const std::vector<Snapshot>& threads) {
+    struct Samples {
+        std::vector<double> values;
+        std::int64_t last_time = std::numeric_limits<std::int64_t>::min();
+        double last = 0.0;
+    };
+    // Grouped by the name's text, since equal names can be different pointers.
+    std::map<std::string, Samples, std::less<>> by_name;
+    for (const Snapshot& thread : threads) {
+        for (const Event& event : thread.events) {
+            if (event.kind != Kind::Value) {
+                continue;
+            }
+            Samples& samples = by_name[event.name != nullptr ? event.name : ""];
+            const double value = std::bit_cast<double>(event.end);
+            samples.values.push_back(value);
+            if (event.start >= samples.last_time) {
+                samples.last_time = event.start;
+                samples.last = value;
             }
         }
     }
+
+    std::vector<ValueSummary> summaries;
+    summaries.reserve(by_name.size());
+    for (auto& [name, samples] : by_name) {
+        std::vector<double>& values = samples.values;
+        std::sort(values.begin(), values.end());
+        const std::size_t count = values.size();
+        const auto percentile = [&values, count](double fraction) {
+            const auto rank =
+                static_cast<std::size_t>(std::ceil(fraction * static_cast<double>(count)));
+            return values[std::clamp<std::size_t>(rank, 1, count) - 1];
+        };
+        double sum = 0.0;
+        for (const double value : values) {
+            sum += value;
+        }
+        summaries.push_back(ValueSummary{
+            .name = name,
+            .samples = count,
+            .minimum = values.front(),
+            .mean = sum / static_cast<double>(count),
+            .p50 = percentile(0.50),
+            .p95 = percentile(0.95),
+            .p99 = percentile(0.99),
+            .maximum = values.back(),
+            .last = samples.last,
+        });
+    }
+    return summaries;
+}
+
+std::vector<ValueSummary> Recorder::summarize_values() const {
+    std::uint64_t dropped = 0;
+    return summarize(snapshot(dropped));
+}
+
+bool Recorder::write_json(const std::function<bool(std::string_view)>& output,
+                          std::string_view process_name) const {
+    std::uint64_t dropped = 0;
+    std::vector<Snapshot> threads = snapshot(dropped);
+    const std::vector<ValueSummary> summaries = summarize(threads);
 
     std::uint64_t recorded = 0;
     for (Snapshot& thread : threads) {
@@ -474,8 +548,30 @@ bool Recorder::write_json(const std::function<bool(std::string_view)>& output,
     }
 
     json.format("\n],\n\"displayTimeUnit\":\"ms\",\n\"otherData\":{{\"recorded_events\":{},"
-                "\"dropped_events\":{},\"frames\":{}}}}}\n",
+                "\"dropped_events\":{},\"frames\":{},\n\"values\":{{",
                 recorded, dropped, m_frames.load(std::memory_order_relaxed));
+    bool first_summary = true;
+    for (const ValueSummary& summary : summaries) {
+        json.raw(first_summary ? "\n" : ",\n");
+        first_summary = false;
+        json.string(summary.name);
+        json.format(":{{\"samples\":{}", summary.samples);
+        const std::array<std::pair<std::string_view, double>, 7> fields{{
+            {"min", summary.minimum},
+            {"mean", summary.mean},
+            {"p50", summary.p50},
+            {"p95", summary.p95},
+            {"p99", summary.p99},
+            {"max", summary.maximum},
+            {"last", summary.last},
+        }};
+        for (const auto& [key, value] : fields) {
+            json.format(",\"{}\":", key);
+            json.number(value);
+        }
+        json.raw("}");
+    }
+    json.raw("}}}\n");
     return json.finish();
 }
 

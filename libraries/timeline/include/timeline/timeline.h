@@ -17,6 +17,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -35,6 +36,21 @@ struct Settings {
 
     // Returns the time in nanoseconds since any fixed point. Defaults to std::chrono::steady_clock.
     std::function<std::int64_t()> clock = nullptr;
+};
+
+// The recorded samples of one value, such as a frame time, summed up. Percentiles use the nearest
+// rank: p95 is the smallest sample that at least 95% of the samples don't exceed.
+struct ValueSummary {
+    std::string name;
+    std::size_t samples = 0;
+    double minimum = 0.0;
+    double mean = 0.0;
+    double p50 = 0.0;
+    double p95 = 0.0;
+    double p99 = 0.0;
+    double maximum = 0.0;
+    // The most recent sample.
+    double last = 0.0;
 };
 
 struct Stats {
@@ -84,15 +100,25 @@ public:
 
     [[nodiscard]] Stats stats() const;
 
+    // One summary per value name, sorted by name, over what has been recorded so far. Values with
+    // the same name from different threads are summed up together.
+    [[nodiscard]] std::vector<ValueSummary> summarize_values() const;
+
     // Writes everything recorded so far as one JSON document, handed to `output` in pieces of
     // about 64 KB. Returns false, having stopped, if `output` returns false. Zones that are still
-    // open are left out. `process_name` names the trace's only process.
+    // open are left out. `process_name` names the trace's only process. The document's
+    // "otherData" holds the event counts and, under "values", summarize_values().
     bool write_json(const std::function<bool(std::string_view)>& output,
                     std::string_view process_name = {}) const;
 
 private:
     struct ThreadBuffer;
     struct Event;
+    struct Snapshot;
+
+    // A copy of each thread's published events, so readers don't hold up the threads recording.
+    [[nodiscard]] std::vector<Snapshot> snapshot(std::uint64_t& dropped) const;
+    [[nodiscard]] static std::vector<ValueSummary> summarize(const std::vector<Snapshot>& threads);
 
     [[nodiscard]] std::int64_t now() const;
     [[nodiscard]] ThreadBuffer& this_thread_buffer();

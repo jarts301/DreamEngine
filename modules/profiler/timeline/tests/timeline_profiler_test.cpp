@@ -160,6 +160,19 @@ TEST_CASE("timeline keeps at most max_events, and says how many it dropped") {
     CHECK(contains(read_file(path), R"("recorded_events":1024,"dropped_events":76)"));
 }
 
+TEST_CASE("timeline saves a summary of each value in the trace") {
+    const fs::path path = fresh_folder("summary") / "trace.json";
+    const auto profiler = create_writing_to(path);
+    for (int i = 1; i <= 4; ++i) {
+        profiler->record_value("Frame time (ms)", i * 4.0);
+    }
+    REQUIRE(profiler->flush().has_value());
+    // The name holds ')"', so the raw strings need a delimiter.
+    CHECK(contains(read_file(path),
+                   R"json("Frame time (ms)":{"samples":4,"min":4,"mean":10,"p50":8,"p95":16,)json"
+                   R"json("p99":16,"max":16,"last":16})json"));
+}
+
 TEST_CASE("timeline refuses settings it can't use") {
     const auto rejects = [](std::string_view settings, std::string_view key) {
         const auto created = create(std::format("[profiler.timeline]\n{}\n", settings));

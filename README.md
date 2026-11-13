@@ -143,9 +143,15 @@ void Enemies::update() {
 }
 ```
 
+Profiles also record frame time and the main thread's CPU work, heap allocations per frame,
+process memory, CPU usage, video memory and counts such as draw calls and physics bodies. When the
+game ends, the log sums each one up with its minimum, mean, 95th and 99th percentile, and maximum.
+[Reading profiles](docs/reports/reading-profiles.md) explains what each value means and how to read
+it.
+
 `samples/arcade_demo` saves `dream_arcade_trace.json` this way on Windows and Linux. Configuring
 with `-DDREAM_PROFILING=OFF` removes the zones from the build entirely. See
-[ADR 0015](docs/adr/0015-profiling.md).
+[ADR 0015](docs/adr/0015-profiling.md) and [ADR 0016](docs/adr/0016-profiling-resources.md).
 
 To check the layer rules locally (needs Python 3):
 
