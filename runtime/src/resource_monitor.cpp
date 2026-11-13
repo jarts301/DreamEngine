@@ -41,7 +41,19 @@ void ResourceMonitor::end_frame(const FrameTiming& timing, rhi::Device* device) 
     static_cast<void>(timing);
     static_cast<void>(device);
 #else
-    if (core::profile_sink() == nullptr) {
+    const bool recording = core::profile_sink() != nullptr;
+
+    // Taken even while nobody records, so recording never starts with stale times. Each belongs
+    // to a frame a few frames back, since the GPU runs behind.
+    if (device != nullptr) {
+        while (const std::optional<double> gpu_seconds = device->take_gpu_frame_seconds()) {
+            if (recording) {
+                DREAM_PROFILE_VALUE("GPU frame time (ms)", *gpu_seconds * 1000.0);
+            }
+        }
+    }
+
+    if (!recording) {
         // Differences must not span a time when nobody was recording.
         m_last_heap.reset();
         m_last_cpu_time.reset();

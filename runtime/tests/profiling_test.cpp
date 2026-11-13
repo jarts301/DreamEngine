@@ -338,6 +338,8 @@ TEST_CASE("The main loop records frame timing, the heap, and memory from the sys
     state.script = {k_end_of_frame, k_end_of_frame, k_end_of_frame};
     FakeDeviceState device;
     device.memory = rhi::MemoryUsage{.used_bytes = 256 << 20, .budget_bytes = 1024 << 20};
+    // Two frames' GPU times are ready, as a real GPU's would be a few frames late.
+    device.gpu_frame_seconds = {0.004, 0.0055};
     ScriptedGame game;
     const core::Config config = core::Config::parse("[app]\nmax_fps = 0\n").value();
     {
@@ -362,6 +364,13 @@ TEST_CASE("The main loop records frame timing, the heap, and memory from the sys
     CHECK(log.values("Heap allocations per frame").size() == 2);
     CHECK(log.values("Heap allocated per frame (KB)").size() == 2);
     CHECK(log.values("Heap in use (MB)").size() == 3);
+
+    // Every GPU time the device had, oldest first, and none left behind.
+    const std::vector<double> gpu_times = log.values("GPU frame time (ms)");
+    REQUIRE(gpu_times.size() == 2);
+    CHECK(gpu_times[0] == doctest::Approx(4.0));
+    CHECK(gpu_times[1] == doctest::Approx(5.5));
+    CHECK(device.gpu_frame_seconds.empty());
 
     // Sampled, starting with the first frame.
     CHECK(log.values("GPU memory (MB)").front() == 256.0);
@@ -398,10 +407,17 @@ TEST_CASE("Frame CPU work leaves out waiting for the frame limiter, and CPU use 
     const std::vector<double> work_times = log.values("Frame CPU work (ms)");
     REQUIRE(frame_times.size() == 3);
     REQUIRE(work_times.size() == 3);
+    // The limiter aims at fixed 10 ms marks, so one frame can be short after another overslept,
+    // but together they span about 30 ms, nearly all of it asleep.
+    double total_time = 0.0;
+    double total_work = 0.0;
     for (std::size_t frame = 0; frame < frame_times.size(); ++frame) {
-        CHECK(frame_times[frame] >= 9.0);
-        CHECK(work_times[frame] + 5.0 < frame_times[frame]);
+        CHECK(work_times[frame] <= frame_times[frame]);
+        total_time += frame_times[frame];
+        total_work += work_times[frame];
     }
+    CHECK(total_time >= 25.0);
+    CHECK(total_work + 20.0 < total_time);
 
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
     // Each sample after the first measures the CPU use since the one before.
@@ -411,6 +427,21 @@ TEST_CASE("Frame CPU work leaves out waiting for the frame limiter, and CPU use 
         CHECK(percent >= 0.0);
     }
 #endif
+}
+
+TEST_CASE("GPU times are taken even with no profiler, so none are stale when one starts") {
+    FakeState state;
+    state.script = {k_end_of_frame};
+    FakeDeviceState device;
+    device.gpu_frame_seconds = {0.001, 0.002, 0.003};
+    ScriptedGame game;
+    REQUIRE(core::profile_sink() == nullptr);
+    {
+        App app(std::make_unique<FakePlatform>(state), k_app_config,
+                std::make_unique<FakeDevice>(device));
+        REQUIRE(app.run(game).has_value());
+    }
+    CHECK(device.gpu_frame_seconds.empty());
 }
 
 TEST_CASE("The profiler's sample rate must be sensible") {

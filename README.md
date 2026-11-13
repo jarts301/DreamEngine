@@ -143,8 +143,9 @@ void Enemies::update() {
 }
 ```
 
-Profiles also record frame time and the main thread's CPU work, heap allocations per frame,
-process memory, CPU usage, video memory and counts such as draw calls and physics bodies. When the
+Profiles also record frame time, the main thread's CPU work and the GPU's time per frame, heap
+allocations per frame, process memory, CPU usage, video memory and counts such as draw calls and
+physics bodies. When the
 game ends, the log sums each one up with its minimum, mean, 95th and 99th percentile, and maximum.
 [Reading profiles](docs/reports/reading-profiles.md) explains what each value means and how to read
 it.

@@ -1,6 +1,6 @@
 # 0016. Resources in profiles: frame timing, memory and counters
 
-- Status: Accepted
+- Status: Accepted, extended by [0017](0017-gpu-frame-time.md), which adds the GPU's frame time
 - Date: 2026-11-12
 
 ## Context
@@ -105,6 +105,6 @@ The `timeline` backend sums each value up when it writes the trace: samples, min
 - Video memory figures are not comparable between backends, or on Vulkan between GPUs with and
   without the memory budget extension. On integrated GPUs, video memory is system memory.
 - `CPU usage` on Windows moves in steps of the scheduler tick, so single samples are rough.
-- GPU time is still not measured. It needs timestamp queries in the graphics interface.
+- GPU time was not measured here. ADR 0017 adds it.
 - The Vulkan and DirectX parts could not be compiled where this was written, since neither SDK was
   available. They use only documented VMA 3 and DXGI 1.4 calls.

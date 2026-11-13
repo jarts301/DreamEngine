@@ -12,10 +12,12 @@
 #include <windows.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <ostream> // Needed for doctest to print std::string_view.
 #include <span>
 #include <string>
@@ -339,4 +341,35 @@ TEST_CASE("DirectX device limits the vertex data drawn in one frame") {
         commands->end_render_pass();
         REQUIRE(device->end_frame().has_value());
     }
+}
+
+TEST_CASE("DirectX device measures how long the GPU takes for each frame") {
+    const auto device = make_device();
+    const HiddenWindow window;
+    if (!window.exists()) {
+        return;
+    }
+    REQUIRE(device->attach_surface(window.native(), k_size).has_value());
+    CHECK_FALSE(device->take_gpu_frame_seconds().has_value());
+
+    // The GPU runs behind the CPU, so the first frames' times arrive while later ones are drawn.
+    // The frame limit only keeps a broken measurement from looping forever.
+    std::vector<double> seconds;
+    for (int frame = 0; frame < 300 && seconds.size() < 5; ++frame) {
+        CommandList* const commands = device->begin_frame().value();
+        REQUIRE(commands != nullptr);
+        commands->begin_render_pass(ClearColor{0.1f, 0.2f, 0.3f, 1.0f});
+        commands->end_render_pass();
+        REQUIRE(device->end_frame().has_value());
+        while (const std::optional<double> taken = device->take_gpu_frame_seconds()) {
+            seconds.push_back(*taken);
+        }
+    }
+
+    REQUIRE(seconds.size() >= 5);
+    for (const double time : seconds) {
+        CHECK(time >= 0.0);
+        CHECK(time < 1.0);
+    }
+    CHECK(std::ranges::any_of(seconds, [](double time) { return time > 0.0; }));
 }

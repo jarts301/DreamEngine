@@ -2,6 +2,7 @@
 
 #include "dream/rhi/rhi.h"
 
+#include <deque>
 #include <format>
 #include <optional>
 #include <string>
@@ -21,6 +22,8 @@ struct FakeDeviceState {
     std::vector<std::byte> last_vertices;
     // What memory_usage reports. Nothing, like a backend that can't tell, unless a test sets it.
     std::optional<rhi::MemoryUsage> memory;
+    // What take_gpu_frame_seconds hands out, oldest first.
+    std::deque<double> gpu_frame_seconds;
 };
 
 class FakeDevice final : public rhi::Device, private rhi::CommandList {
@@ -53,6 +56,15 @@ public:
 
     std::optional<rhi::MemoryUsage> memory_usage() override {
         return m_state.memory;
+    }
+
+    std::optional<double> take_gpu_frame_seconds() override {
+        if (m_state.gpu_frame_seconds.empty()) {
+            return std::nullopt;
+        }
+        const double seconds = m_state.gpu_frame_seconds.front();
+        m_state.gpu_frame_seconds.pop_front();
+        return seconds;
     }
 
     core::Result<rhi::BufferHandle> create_buffer(rhi::BufferUsage,

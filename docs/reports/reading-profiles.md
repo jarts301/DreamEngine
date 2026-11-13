@@ -7,6 +7,7 @@ Profiles now record resources as well as time, with no code in the game:
 | Group | Values | How often |
 |---|---|---|
 | Frame timing | `Frame time (ms)`, `Frame CPU work (ms)`, `Fixed steps per frame` | Every frame |
+| GPU time | `GPU frame time (ms)` | Every frame, arriving 2 to 4 frames late |
 | Heap | `Heap allocations per frame`, `Heap allocated per frame (KB)`, `Heap in use (MB)` | Every frame |
 | Process | `Memory resident (MB)`, `Memory private (MB)`, `CPU usage (%)` | 10 times a second |
 | GPU | `GPU memory (MB)`, `GPU memory budget (MB)` | 10 times a second |
@@ -15,8 +16,9 @@ Profiles now record resources as well as time, with no code in the game:
 
 Each value is a number over time. The most important rules for reading them:
 
-1. **Compare `Frame time` with `Frame CPU work`.** If they are close, the game's own code sets the
-   frame rate. If work is much smaller, the GPU, the display or the frame limiter does.
+1. **Compare `Frame time` with `Frame CPU work` and `GPU frame time`.** Whichever of the two is
+   close to the frame time sets the frame rate: the game's CPU work, or the GPU. If neither is, the
+   display or the frame limiter does, and the game has room to spare.
 2. **Judge smoothness by p99 and max, not by the mean.** A mean of 16.7 ms can hide stutters.
 3. **A game in steady play should make close to zero heap allocations per frame.** Allocations
    every frame are the usual cause of slow, hard-to-see frame time growth and stutter.
@@ -24,7 +26,8 @@ Each value is a number over time. The most important rules for reading them:
    then levels off is a cache or a pool filling up.
 5. **The GPU numbers depend on the graphics backend**, so compare runs on the same backend only.
 
-The design is recorded in [ADR 0016](../adr/0016-profiling-resources.md).
+The design is recorded in [ADR 0016](../adr/0016-profiling-resources.md) and, for the GPU's time,
+[ADR 0017](../adr/0017-gpu-frame-time.md).
 
 ## 1. Getting the values
 
@@ -70,7 +73,8 @@ There are three places to read the values:
 - **Max** is the single worst sample. Look it up on the timeline to see what happened then.
 - **Samples** differs between values on purpose. Frame values have one per frame, sampled values
   about `sample_rate` a second, and `Heap ... per frame` values one fewer than the frames, since
-  the first frame has nothing to compare with.
+  the first frame has nothing to compare with. `GPU frame time` has a few fewer than the frames,
+  because the last frames are still on the GPU when the game ends (section 2).
 
 The summary covers exactly what was recorded, so with `start_frame` and `frames` under
 `[profiler.timeline]` it covers only those frames, leaving loading out.
@@ -88,7 +92,7 @@ time the player sees between two frames, so 16.7 ms is 60 FPS and 33.3 ms is 30 
   updates resumed, so pausing doesn't appear as a huge frame.
 - **A very short frame right after a very long one** is usually the frame limiter re-aligning. It
   doesn't sleep to make up for a late frame, so the frame after a hitch is short. The worked example
-  in section 7 shows one.
+  in section 9 shows one.
 
 ### Frame CPU work (ms)
 
@@ -96,13 +100,20 @@ The part of the frame time the main thread spent working: the frame time less th
 `Begin GPU frame`, `Submit and present` and `Frame limit`. It covers events, fixed updates,
 updates, recording the frame's drawing, and the engine's own profiling work.
 
-| Frame time | Frame CPU work | What sets the frame rate |
-|---|---|---|
-| At the display's or `max_fps` period, steady | Well below it | Nothing is struggling: the game is paced, with room to spare. The difference is headroom |
-| Above the period | Close to the frame time | The CPU. Look at `Update`, `Fixed update`, `Render` and their children |
-| Above the period | Well below the frame time | The GPU or the display. Look at how long `Begin GPU frame` and `Submit and present` take |
-| A spike | No spike | Something outside the main thread's work: the GPU, the driver, or the operating system not scheduling the game in time |
-| A spike | The same spike | The game's own work. Find the frame on the timeline and open its `Frame` zone |
+How to tell what limits the frame rate, with `GPU frame time` (below):
+
+| Frame time | Frame CPU work | GPU frame time | What sets the frame rate |
+|---|---|---|---|
+| At the display's or `max_fps` period, steady | Well below it | Well below it | Nothing is struggling: the game is paced. The headroom is the period less the larger of the two |
+| Above the period | Close to the frame time | Below it | The CPU. Look at `Update`, `Fixed update`, `Render` and their children |
+| Above the period | Well below it | Close to the frame time | The GPU. Look at what is drawn: `Draw calls`, geometry, screen size, shaders |
+| Above the period | Well below it | Well below it | Neither is busy, so something is waited on: a display refresh just missed, the driver, or the operating system. Look at `Begin GPU frame` and `Submit and present` |
+| A spike | No spike | A spike, 2 to 4 frames later on its graph | The GPU, on that frame |
+| A spike | No spike | No spike | The operating system or the driver, not the game |
+| A spike | The same spike | | The game's own work. Find the frame on the timeline and open its `Frame` zone |
+
+The CPU and the GPU work at the same time, the GPU on one frame while the CPU prepares the next,
+so a frame takes about as long as the slower of the two, not their sum.
 
 Two things to know:
 
@@ -111,6 +122,28 @@ Two things to know:
   frame reads as slightly more waiting than it really is.
 - Work on other threads, such as physics workers and audio, isn't in this value. `CPU usage`
   covers every thread (section 5).
+
+### GPU frame time (ms)
+
+How long the GPU worked on each frame, from the start of the frame's commands to their end,
+measured with the GPU's own timestamps. It is the GPU's counterpart to `Frame CPU work`: when it is
+close to `Frame time`, the game is GPU-bound, and drawing less, or more cheaply, makes it faster.
+
+- **It arrives late.** The GPU runs behind the CPU, so a frame's time is known only 2 frames later
+  on Vulkan and up to about 4 on DirectX. On the timeline its graph is shifted right by that much:
+  a GPU spike belongs to a frame a little to its left. The summary is unaffected.
+- **Presenting isn't in it.** Showing the image and the desktop's compositor come after the frame's
+  commands.
+- **On Vulkan it can include a wait for the window's image.** If the GPU starts drawing before the
+  display has released the image it draws to, the wait is counted. A GPU frame time that sits at the
+  display's period while little is drawn is that wait, not work. DirectX doesn't show this.
+- **Light frames can read long.** A GPU that isn't busy lowers its clock to save power, so the same
+  work takes longer when there is little of it. Compare optimizations in scenes that load the GPU.
+- **A few frames have no time.** The last frames are still on the GPU when the game ends. DirectX
+  also drops a frame when its interval is reported unreliable, as when the GPU changes its clock,
+  and when the GPU is more than about 4 frames behind.
+- **It is absent** with the `null` graphics backend, and on a GPU whose queue has no timestamps,
+  which the log says at startup.
 
 ### Fixed steps per frame
 
@@ -309,16 +342,22 @@ Read this way:
   what the profiler's own events take. There is no leak.
 - **The profiler's cost is visible.** Each `Profiler sampling` zone took about 0.1 ms, 20 times in
   2 seconds.
+- **There is no GPU frame time**, because this run had no graphics device.
 
 ## 10. Limits
 
-- **GPU time isn't measured.** `Begin GPU frame` shows the CPU waiting for the GPU, not how long the
-  GPU worked. Measuring that needs timestamp queries in the graphics interface.
+- **GPU time covers the whole frame only.** There is no breakdown by part of the frame, such as the
+  scene against the interface, and GPU work isn't drawn on the timeline beside the CPU's zones.
+  ADR 0017 explains why: the timeline needs the GPU's clock matched to the CPU's, which Direct3D 11
+  can't do.
 - **Android isn't covered**, as agreed: no profiler is listed there, and heap counting is left out
   of Android builds.
 - **What was verified, and what wasn't.** The process, heap, frame timing, summary and engine
   values were compiled with GCC and run on Linux, including under AddressSanitizer and
   ThreadSanitizer, and the hello game's profiling check reads them from a real trace. The Windows
-  parts of `process_stats.cpp` and `heap_counting.cpp`, and the `memory_usage` code of the Vulkan and
-  DirectX backends, could not be compiled there, since neither Windows nor the Vulkan SDK was
-  available. Build on Windows and run a game with each graphics backend to confirm them.
+  parts of `process_stats.cpp` and `heap_counting.cpp`, and the `memory_usage` and GPU timing code
+  of the Vulkan and DirectX backends, could not be compiled there, since neither Windows nor the
+  Vulkan SDK was available. The GPU timing logic of both backends was run against a simulated GPU,
+  extracted as written, which checked the ring of queries, late and unreliable results, and
+  timestamps that wrap around. Build on Windows, run `dream_rhi_directx_tests`, which measures GPU
+  time on WARP, and run a game with each graphics backend to confirm them.

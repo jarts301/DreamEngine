@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <format>
 #include <limits>
 #include <map>
@@ -36,6 +37,9 @@ namespace {
 using namespace rhi;
 
 constexpr std::uint32_t k_frames_in_flight = 2;
+
+// How many measured frames are kept for take_gpu_frame_seconds before the oldest are dropped.
+constexpr std::size_t k_kept_gpu_frame_times = 16;
 
 // How much uniform data, and how many different texture bindings, one frame can use.
 constexpr VkDeviceSize k_uniform_buffer_size = 256 * 1024;
@@ -93,6 +97,9 @@ struct FrameResources {
     VkCommandBuffer commands = VK_NULL_HANDLE;
     VkFence in_flight = VK_NULL_HANDLE;
     VkSemaphore image_available = VK_NULL_HANDLE;
+    // Whether the last submission from this slot wrote its GPU timestamps, for reading once its
+    // fence has signaled.
+    bool timestamps_written = false;
 
     // Uniform data is appended here during the frame, and each draw selects its part by offset.
     VkBuffer uniform_buffer = VK_NULL_HANDLE;
@@ -157,6 +164,7 @@ public:
                 }
             }
             destroy_texture_resource(m_white_texture);
+            vkDestroyQueryPool(m_device, m_timestamps, nullptr);
             vkDestroyCommandPool(m_device, m_upload_pool, nullptr);
             vkDestroySampler(m_device, m_sampler, nullptr);
             vkDestroyRenderPass(m_device, m_render_pass, nullptr);
@@ -253,6 +261,15 @@ public:
     // The device-local heaps, as the allocator sees them. With VK_EXT_memory_budget, usage is the
     // driver's figure for the whole program, swapchain included; without it, only what the
     // allocator itself holds, and the budget is its own estimate.
+    std::optional<double> take_gpu_frame_seconds() override {
+        if (m_gpu_frame_seconds.empty()) {
+            return std::nullopt;
+        }
+        const double seconds = m_gpu_frame_seconds.front();
+        m_gpu_frame_seconds.pop_front();
+        return seconds;
+    }
+
     std::optional<MemoryUsage> memory_usage() override {
         if (m_allocator == VK_NULL_HANDLE) {
             return std::nullopt;
@@ -538,6 +555,7 @@ public:
         if (result != VK_SUCCESS) {
             return vulkan_error("Waiting for the GPU", result);
         }
+        read_frame_timestamps(frame);
 
         result = vkAcquireNextImageKHR(m_device, m_swapchain,
                                        std::numeric_limits<std::uint64_t>::max(),
@@ -577,6 +595,12 @@ public:
         if (result != VK_SUCCESS) {
             return vulkan_error("Starting a frame", result);
         }
+        if (m_timestamps != VK_NULL_HANDLE) {
+            const std::uint32_t first = m_frame_index * 2;
+            vkCmdResetQueryPool(frame.commands, m_timestamps, first, 2);
+            vkCmdWriteTimestamp(frame.commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_timestamps,
+                                first);
+        }
         m_recording = frame.commands;
         return static_cast<CommandList*>(this);
     }
@@ -585,6 +609,10 @@ public:
         DREAM_VERIFY(m_recording != VK_NULL_HANDLE, "end_frame called without begin_frame");
 
         FrameResources& frame = m_frames[m_frame_index];
+        if (m_timestamps != VK_NULL_HANDLE) {
+            vkCmdWriteTimestamp(frame.commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestamps,
+                                m_frame_index * 2 + 1);
+        }
         VkResult result = vkEndCommandBuffer(frame.commands);
         m_recording = VK_NULL_HANDLE;
         if (result != VK_SUCCESS) {
@@ -607,6 +635,7 @@ public:
         if (result != VK_SUCCESS) {
             return vulkan_error("Submitting a frame", result);
         }
+        frame.timestamps_written = m_timestamps != VK_NULL_HANDLE;
 
         const VkPresentInfoKHR present{
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -773,6 +802,58 @@ private:
         });
     }
 
+    // GPU timing, for take_gpu_frame_seconds: each frame slot owns two timestamps, written at the
+    // start and end of its commands, and read once the slot's fence says the GPU has finished.
+    // Optional, so a queue without timestamps only turns timing off.
+    void create_timestamps(const VkPhysicalDeviceProperties& properties) {
+        std::uint32_t count = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(m_physical_device, &count, nullptr);
+        std::vector<VkQueueFamilyProperties> families(count);
+        vkGetPhysicalDeviceQueueFamilyProperties(m_physical_device, &count, families.data());
+        const std::uint32_t valid_bits =
+            m_queue_family < count ? families[m_queue_family].timestampValidBits : 0;
+        if (valid_bits == 0 || properties.limits.timestampPeriod <= 0.0f) {
+            DREAM_LOG_INFO("This GPU's queue has no timestamps, so GPU time isn't measured");
+            return;
+        }
+
+        const VkQueryPoolCreateInfo info{
+            .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+            .queryType = VK_QUERY_TYPE_TIMESTAMP,
+            .queryCount = k_frames_in_flight * 2,
+        };
+        if (vkCreateQueryPool(m_device, &info, nullptr, &m_timestamps) != VK_SUCCESS) {
+            m_timestamps = VK_NULL_HANDLE;
+            return;
+        }
+        // Timestamps wrap around after `valid_bits` bits, and count ticks of this many nanoseconds.
+        m_timestamp_mask =
+            valid_bits >= 64 ? ~std::uint64_t{0} : (std::uint64_t{1} << valid_bits) - 1;
+        m_timestamp_period_ns = properties.limits.timestampPeriod;
+    }
+
+    // The slot's fence has signaled, so its timestamps are ready, and reading doesn't wait.
+    void read_frame_timestamps(FrameResources& frame) {
+        if (!frame.timestamps_written) {
+            return;
+        }
+        frame.timestamps_written = false;
+        const auto slot = static_cast<std::uint32_t>(&frame - m_frames.data());
+        std::array<std::uint64_t, 2> ticks{};
+        const VkResult result = vkGetQueryPoolResults(
+            m_device, m_timestamps, slot * 2, 2, sizeof(ticks), ticks.data(),
+            sizeof(std::uint64_t), VK_QUERY_RESULT_64_BIT);
+        if (result != VK_SUCCESS) {
+            return;
+        }
+        if (m_gpu_frame_seconds.size() == k_kept_gpu_frame_times) {
+            m_gpu_frame_seconds.pop_front();
+        }
+        const std::uint64_t elapsed = (ticks[1] - ticks[0]) & m_timestamp_mask;
+        m_gpu_frame_seconds.push_back(static_cast<double>(elapsed) *
+                                      static_cast<double>(m_timestamp_period_ns) * 1e-9);
+    }
+
     core::Result<void> create_device() {
         const float priority = 1.0f;
         const VkDeviceQueueCreateInfo queue{
@@ -826,6 +907,7 @@ private:
         vkGetPhysicalDeviceProperties(m_physical_device, &properties);
         m_uniform_alignment =
             std::max<VkDeviceSize>(properties.limits.minUniformBufferOffsetAlignment, 1);
+        create_timestamps(properties);
 
         // One layout for every pipeline: a uniform block, a texture, and push constants.
         const std::array bindings{
@@ -1775,6 +1857,10 @@ private:
     VkSampler m_sampler = VK_NULL_HANDLE;
     VkCommandPool m_upload_pool = VK_NULL_HANDLE;
     VkDeviceSize m_uniform_alignment = 1;
+    VkQueryPool m_timestamps = VK_NULL_HANDLE;
+    std::uint64_t m_timestamp_mask = 0;
+    float m_timestamp_period_ns = 0.0f;
+    std::deque<double> m_gpu_frame_seconds;
     TextureResource m_white_texture;
 
     VkSurfaceKHR m_surface = VK_NULL_HANDLE;

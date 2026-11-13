@@ -219,6 +219,15 @@ public:
     [[nodiscard]] virtual std::optional<MemoryUsage> memory_usage() {
         return std::nullopt;
     }
+
+    // An optional capability, for profiling: how long the GPU spent on a finished frame, from the
+    // start of the frame's commands to their end, in seconds. Each frame's time is given once,
+    // oldest first, and a few frames late, since the GPU runs behind the CPU. Nothing means no new
+    // time yet, and always for a backend that can't measure, which is the default. Call it after
+    // end_frame until it returns nothing. Backends keep only the last few times nobody took.
+    [[nodiscard]] virtual std::optional<double> take_gpu_frame_seconds() {
+        return std::nullopt;
+    }
 };
 
 } // namespace dream::rhi

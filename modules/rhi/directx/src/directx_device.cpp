@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <format>
 #include <limits>
 #include <memory>
@@ -145,6 +146,16 @@ struct TextureResource {
 // A graphics device on Direct3D 11, feature level 11.0, presenting with the DXGI flip model that
 // Windows 10 introduced. Direct3D 11 manages memory, synchronization and mipmaps itself, which is
 // why the backend is short next to the Vulkan one.
+// One frame's GPU timing queries.
+struct FrameTimingQueries {
+    ComPtr<ID3D11Query> disjoint;
+    ComPtr<ID3D11Query> start;
+    ComPtr<ID3D11Query> end;
+};
+
+// How many measured frames are kept for take_gpu_frame_seconds before the oldest are dropped.
+constexpr std::size_t k_kept_gpu_frame_times = 16;
+
 class DirectXDevice final : public Device, private CommandList {
 public:
     DirectXDevice() = default;
@@ -166,6 +177,7 @@ public:
         if (auto result = create_shared_state(); !result.has_value()) {
             return result;
         }
+        create_timing_queries();
 
         constexpr std::array k_white_pixel{std::byte{255}, std::byte{255}, std::byte{255},
                                            std::byte{255}};
@@ -240,6 +252,16 @@ public:
 
     std::string_view shader_file_suffix() const override {
         return ".dxbc";
+    }
+
+    std::optional<double> take_gpu_frame_seconds() override {
+        collect_frame_timings();
+        if (m_gpu_frame_seconds.empty()) {
+            return std::nullopt;
+        }
+        const double seconds = m_gpu_frame_seconds.front();
+        m_gpu_frame_seconds.pop_front();
+        return seconds;
     }
 
     // The system's own count of this program's dedicated video memory, and its budget, which
@@ -430,6 +452,7 @@ public:
         m_vertex_buffer_offset = 0;
         m_vertex_buffer_dirty = true;
         m_bound_stride = 0;
+        begin_frame_timing();
         return static_cast<CommandList*>(this);
     }
 
@@ -437,6 +460,8 @@ public:
         DREAM_VERIFY(m_in_frame, "end_frame called without begin_frame");
         DREAM_VERIFY(!m_in_pass, "The render pass was not ended");
         m_in_frame = false;
+        // Before presenting, so waiting for the display isn't part of the GPU's time.
+        end_frame_timing();
         if (!m_swapchain) {
             return {};
         }
@@ -518,6 +543,82 @@ private:
                        to_utf8(adapter_desc.Description), (level_bits >> 12) & 0xF,
                        (level_bits >> 8) & 0xF);
         return {};
+    }
+
+    // GPU timing, for take_gpu_frame_seconds. Each frame uses one set of queries from a ring: two
+    // timestamps, and a disjoint query that gives their frequency and says whether they can be
+    // trusted. The driver may queue a few frames, so a set is read back some frames later, without
+    // waiting, and a frame goes untimed if every set is still waiting for the GPU.
+    //
+    // Every Direct3D 11 device has these queries, so failing to make them only turns timing off.
+    void create_timing_queries() {
+        const D3D11_QUERY_DESC disjoint{.Query = D3D11_QUERY_TIMESTAMP_DISJOINT, .MiscFlags = 0};
+        const D3D11_QUERY_DESC timestamp{.Query = D3D11_QUERY_TIMESTAMP, .MiscFlags = 0};
+        for (FrameTimingQueries& queries : m_timing_queries) {
+            if (FAILED(m_device->CreateQuery(&disjoint, &queries.disjoint)) ||
+                FAILED(m_device->CreateQuery(&timestamp, &queries.start)) ||
+                FAILED(m_device->CreateQuery(&timestamp, &queries.end))) {
+                DREAM_LOG_WARNING("Direct3D timestamp queries are unavailable, so GPU time "
+                                  "isn't measured");
+                return;
+            }
+        }
+        m_timing_available = true;
+    }
+
+    [[nodiscard]] FrameTimingQueries& next_timing_queries() {
+        return m_timing_queries[(m_timing_oldest + m_timing_pending) % m_timing_queries.size()];
+    }
+
+    void begin_frame_timing() {
+        collect_frame_timings();
+        m_timing_this_frame = m_timing_available && m_timing_pending < m_timing_queries.size();
+        if (m_timing_this_frame) {
+            FrameTimingQueries& queries = next_timing_queries();
+            m_context->Begin(queries.disjoint.Get());
+            m_context->End(queries.start.Get());
+        }
+    }
+
+    void end_frame_timing() {
+        if (!m_timing_this_frame) {
+            return;
+        }
+        FrameTimingQueries& queries = next_timing_queries();
+        m_context->End(queries.end.Get());
+        m_context->End(queries.disjoint.Get());
+        ++m_timing_pending;
+        m_timing_this_frame = false;
+    }
+
+    // Reads the finished query sets, oldest first, and stops at the first one that isn't.
+    void collect_frame_timings() {
+        // Presenting already sends the queries to the GPU, so there is no need to flush, and not
+        // waiting is the point.
+        const auto read = [this](ID3D11Query* query, auto& data) {
+            return m_context->GetData(query, &data, static_cast<UINT>(sizeof(data)),
+                                      D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK;
+        };
+        while (m_timing_pending > 0) {
+            FrameTimingQueries& queries = m_timing_queries[m_timing_oldest];
+            D3D11_QUERY_DATA_TIMESTAMP_DISJOINT disjoint{};
+            if (!read(queries.disjoint.Get(), disjoint)) {
+                return;
+            }
+            UINT64 start = 0;
+            UINT64 end = 0;
+            const bool timed = read(queries.start.Get(), start) && read(queries.end.Get(), end);
+            // A disjoint interval, such as one where the GPU changed its clock, has no usable time.
+            if (timed && !disjoint.Disjoint && disjoint.Frequency > 0 && end >= start) {
+                if (m_gpu_frame_seconds.size() == k_kept_gpu_frame_times) {
+                    m_gpu_frame_seconds.pop_front();
+                }
+                m_gpu_frame_seconds.push_back(static_cast<double>(end - start) /
+                                              static_cast<double>(disjoint.Frequency));
+            }
+            m_timing_oldest = (m_timing_oldest + 1) % m_timing_queries.size();
+            --m_timing_pending;
+        }
     }
 
     // The sampler, constant buffers and per-frame vertex memory that every pipeline shares.
@@ -1131,6 +1232,15 @@ private:
     core::HandlePool<BufferResource> m_buffers;
     core::HandlePool<ShaderResource> m_shaders;
     core::HandlePool<PipelineResource> m_pipelines;
+
+    // Enough for the three frames DXGI queues by default, and the one being recorded.
+    std::array<FrameTimingQueries, 4> m_timing_queries;
+    bool m_timing_available = false;
+    bool m_timing_this_frame = false;
+    // The ring's sets waiting for the GPU are the `m_timing_pending` from `m_timing_oldest` on.
+    std::size_t m_timing_oldest = 0;
+    std::size_t m_timing_pending = 0;
+    std::deque<double> m_gpu_frame_seconds;
 };
 
 core::Result<std::unique_ptr<Device>> create(const core::Config& config) {

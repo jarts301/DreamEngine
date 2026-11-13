@@ -20,9 +20,10 @@ struct FrameTiming {
     int fixed_steps = 0;
 };
 
-// Records the resource values described in docs/adr/0016-profiling-resources.md: frame timing and
-// the heap every frame, and process, video and tracked memory `samples_per_second` times a second.
-// While no profiler is installed it only checks that, and reads nothing.
+// Records the resource values described in docs/adr/0016-profiling-resources.md: frame timing, GPU
+// time (docs/adr/0017-gpu-frame-time.md) and the heap every frame, and process, video and tracked
+// memory `samples_per_second` times a second. While no profiler is installed it only takes the
+// device's GPU times, so they don't go stale, and reads nothing else.
 class ResourceMonitor {
 public:
     explicit ResourceMonitor(std::uint32_t samples_per_second);
