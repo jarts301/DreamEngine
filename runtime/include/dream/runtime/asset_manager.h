@@ -67,6 +67,11 @@ public:
             return std::static_pointer_cast<const T>(cached);
         }
 
+        if (m_refusing_loads) {
+            return core::Error{core::ErrorCode::OutOfMemory,
+                               std::format("Not loading '{}': memory is critically low", path)};
+        }
+
         const auto loader = m_loaders.find(type);
         if (loader == m_loaders.end()) {
             return core::Error{core::ErrorCode::InvalidArgument,
@@ -92,6 +97,18 @@ public:
         return asset;
     }
 
+    // While on, loading an asset that isn't already in memory fails with ErrorCode::OutOfMemory
+    // instead of allocating for it, so a load fails cleanly rather than the program running out.
+    // Assets already loaded are still returned. The App turns it on while memory pressure is
+    // critical (docs/adr/0018-memory-budgets.md).
+    void set_refusing_loads(bool refusing) noexcept {
+        m_refusing_loads = refusing;
+    }
+
+    [[nodiscard]] bool is_refusing_loads() const noexcept {
+        return m_refusing_loads;
+    }
+
     // Whether `path` is currently in memory as a T.
     template <typename T> [[nodiscard]] bool is_loaded(std::string_view path) const {
         return find_cached(Key{&detail::g_asset_tag<T>, std::string(path)}) != nullptr;
@@ -114,6 +131,7 @@ private:
     std::map<const void*, std::shared_ptr<const void>> m_loaders;
     std::map<Key, std::weak_ptr<const void>> m_cache;
     std::vector<Key> m_loading;
+    bool m_refusing_loads = false;
 };
 
 } // namespace dream::runtime

@@ -24,6 +24,24 @@ struct ProcessMemory {
 // second at most.
 [[nodiscard]] std::optional<ProcessMemory> process_memory();
 
+// The whole system's memory, for deciding how much room is left. See
+// docs/adr/0018-memory-budgets.md.
+struct SystemMemory {
+    std::uint64_t total_physical_bytes = 0;
+
+    // RAM that can be given to programs without swapping: MemAvailable on Linux, available
+    // physical memory on Windows. Below a little of this, the system starts paging.
+    std::uint64_t available_physical_bytes = 0;
+
+    // How much more this process can allocate before allocations fail or the system ends it. On
+    // Windows, what it can still commit. On Linux, available RAM plus free swap, and no more than
+    // the commit limit when the system doesn't overcommit.
+    std::uint64_t available_commit_bytes = 0;
+};
+
+// Nothing on platforms where it isn't known. Costs a system call or two.
+[[nodiscard]] std::optional<SystemMemory> system_memory();
+
 // CPU time used by all of the process's threads so far, in user and kernel mode. Windows updates it
 // once per scheduler tick, about every 15 ms, so short intervals read unevenly.
 [[nodiscard]] std::optional<double> process_cpu_seconds();

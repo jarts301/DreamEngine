@@ -13,6 +13,11 @@ debug_tools = false
 [profiler.timeline]
 path = "dream_arcade_trace.json"
 
+# Memory is watched with the engine's defaults. A game can also give itself a budget, as
+# docs/reports/memory-budgets.md explains:
+[memory]
+budget_mb = 1024
+
 [input.actions]
 throw = ["key:space", "mouse:left", "touch"]
 menu = ["key:escape", "key:back"]

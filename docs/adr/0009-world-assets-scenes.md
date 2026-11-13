@@ -1,6 +1,7 @@
 # 0009. World, events, assets and scenes
 
-- Status: Accepted
+- Status: Accepted, extended by [0018](0018-memory-budgets.md), under which the AssetManager
+  refuses new assets while memory is critically low
 - Date: 2026-11-09
 
 ## Decision

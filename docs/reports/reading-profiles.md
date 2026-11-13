@@ -13,6 +13,7 @@ Profiles now record resources as well as time, with no code in the game:
 | GPU | `GPU memory (MB)`, `GPU memory budget (MB)` | 10 times a second |
 | Engine budgets | `Tracked <tag> (MB)` | 10 times a second, once used |
 | Engine systems | `Draw calls`, `Debug lines`, `UI draw commands`, `Physics 3D bodies`, `Physics 3D contact events`, the 2D ones, `Audio voices`, `World transforms` | Each time the system runs |
+| Memory guard | `Memory pressure`, `System RAM available (MB)`, `System commit available (MB)`, `Memory budget used (%)` | Each memory check, 4 times a second |
 
 Each value is a number over time. The most important rules for reading them:
 
@@ -191,6 +192,13 @@ The two systems count differently, so compare runs on the same system.
 - **A step up on loading and a step down on unloading** is normal. If the step down is smaller than
   the step up, something from the old level stayed loaded. Assets are freed when nothing refers to
   them any more (ADR 0009), so look for a reference kept by the game.
+
+### Memory pressure and the system's memory
+
+The engine's memory guard records its readings at each check: `Memory pressure` (0 normal,
+1 warning, 2 critical), the system's free RAM and room to allocate, and, when the game has a
+budget, how much of it is used. [Memory budgets](memory-budgets.md) explains the levels and what
+the game should do at each.
 
 ## 4. The heap
 

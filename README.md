@@ -154,6 +154,21 @@ it.
 with `-DDREAM_PROFILING=OFF` removes the zones from the build entirely. See
 [ADR 0015](docs/adr/0015-profiling.md) and [ADR 0016](docs/adr/0016-profiling-resources.md).
 
+## Running out of memory
+
+Every game watches its memory and the system's. When memory runs low, `Game::on_low_memory` is
+called so the game can free some, new assets are refused while it is critically low, and an
+emergency reserve lets an allocation that fails succeed, instead of the game crashing. A game can
+also give itself a budget:
+
+```toml
+[memory]
+budget_mb = 2048   # The most private memory the game means to use.
+```
+
+[Memory budgets](docs/reports/memory-budgets.md) describes the strategy and what a game should do.
+See [ADR 0018](docs/adr/0018-memory-budgets.md).
+
 To check the layer rules locally (needs Python 3):
 
 ```bash

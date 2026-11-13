@@ -10,6 +10,8 @@ add_library(dream_runtime STATIC
     src/debug_lines.cpp
     src/event_bus.cpp
     src/input_actions.cpp
+    src/memory_budget.cpp
+    src/memory_guard.cpp
     src/model_loader.cpp
     src/physics_2d.cpp
     src/physics_3d.cpp
@@ -43,6 +45,7 @@ if(DREAM_BUILD_TESTS)
             tests/event_bus_test.cpp
             tests/heap_counting_test.cpp
             tests/input_actions_test.cpp
+            tests/memory_budget_test.cpp
             tests/model_loader_test.cpp
             tests/physics_test.cpp
             tests/profiling_test.cpp
@@ -53,6 +56,15 @@ if(DREAM_BUILD_TESTS)
             tests/world_test.cpp
             # Profiled games count their allocations with this, so the tests run on top of it too.
             entry/heap_counting.cpp
+        LIBRARIES
+            dream::runtime
+    )
+
+    # Runs a game out of memory under a limit the program sets on itself, which can't be lifted,
+    # so it is a program of its own.
+    dream_add_test(dream_runtime_memory_exhaustion_test
+        SOURCES
+            tests/memory_exhaustion_test.cpp
         LIBRARIES
             dream::runtime
     )

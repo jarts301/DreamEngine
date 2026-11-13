@@ -4,6 +4,7 @@
 #include "dream/core/log.h"
 #include "dream/core/profile.h"
 
+#include "memory_guard.h"
 #include "resource_monitor.h"
 
 #include <algorithm>
@@ -35,6 +36,12 @@ core::Result<std::uint32_t> read_setting(const core::Config& config, std::string
 
 double seconds_since(core::TimePoint start) {
     return std::chrono::duration<double>(core::now() - start).count();
+}
+
+std::string megabytes(const std::optional<std::uint64_t>& bytes) {
+    return bytes.has_value()
+               ? std::format("{:.1f} MB", static_cast<double>(*bytes) / (1024.0 * 1024.0))
+               : "unknown";
 }
 
 } // namespace
@@ -130,6 +137,18 @@ core::Result<void> App::run(Game& game) {
                            "Setting 'profiler.sample_rate' can be at most 1000"};
     }
 
+    const core::Result<MemorySettings> memory_settings = MemorySettings::from_config(m_config);
+    if (!memory_settings.has_value()) {
+        return memory_settings.error();
+    }
+    m_refuse_loads_when_critical = memory_settings.value().refuse_loads;
+    // Before the game starts, because loading in on_start is when memory is most likely to run
+    // out. The game can read the first check's result there, through memory_pressure().
+    MemoryGuard memory(memory_settings.value());
+    if (const std::optional<MemoryPressureChanged> change = memory.check(core::now())) {
+        handle_memory_pressure(game, *change, false);
+    }
+
     const platform::WindowSettings window{
         .title = std::string(m_config.get_string("app.title").value_or("Dream Engine")),
         .width = width.value(),
@@ -185,6 +204,10 @@ core::Result<void> App::run(Game& game) {
         FrameTiming timing;
         {
             DREAM_PROFILE_ZONE("Frame");
+            // First, so the game hears of a change before it updates.
+            if (const std::optional<MemoryPressureChanged> change = memory.check(core::now())) {
+                handle_memory_pressure(game, *change, true);
+            }
             {
                 DREAM_PROFILE_ZONE("Queued events");
                 m_events.flush();
@@ -231,6 +254,37 @@ core::Result<void> App::run(Game& game) {
         game.on_stop(*this);
     }
     return outcome;
+}
+
+void App::handle_memory_pressure(Game& game, const MemoryPressureChanged& change, bool started) {
+    m_memory_pressure = change.pressure;
+    m_assets.set_refusing_loads(m_refuse_loads_when_critical &&
+                                change.pressure == MemoryPressure::Critical);
+
+    const MemoryReading& reading = change.reading;
+    const std::string details = std::format(
+        "private memory {}, system RAM available {}, room to allocate {}{}",
+        megabytes(reading.process_bytes), megabytes(reading.available_physical_bytes),
+        megabytes(reading.available_commit_bytes),
+        reading.allocation_failed ? ", and an allocation failed" : "");
+    switch (change.pressure) {
+    case MemoryPressure::Critical:
+        DREAM_LOG_ERROR("Memory pressure is critical: {}{}", details,
+                        m_refuse_loads_when_critical ? ". New assets are refused until it eases"
+                                                     : "");
+        break;
+    case MemoryPressure::Warning:
+        DREAM_LOG_WARNING("Memory pressure is raised: {}", details);
+        break;
+    case MemoryPressure::Normal:
+        DREAM_LOG_INFO("Memory pressure is back to normal: {}", details);
+        break;
+    }
+
+    m_events.publish(change);
+    if (started && change.pressure > change.previous) {
+        game.on_low_memory(*this);
+    }
 }
 
 void App::pump_events(Game& game) {

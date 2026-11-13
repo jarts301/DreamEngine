@@ -31,6 +31,13 @@ For that, add `RENDERER` to `dream_add_game`. See [ADR 0010](../docs/adr/0010-re
 `runtime::UserInterface` and `runtime::DebugOverlay`, which need `audio`, `ui` and `debug_ui`
 listed the same way.
 
+## Memory
+
+The App watches memory as `[memory]` in the project configuration sets out, and calls
+`Game::on_low_memory` when it runs low, on every platform. `App::memory_pressure` tells the level,
+and the AssetManager refuses new assets while it is critical. See
+[Memory budgets](../docs/reports/memory-budgets.md) and [ADR 0018](../docs/adr/0018-memory-budgets.md).
+
 ## Profiling
 
 A game needs no code to be profiled: listing `profiler` under `[modules.<platform>]` makes

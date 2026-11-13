@@ -9,6 +9,7 @@
 #include "dream/runtime/event_bus.h"
 #include "dream/runtime/game.h"
 #include "dream/runtime/input_actions.h"
+#include "dream/runtime/memory_budget.h"
 #include "dream/runtime/scene_loader.h"
 #include "dream/runtime/virtual_file_system.h"
 
@@ -33,6 +34,10 @@ namespace dream::runtime {
 //
 //     [profiler]
 //     sample_rate = 10  # Times per second. Frame timing and the heap are recorded every frame.
+//
+// It watches memory as [memory] sets out (see MemorySettings), so the game can free memory before
+// it runs out. When the pressure rises, Game::on_low_memory is called, and every change is
+// published as MemoryPressureChanged. See docs/reports/memory-budgets.md.
 class App {
 public:
     // `config` must outlive this object. `device` is null for a program that draws nothing.
@@ -102,6 +107,11 @@ public:
         m_platform->set_text_input(enabled);
     }
 
+    // How close the game is to running out of memory, as of the last check.
+    [[nodiscard]] MemoryPressure memory_pressure() const noexcept {
+        return m_memory_pressure;
+    }
+
     [[nodiscard]] double fixed_step_seconds() const noexcept {
         return m_fixed_steps.step_seconds();
     }
@@ -133,6 +143,8 @@ private:
     void pump_events(Game& game);
     void handle_event(Game& game, const platform::Event& event);
     [[nodiscard]] core::Result<void> attach_surface();
+    // `started` is whether Game::on_start has run, and so whether the game can be told.
+    void handle_memory_pressure(Game& game, const MemoryPressureChanged& change, bool started);
     // Adds the time spent waiting on the device to `wait_seconds`.
     [[nodiscard]] core::Result<void> render_frame(Game& game, double& wait_seconds);
 
@@ -152,6 +164,8 @@ private:
     bool m_paused = false;
     bool m_has_surface = true;
     bool m_surface_attached = false;
+    MemoryPressure m_memory_pressure = MemoryPressure::Normal;
+    bool m_refuse_loads_when_critical = true;
 };
 
 } // namespace dream::runtime

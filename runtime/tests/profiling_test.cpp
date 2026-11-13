@@ -372,6 +372,9 @@ TEST_CASE("The main loop records frame timing, the heap, and memory from the sys
     CHECK(gpu_times[1] == doctest::Approx(5.5));
     CHECK(device.gpu_frame_seconds.empty());
 
+    // The memory guard's readings, from its first check.
+    CHECK_FALSE(log.values("Memory pressure").empty());
+
     // Sampled, starting with the first frame.
     CHECK(log.values("GPU memory (MB)").front() == 256.0);
     CHECK(log.values("GPU memory budget (MB)").front() == 1024.0);

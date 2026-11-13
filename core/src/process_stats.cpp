@@ -1,5 +1,6 @@
 #include "dream/core/process_stats.h"
 
+#include <algorithm>
 #include <atomic>
 
 #if defined(_WIN32)
@@ -38,6 +39,20 @@ std::optional<ProcessMemory> process_memory() {
         .resident_bytes = counters.WorkingSetSize,
         .peak_resident_bytes = counters.PeakWorkingSetSize,
         .private_bytes = counters.PrivateUsage,
+    };
+}
+
+std::optional<SystemMemory> system_memory() {
+    MEMORYSTATUSEX status{};
+    status.dwLength = sizeof(status);
+    if (GlobalMemoryStatusEx(&status) == 0) {
+        return std::nullopt;
+    }
+    // ullAvailPageFile is what this process can still commit, which is where allocations fail.
+    return SystemMemory{
+        .total_physical_bytes = status.ullTotalPhys,
+        .available_physical_bytes = status.ullAvailPhys,
+        .available_commit_bytes = status.ullAvailPageFile,
     };
 }
 
@@ -98,6 +113,61 @@ std::optional<ProcessMemory> process_memory() {
     return memory;
 }
 
+std::optional<SystemMemory> system_memory() {
+    std::FILE* const file = std::fopen("/proc/meminfo", "r");
+    if (file == nullptr) {
+        return std::nullopt;
+    }
+
+    std::uint64_t total = 0;
+    std::uint64_t available = 0;
+    std::uint64_t swap_free = 0;
+    std::uint64_t commit_limit = 0;
+    std::uint64_t committed = 0;
+    bool found_available = false;
+    char line[256];
+    while (std::fgets(line, sizeof(line), file) != nullptr) {
+        // Lines look like "MemAvailable:    123456 kB".
+        const auto read = [&line](const char* key, std::uint64_t& bytes) {
+            const std::size_t length = std::strlen(key);
+            if (std::strncmp(line, key, length) != 0) {
+                return false;
+            }
+            bytes = std::strtoull(line + length, nullptr, 10) * 1024;
+            return true;
+        };
+        if (read("MemAvailable:", available)) {
+            found_available = true;
+        } else if (!read("MemTotal:", total) && !read("SwapFree:", swap_free) &&
+                   !read("CommitLimit:", commit_limit)) {
+            read("Committed_AS:", committed);
+        }
+    }
+    std::fclose(file);
+    // MemAvailable needs Linux 3.14.
+    if (!found_available) {
+        return std::nullopt;
+    }
+
+    SystemMemory memory{
+        .total_physical_bytes = total,
+        .available_physical_bytes = available,
+        .available_commit_bytes = available + swap_free,
+    };
+    // In strict mode (vm.overcommit_memory = 2) allocations fail at the commit limit, as on
+    // Windows. Otherwise the limit is only advisory, and running out of RAM and swap is what ends
+    // a program.
+    if (std::FILE* const mode_file = std::fopen("/proc/sys/vm/overcommit_memory", "r")) {
+        const int mode = std::fgetc(mode_file);
+        std::fclose(mode_file);
+        if (mode == '2') {
+            const std::uint64_t room = commit_limit > committed ? commit_limit - committed : 0;
+            memory.available_commit_bytes = std::min(memory.available_commit_bytes, room);
+        }
+    }
+    return memory;
+}
+
 std::optional<double> process_cpu_seconds() {
     timespec time{};
     if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time) != 0) {
@@ -109,6 +179,10 @@ std::optional<double> process_cpu_seconds() {
 #else
 
 std::optional<ProcessMemory> process_memory() {
+    return std::nullopt;
+}
+
+std::optional<SystemMemory> system_memory() {
     return std::nullopt;
 }
 

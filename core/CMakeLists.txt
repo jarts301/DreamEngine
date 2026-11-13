@@ -10,6 +10,7 @@ add_library(dream_core STATIC
     src/linear_allocator.cpp
     src/log.cpp
     src/memory.cpp
+    src/memory_reserve.cpp
     src/module_project.cpp
     src/module_registry.cpp
     src/pool_allocator.cpp
@@ -50,6 +51,7 @@ if(DREAM_BUILD_TESTS)
             tests/job_system_test.cpp
             tests/log_test.cpp
             tests/math_test.cpp
+            tests/memory_reserve_test.cpp
             tests/memory_test.cpp
             tests/module_test.cpp
             tests/process_stats_test.cpp

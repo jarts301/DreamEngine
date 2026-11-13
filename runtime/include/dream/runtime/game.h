@@ -46,6 +46,9 @@ public:
 
     virtual void on_surface_resized(App& /*app*/, platform::SurfaceSize /*size*/) {}
 
+    // Called when memory runs low: on Android when the system says so, and on every platform when
+    // the App's memory pressure rises (App::memory_pressure). Free what can be rebuilt, such as
+    // caches and assets the current scene doesn't need. See docs/reports/memory-budgets.md.
     virtual void on_low_memory(App& /*app*/) {}
 };
 
