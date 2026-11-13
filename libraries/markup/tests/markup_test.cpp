@@ -3,6 +3,7 @@
 
 #include <doctest/doctest.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -59,13 +60,27 @@ public:
     TextureId next = 0;
 };
 
+// A phone running the tests can point at its own copies of the fonts and sample files, since the
+// built-in paths are on the build machine.
+std::string test_path(const char* variable, const char* built_in) {
+#if defined(_WIN32)
+    static_cast<void>(variable);
+    return built_in;
+#else
+    const char* const set = std::getenv(variable);
+    return set != nullptr ? set : built_in;
+#endif
+}
+
 struct Fixture {
     TestHost host;
     Context ui{host};
 
     Fixture() {
-        host.add_disk_file("assets:/fonts/regular.ttf", DREAM_TEST_FONT);
-        host.add_disk_file("assets:/fonts/bold.ttf", DREAM_TEST_BOLD_FONT);
+        host.add_disk_file("assets:/fonts/regular.ttf",
+                           test_path("DREAM_TEST_FONT", DREAM_TEST_FONT));
+        host.add_disk_file("assets:/fonts/bold.ttf",
+                           test_path("DREAM_TEST_BOLD_FONT", DREAM_TEST_BOLD_FONT));
         REQUIRE(ui.load_font("assets:/fonts/regular.ttf"));
         REQUIRE(ui.load_font("assets:/fonts/bold.ttf"));
     }
@@ -329,7 +344,8 @@ TEST_CASE_FIXTURE(Fixture, "markup shows images at their size") {
 // The arcade demo's own interface files, read from the samples, must lay out as their style sheet
 // says and react to the pointer as RmlUi does with them.
 TEST_CASE_FIXTURE(Fixture, "markup lays out the arcade demo's interface") {
-    const std::string ui_folder = std::string(DREAM_TEST_SAMPLES) + "/arcade_demo/assets/ui/";
+    const std::string ui_folder =
+        test_path("DREAM_TEST_SAMPLES", DREAM_TEST_SAMPLES) + "/arcade_demo/assets/ui/";
     host.add_disk_file("assets:/ui/hud.rml", ui_folder + "hud.rml");
     host.add_disk_file("assets:/ui/menu.rml", ui_folder + "menu.rml");
     host.add_disk_file("assets:/ui/style.rcss", ui_folder + "style.rcss");

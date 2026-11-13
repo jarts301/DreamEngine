@@ -359,11 +359,14 @@ TEST_CASE("The main loop records frame timing, the heap, and memory from the sys
         CHECK(work_times[frame] <= frame_times[frame]);
     }
     CHECK(log.values("Fixed steps per frame").size() == 3);
-    // The test program counts its heap, as profiled games do. The first frame has no earlier one
-    // to compare with.
+#if (defined(_WIN32) || defined(__linux__)) && !defined(__ANDROID__)
+    // The test program counts its heap, as profiled games do, which runtime/entry/heap_counting.cpp
+    // does on Windows and Linux but not Android. The first frame has no earlier one to compare
+    // with.
     CHECK(log.values("Heap allocations per frame").size() == 2);
     CHECK(log.values("Heap allocated per frame (KB)").size() == 2);
     CHECK(log.values("Heap in use (MB)").size() == 3);
+#endif
 
     // Every GPU time the device had, oldest first, and none left behind.
     const std::vector<double> gpu_times = log.values("GPU frame time (ms)");
@@ -372,8 +375,11 @@ TEST_CASE("The main loop records frame timing, the heap, and memory from the sys
     CHECK(gpu_times[1] == doctest::Approx(5.5));
     CHECK(device.gpu_frame_seconds.empty());
 
-    // The memory guard's readings, from its first check.
+#if !defined(__ANDROID__)
+    // The memory guard's readings, from its first check. Memory watching is off by default on
+    // Android.
     CHECK_FALSE(log.values("Memory pressure").empty());
+#endif
 
     // Sampled, starting with the first frame.
     CHECK(log.values("GPU memory (MB)").front() == 256.0);
@@ -423,9 +429,12 @@ TEST_CASE("Frame CPU work leaves out waiting for the frame limiter, and CPU use 
     CHECK(total_work + 20.0 < total_time);
 
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
-    // Each sample after the first measures the CPU use since the one before.
+    // Each sample after the first measures the CPU use since the one before. A frame that follows
+    // an overslept one can come less than the sampling interval later, and then takes no sample, so
+    // a busy machine may record one instead of two.
     const std::vector<double> cpu = log.values("CPU usage (%)");
-    CHECK(cpu.size() == 2);
+    CHECK_FALSE(cpu.empty());
+    CHECK(cpu.size() <= 2);
     for (const double percent : cpu) {
         CHECK(percent >= 0.0);
     }

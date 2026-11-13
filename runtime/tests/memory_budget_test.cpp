@@ -240,9 +240,11 @@ core::Result<void> run_game(MemoryGame& game, std::string_view memory_settings, 
 
 TEST_CASE("A game over its memory budget knows it from the start, and new assets are refused") {
     MemoryGame game;
-    // 10 KB, which any process is over.
-    REQUIRE(run_game(game, "budget_mb = 0.01\nlow_system_mb = 0\ncritical_system_mb = 0\n", 2)
-                .has_value());
+    // 10 KB, which any process is over. Watching is turned on, since it is off by default on
+    // Android.
+    constexpr std::string_view k_settings =
+        "enabled = true\nbudget_mb = 0.01\nlow_system_mb = 0\ncritical_system_mb = 0\n";
+    REQUIRE(run_game(game, k_settings, 2).has_value());
     CHECK(game.pressure_at_start == MemoryPressure::Critical);
     CHECK(game.refusing_at_start);
     // Still critical, and no change to report, so no call.
@@ -254,8 +256,10 @@ TEST_CASE("A game over its memory budget knows it from the start, and new assets
 TEST_CASE("A failed allocation makes the pressure critical until the reserve is taken back") {
     MemoryGame game;
     game.fail_on_first_frame = true;
+    // Watching is turned on, since it is off by default on Android.
     constexpr std::string_view k_settings =
-        "low_system_mb = 0\ncritical_system_mb = 0\nreserve_mb = 1\ncheck_rate = 1000\n";
+        "enabled = true\nlow_system_mb = 0\ncritical_system_mb = 0\nreserve_mb = 1\n"
+        "check_rate = 1000\n";
     REQUIRE(run_game(game, k_settings, 4).has_value());
 
     CHECK(game.pressure_at_start == MemoryPressure::Normal);

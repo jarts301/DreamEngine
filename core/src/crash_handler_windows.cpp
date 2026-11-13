@@ -10,6 +10,7 @@
 #include <windows.h>
 // After windows.h, which they need.
 #include <dbghelp.h>
+#include <eh.h>
 #include <psapi.h>
 
 #include <csignal>
@@ -403,7 +404,10 @@ bool install_platform() noexcept {
     // No "abort() has been called" dialog, and no second report through Windows Error Reporting:
     // this report replaces both, and the dialog would stop an unattended run.
     g_previous_abort_behavior = _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
-    g_previous_terminate = std::set_terminate(&on_terminate);
+    // The C runtime's own handler. Built without exceptions, as the engine is, std::set_terminate
+    // does nothing and std::terminate calls abort(), which the SIGABRT handler above reports. Code
+    // built with exceptions, such as some libraries, still reaches this one.
+    g_previous_terminate = ::set_terminate(&on_terminate);
     g_previous_purecall = _set_purecall_handler(&on_purecall);
     g_previous_invalid_parameter = _set_invalid_parameter_handler(&on_invalid_parameter);
     return true;
@@ -413,7 +417,7 @@ void uninstall_platform() noexcept {
     SetUnhandledExceptionFilter(g_previous_filter);
     std::signal(SIGABRT, g_previous_abort);
     _set_abort_behavior(g_previous_abort_behavior, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
-    std::set_terminate(g_previous_terminate);
+    ::set_terminate(g_previous_terminate);
     _set_purecall_handler(g_previous_purecall);
     _set_invalid_parameter_handler(g_previous_invalid_parameter);
 

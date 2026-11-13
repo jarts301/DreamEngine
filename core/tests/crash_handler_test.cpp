@@ -17,11 +17,19 @@
 #include <csignal>
 #endif
 
+#if defined(_WIN32)
+#include <eh.h>
+#endif
+
 using namespace dream::core;
 
 namespace {
 
 namespace fs = std::filesystem;
+
+// Only the tests of installing a handler use these, and those run where crash reports are caught,
+// which isn't Android.
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
 
 fs::path fresh_folder(std::string_view name) {
     const fs::path folder = fs::temp_directory_path() / "dream_crash_handler_tests" / name;
@@ -31,6 +39,26 @@ fs::path fresh_folder(std::string_view name) {
 }
 
 void test_terminate() {}
+
+// Built without exceptions, std::set_terminate does nothing on Windows, so the C runtime's own
+// functions are used there, as the crash handler does.
+std::terminate_handler swap_terminate(std::terminate_handler handler) {
+#if defined(_WIN32)
+    return ::set_terminate(handler);
+#else
+    return std::set_terminate(handler);
+#endif
+}
+
+std::terminate_handler current_terminate() {
+#if defined(_WIN32)
+    return ::_get_terminate();
+#else
+    return std::get_terminate();
+#endif
+}
+
+#endif
 
 std::string write_to_string(void (*write)(crash::ReportWriter&)) {
     std::string text;
@@ -62,7 +90,7 @@ TEST_CASE("crash kinds have names, both ways") {
 
 TEST_CASE("a crash handler makes its folder, and puts back the handlers it replaced") {
     const fs::path folder = fresh_folder("installs") / "nested";
-    const std::terminate_handler before = std::set_terminate(&test_terminate);
+    const std::terminate_handler before = swap_terminate(&test_terminate);
 #if defined(__linux__)
     struct sigaction previous {};
     sigaction(SIGSEGV, nullptr, &previous);
@@ -72,14 +100,14 @@ TEST_CASE("a crash handler makes its folder, and puts back the handlers it repla
         REQUIRE(handler.has_value());
         CHECK(fs::is_directory(folder));
         CHECK(handler.value()->directory().is_absolute());
-        CHECK(std::get_terminate() != &test_terminate);
+        CHECK(current_terminate() != &test_terminate);
 #if defined(__linux__)
         struct sigaction during {};
         sigaction(SIGSEGV, nullptr, &during);
         CHECK((during.sa_flags & SA_SIGINFO) != 0);
 #endif
     }
-    CHECK(std::get_terminate() == &test_terminate);
+    CHECK(current_terminate() == &test_terminate);
 #if defined(__linux__)
     struct sigaction after {};
     sigaction(SIGSEGV, nullptr, &after);
@@ -87,7 +115,7 @@ TEST_CASE("a crash handler makes its folder, and puts back the handlers it repla
     CHECK(after.sa_handler == previous.sa_handler);
     CHECK((after.sa_flags & SA_SIGINFO) == (previous.sa_flags & SA_SIGINFO));
 #endif
-    std::set_terminate(before);
+    swap_terminate(before);
 }
 
 TEST_CASE("only one crash handler is installed at a time") {

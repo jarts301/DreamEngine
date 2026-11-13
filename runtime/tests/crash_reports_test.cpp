@@ -34,7 +34,12 @@ public:
 TEST_CASE("Crash report settings have defaults, and read every key") {
     const core::Result<CrashReportConfig> defaults = read("");
     REQUIRE(defaults.has_value());
+#if defined(__ANDROID__)
+    // Off by default there, since crash reports aren't caught on Android.
+    CHECK_FALSE(defaults.value().enabled);
+#else
     CHECK(defaults.value().enabled);
+#endif
     CHECK(defaults.value().directory == std::filesystem::path("crash_reports"));
     CHECK(defaults.value().minidump);
     CHECK_FALSE(defaults.value().simulate.has_value());

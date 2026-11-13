@@ -126,9 +126,14 @@ bool Fonts::add(std::vector<std::byte> bytes, std::string& error) {
     auto face = std::make_unique<Face>();
     face->data.resize(bytes.size());
     std::memcpy(face->data.data(), bytes.data(), bytes.size());
+    // stb_truetype reads the header without knowing the file's size, so a file too short to hold
+    // one is refused first.
+    if (bytes.size() < 12) {
+        error = "The file is not a TrueType or OpenType font";
+        return false;
+    }
     const int start = stbtt_GetFontOffsetForIndex(face->data.data(), 0);
-    if (bytes.size() < 12 || start < 0 ||
-        stbtt_InitFont(&face->info, face->data.data(), start) == 0) {
+    if (start < 0 || stbtt_InitFont(&face->info, face->data.data(), start) == 0) {
         error = "The file is not a TrueType or OpenType font";
         return false;
     }

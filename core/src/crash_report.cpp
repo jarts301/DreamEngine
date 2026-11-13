@@ -18,6 +18,10 @@
 #include <system_error>
 #include <thread>
 
+#if defined(_WIN32)
+#include <eh.h>
+#endif
+
 namespace dream::core {
 namespace crash {
 
@@ -470,7 +474,13 @@ void simulate_crash(CrashKind kind) {
         DREAM_VERIFY(kind != CrashKind::Assert, "A simulated assertion failure");
         break;
     case CrashKind::Terminate:
+#if defined(_WIN32)
+        // Built without exceptions, std::terminate is only abort() on Windows. The C runtime's
+        // terminate is what code built with exceptions calls.
+        ::terminate();
+#else
         std::terminate();
+#endif
     }
     // Reached only if the crash above didn't happen, such as a division by zero on a processor
     // that doesn't trap it, or an assert handler that returns.
