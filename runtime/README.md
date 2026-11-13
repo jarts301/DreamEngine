@@ -38,6 +38,13 @@ The App watches memory as `[memory]` in the project configuration sets out, and 
 and the AssetManager refuses new assets while it is critical. See
 [Memory budgets](../docs/reports/memory-budgets.md) and [ADR 0018](../docs/adr/0018-memory-budgets.md).
 
+## Crashes
+
+`run_program` installs a crash handler from `[crash_report]` in the project configuration, so a
+crash leaves a report, and on Windows a minidump. `[crash_report] simulate` crashes on purpose to
+try it. See [Crash reports](../docs/reports/crash-reports.md) and
+[ADR 0019](../docs/adr/0019-crash-reports.md).
+
 ## Profiling
 
 A game needs no code to be profiled: listing `profiler` under `[modules.<platform>]` makes

@@ -1,8 +1,11 @@
 #include "dream/runtime/app.h"
 
 #include "dream/core/clock.h"
+#include "dream/core/crash_handler.h"
 #include "dream/core/log.h"
 #include "dream/core/profile.h"
+
+#include "dream/runtime/crash_reports.h"
 
 #include "memory_guard.h"
 #include "resource_monitor.h"
@@ -137,6 +140,12 @@ core::Result<void> App::run(Game& game) {
                            "Setting 'profiler.sample_rate' can be at most 1000"};
     }
 
+    // Only the simulated crash is read here. run_program installs the crash handler itself.
+    const core::Result<CrashReportConfig> crash_config = CrashReportConfig::from_config(m_config);
+    if (!crash_config.has_value()) {
+        return crash_config.error();
+    }
+
     const core::Result<MemorySettings> memory_settings = MemorySettings::from_config(m_config);
     if (!memory_settings.has_value()) {
         return memory_settings.error();
@@ -183,6 +192,8 @@ core::Result<void> App::run(Game& game) {
     core::Result<void> outcome;
     ResourceMonitor resources(sample_rate.value());
     std::optional<core::TimePoint> previous_frame_end;
+    // Counted from 0, as the profiler's frame marks are.
+    std::uint64_t frame_number = 0;
 
     while (m_running) {
         m_input.begin_frame();
@@ -202,6 +213,7 @@ core::Result<void> App::run(Game& game) {
         }
 
         FrameTiming timing;
+        core::set_crash_frame(frame_number);
         {
             DREAM_PROFILE_ZONE("Frame");
             // First, so the game hears of a change before it updates.
@@ -222,6 +234,14 @@ core::Result<void> App::run(Game& game) {
             {
                 DREAM_PROFILE_ZONE("Update");
                 game.on_update(*this, time);
+            }
+            if (crash_config.value().simulate.has_value() &&
+                frame_number == crash_config.value().simulate_after_frames) {
+                const core::CrashKind kind = *crash_config.value().simulate;
+                DREAM_LOG_WARNING("Crashing on purpose, with '{}', as [crash_report] simulate "
+                                  "asks",
+                                  core::crash_kind_name(kind));
+                core::simulate_crash(kind);
             }
 
             outcome = render_frame(game, timing.wait_seconds);
@@ -247,6 +267,7 @@ core::Result<void> App::run(Game& game) {
         // After the frame's zone and values, so a profiler that records a range of frames gets
         // each one whole.
         DREAM_PROFILE_FRAME();
+        ++frame_number;
     }
 
     {

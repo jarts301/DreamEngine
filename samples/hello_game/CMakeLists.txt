@@ -53,5 +53,31 @@ if(DREAM_BUILD_TESTS)
                     -P "${DreamEngine_SOURCE_DIR}/cmake/tests/check_trace.cmake"
                 WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
         endif()
+
+        # The game crashes on purpose, as [crash_report] simulate asks, and the check reads the
+        # report it leaves: the game, the frame, the modules, and the log up to the crash.
+        dream_add_game(dream_hello_game_crash SOURCES src/hello_game.cpp CONFIG tests/crash.toml
+            ASSETS assets)
+
+        if(NOT CMAKE_CROSSCOMPILING)
+            if(WIN32)
+                set(crash_reason "Access violation, writing address 0x0000000000000000")
+            else()
+                set(crash_reason "Segmentation fault (SIGSEGV)")
+            endif()
+            set(expected_report
+                "Application: Dream Hello" "Frame: 2" "platform module: null" "${crash_reason}"
+                "Crashing on purpose, with 'null_pointer'" "Stack trace")
+            list(JOIN expected_report "|" expected_report)
+            set(report_folder "${CMAKE_CURRENT_BINARY_DIR}/dream_hello_game_crash_reports")
+            add_test(NAME dream_hello_game_crash
+                COMMAND ${CMAKE_COMMAND}
+                    "-DPROGRAM=$<TARGET_FILE:dream_hello_game_crash>"
+                    "-DDIRECTORY=${report_folder}"
+                    "-DEXPECT=${expected_report}"
+                    "-DMINIDUMP=${WIN32}"
+                    -P "${DreamEngine_SOURCE_DIR}/cmake/tests/check_crash_report.cmake"
+                WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+        endif()
     endif()
 endif()

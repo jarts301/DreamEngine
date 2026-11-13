@@ -1,0 +1,25 @@
+# The game crashes on purpose in frame 2. cmake/tests/check_crash_report.cmake runs it and reads
+# the crash report it leaves.
+[app]
+title = "Dream Hello"
+max_fps = 0
+
+[platform.null]
+frame_limit = 10
+
+[input.actions]
+confirm = ["key:space"]
+quit = ["key:escape"]
+
+# Relative to the working directory, which the test sets.
+[crash_report]
+directory = "dream_hello_game_crash_reports"
+simulate = "null_pointer"
+simulate_after_frames = 2
+
+# Crash reports are for PC for now, so this test is not built for Android.
+[modules.windows]
+platform = ["null"]
+
+[modules.linux]
+platform = ["null"]

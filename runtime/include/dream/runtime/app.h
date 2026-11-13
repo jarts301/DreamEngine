@@ -2,6 +2,7 @@
 
 #include "dream/core/clock.h"
 #include "dream/core/config.h"
+#include "dream/core/crash_handler.h"
 #include "dream/core/module_project.h"
 #include "dream/core/result.h"
 #include "dream/platform/platform.h"
@@ -13,6 +14,7 @@
 #include "dream/runtime/scene_loader.h"
 #include "dream/runtime/virtual_file_system.h"
 
+#include <format>
 #include <memory>
 
 namespace dream::runtime {
@@ -38,6 +40,9 @@ namespace dream::runtime {
 // It watches memory as [memory] sets out (see MemorySettings), so the game can free memory before
 // it runs out. When the pressure rises, Game::on_low_memory is called, and every change is
 // published as MemoryPressureChanged. See docs/reports/memory-budgets.md.
+//
+// The frame it is on goes into crash reports, and [crash_report] simulate crashes it on purpose
+// (see CrashReportConfig).
 class App {
 public:
     // `config` must outlive this object. `device` is null for a program that draws nothing.
@@ -132,6 +137,9 @@ public:
         if (!created.has_value()) {
             return created.error();
         }
+        // Crash reports name the backends in use.
+        core::set_crash_detail(std::format("{} module", Interface::k_module_interface),
+                               created.value().name);
         return std::move(created.value().instance);
     }
 

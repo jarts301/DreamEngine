@@ -5,7 +5,7 @@ and never include platform or backend headers.
 
 | Sample | Shows |
 |---|---|
-| [arcade_demo](arcade_demo) | A small game using everything: physics, music and sounds, a HUD and menu, ImGui debug tools, and on PC a profile of each run. Its checks run it with Jolt, miniaudio and RmlUi, and again with impulse, PortAudio and markup |
+| [arcade_demo](arcade_demo) | A small game using everything: physics, music and sounds, a HUD and menu, ImGui debug tools, and on PC a profile of each run, a memory budget and a crash you can switch on to try crash reports. Its checks run it with Jolt, miniaudio and RmlUi, and again with impulse, PortAudio and markup |
 | [cube](cube) | A spinning cube drawn with Vulkan or DirectX on PC and Vulkan on Android, with Slang shaders |
 | [render_demo](render_demo) | A lit, textured 3D scene drawn by the engine's renderer from a scene file |
 | [physics_demo](physics_demo) | 3D and 2D physics from scene files, with shooting, sensors, joints and debug shapes, checked with Jolt and Box2D and with impulse and Chipmunk |

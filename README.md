@@ -169,6 +169,21 @@ budget_mb = 2048   # The most private memory the game means to use.
 [Memory budgets](docs/reports/memory-budgets.md) describes the strategy and what a game should do.
 See [ADR 0018](docs/adr/0018-memory-budgets.md).
 
+## Crash reports
+
+When a game or the engine crashes on Windows or Linux, a report is written to `crash_reports/`
+with the reason, the frame, the modules in use, memory, the last log lines and the stack, and on
+Windows a minidump beside it that Visual Studio opens at the crash. To try it, crash on purpose:
+
+```toml
+[crash_report]
+simulate = "null_pointer"    # Or "stack_overflow", "abort", "assert", ... "none" turns it off.
+simulate_after_frames = 300
+```
+
+[Crash reports](docs/reports/crash-reports.md) explains how to read them. See
+[ADR 0019](docs/adr/0019-crash-reports.md).
+
 To check the layer rules locally (needs Python 3):
 
 ```bash

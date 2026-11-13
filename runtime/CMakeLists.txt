@@ -7,6 +7,7 @@ add_library(dream_runtime STATIC
     src/app.cpp
     src/asset_manager.cpp
     src/audio.cpp
+    src/crash_reports.cpp
     src/debug_lines.cpp
     src/event_bus.cpp
     src/input_actions.cpp
@@ -42,6 +43,7 @@ if(DREAM_BUILD_TESTS)
             tests/app_test.cpp
             tests/asset_manager_test.cpp
             tests/audio_test.cpp
+            tests/crash_reports_test.cpp
             tests/event_bus_test.cpp
             tests/heap_counting_test.cpp
             tests/input_actions_test.cpp

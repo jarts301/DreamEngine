@@ -13,10 +13,20 @@ debug_tools = false
 [profiler.timeline]
 path = "dream_arcade_trace.json"
 
-# Memory is watched with the engine's defaults. A game can also give itself a budget, as
-# docs/reports/memory-budgets.md explains:
+# The most private memory the game means to use. Near it, the game is warned, and over it, new
+# assets are refused until it frees some. See docs/reports/memory-budgets.md.
 [memory]
 budget_mb = 1024
+
+# When the game crashes, a report is written to crash_reports/, in the folder the game was started
+# from, with a minidump beside it on Windows. See docs/reports/crash-reports.md.
+#
+# To try it, set simulate to "null_pointer", "divide_by_zero", "stack_overflow", "abort", "assert"
+# or "terminate", and the game crashes that way after simulate_after_frames frames, about 5
+# seconds at 60 FPS. "none" turns the simulation off.
+[crash_report]
+simulate = "none"
+simulate_after_frames = 300
 
 [input.actions]
 throw = ["key:space", "mouse:left", "touch"]
