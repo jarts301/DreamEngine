@@ -28,6 +28,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -620,6 +621,7 @@ public:
                                 first);
         }
         m_recording = frame.commands;
+        m_render_pass_ended = false;
         return static_cast<CommandList*>(this);
     }
 
@@ -631,9 +633,20 @@ public:
             vkCmdWriteTimestamp(frame.commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_timestamps,
                                 m_frame_index * 2 + 1);
         }
+        std::optional<Readback> readback;
+        if (m_capture_requested && m_render_pass_ended) {
+            m_capture_requested = false;
+            readback = record_capture(frame.commands);
+        }
+        const auto drop_readback = [&] {
+            if (readback.has_value()) {
+                vmaDestroyBuffer(m_allocator, readback->buffer, readback->allocation);
+            }
+        };
         VkResult result = vkEndCommandBuffer(frame.commands);
         m_recording = VK_NULL_HANDLE;
         if (result != VK_SUCCESS) {
+            drop_readback();
             return vulkan_error("Finishing a frame", result);
         }
 
@@ -651,9 +664,13 @@ public:
         };
         result = vkQueueSubmit(m_queue, 1, &submit, frame.in_flight);
         if (result != VK_SUCCESS) {
+            drop_readback();
             return vulkan_error("Submitting a frame", result);
         }
         frame.timestamps_written = m_timestamps != VK_NULL_HANDLE;
+        if (readback.has_value()) {
+            finish_capture(*readback);
+        }
 
         const VkPresentInfoKHR present{
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -681,7 +698,117 @@ public:
         }
     }
 
+    bool capture_next_frame() override {
+        if (!m_can_capture) {
+            return false;
+        }
+        m_capture_requested = true;
+        return true;
+    }
+
+    std::optional<CapturedFrame> take_captured_frame() override {
+        return std::exchange(m_captured, std::nullopt);
+    }
+
 private:
+    // A buffer the CPU can read, which a frame's image is copied into.
+    struct Readback {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VmaAllocation allocation = VK_NULL_HANDLE;
+        const std::byte* memory = nullptr;
+        VkExtent2D extent{};
+    };
+
+    // Records copying the swapchain image, which the render pass left ready to present, into a
+    // readable buffer, and puts the image back as it was.
+    std::optional<Readback> record_capture(VkCommandBuffer commands) {
+        Readback readback{.extent = m_extent};
+        const VkBufferCreateInfo buffer_info{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = VkDeviceSize{m_extent.width} * m_extent.height * 4,
+            .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        const VmaAllocationCreateInfo allocation_info{
+            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+        VmaAllocationInfo allocated{};
+        const VkResult result = vmaCreateBuffer(m_allocator, &buffer_info, &allocation_info,
+                                                &readback.buffer, &readback.allocation, &allocated);
+        if (result != VK_SUCCESS) {
+            DREAM_LOG_WARNING("Could not capture a frame: {}",
+                              vulkan_error("Making a readable buffer", result).message);
+            return std::nullopt;
+        }
+        readback.memory = static_cast<const std::byte*>(allocated.pMappedData);
+
+        const auto image_barrier = [&](VkImageLayout from, VkImageLayout to,
+                                       VkAccessFlags from_access, VkAccessFlags to_access,
+                                       VkPipelineStageFlags from_stage,
+                                       VkPipelineStageFlags to_stage) {
+            const VkImageMemoryBarrier barrier{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask = from_access,
+                .dstAccessMask = to_access,
+                .oldLayout = from,
+                .newLayout = to,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = m_images[m_image_index],
+                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+            };
+            vkCmdPipelineBarrier(commands, from_stage, to_stage, 0, 0, nullptr, 0, nullptr, 1,
+                                 &barrier);
+        };
+        image_barrier(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                      VK_PIPELINE_STAGE_TRANSFER_BIT);
+        const VkBufferImageCopy region{
+            .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+            .imageExtent = {m_extent.width, m_extent.height, 1},
+        };
+        vkCmdCopyImageToBuffer(commands, m_images[m_image_index],
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.buffer, 1, &region);
+        image_barrier(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                      VK_ACCESS_TRANSFER_READ_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                      VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+        const VkBufferMemoryBarrier host_read{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = readback.buffer,
+            .size = VK_WHOLE_SIZE,
+        };
+        vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+                             0, 0, nullptr, 1, &host_read, 0, nullptr);
+        return readback;
+    }
+
+    // Waits for the submitted frame, then reads its copy into m_captured as RGBA.
+    void finish_capture(const Readback& readback) {
+        vkQueueWaitIdle(m_queue);
+        vmaInvalidateAllocation(m_allocator, readback.allocation, 0, VK_WHOLE_SIZE);
+        const bool bgra = m_surface_format.format == VK_FORMAT_B8G8R8A8_SRGB ||
+                          m_surface_format.format == VK_FORMAT_B8G8R8A8_UNORM;
+        CapturedFrame frame{.width = readback.extent.width, .height = readback.extent.height};
+        const std::size_t pixel_count = std::size_t{frame.width} * frame.height;
+        frame.pixels.resize(pixel_count * 4);
+        for (std::size_t pixel = 0; pixel < pixel_count; ++pixel) {
+            const std::byte* const in = readback.memory + pixel * 4;
+            std::byte* const out = frame.pixels.data() + pixel * 4;
+            out[0] = in[bgra ? 2 : 0];
+            out[1] = in[1];
+            out[2] = in[bgra ? 0 : 2];
+            out[3] = std::byte{255};
+        }
+        vmaDestroyBuffer(m_allocator, readback.buffer, readback.allocation);
+        m_captured = std::move(frame);
+    }
+
     // Objects still alive when the device closes were never destroyed, which over a long session
     // or repeated loads is a leak.
     void warn_about_leftovers() const {
@@ -1510,6 +1637,10 @@ private:
             }
         }
 
+        const bool can_capture =
+            (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+        m_can_capture = can_capture;
+
         const VkSwapchainKHR previous = m_swapchain;
         const VkSwapchainCreateInfoKHR info{
             .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -1519,7 +1650,9 @@ private:
             .imageColorSpace = m_surface_format.colorSpace,
             .imageExtent = extent,
             .imageArrayLayers = 1,
-            .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+            // Copying from the images is what frame captures need, where it's supported.
+            .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                          (can_capture ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : VkImageUsageFlags{0}),
             .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
             .preTransform = transform,
             .compositeAlpha = composite_alpha,
@@ -1685,6 +1818,7 @@ private:
 
     void end_render_pass() override {
         vkCmdEndRenderPass(m_recording);
+        m_render_pass_ended = true;
     }
 
     void bind_pipeline(PipelineHandle handle) override {
@@ -1897,6 +2031,10 @@ private:
     VkFormat m_depth_format = VK_FORMAT_UNDEFINED;
     VkSwapchainKHR m_swapchain = VK_NULL_HANDLE;
     VkExtent2D m_extent{};
+    std::optional<CapturedFrame> m_captured;
+    bool m_can_capture = false;
+    bool m_capture_requested = false;
+    bool m_render_pass_ended = false;
     platform::SurfaceSize m_requested_size;
     bool m_needs_new_swapchain = false;
     bool m_surface_lost = false;

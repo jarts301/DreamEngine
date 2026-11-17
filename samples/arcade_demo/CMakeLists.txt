@@ -20,12 +20,12 @@ if(DREAM_BUILD_TESTS)
     # The scripted run on the real GPU and sound hardware, with validation. Not a CTest, because
     # build servers have neither.
     dream_add_game(dream_arcade_demo_vulkan_check SOURCES src/arcade_demo.cpp
-        CONFIG tests/vulkan.toml ASSETS assets ../assets RENDERER)
+        CONFIG tests/vulkan.toml ASSETS assets ../assets tests/reference RENDERER)
 
     # The same run on DirectX, which only Windows can build.
     if(WIN32)
         dream_add_game(dream_arcade_demo_directx_check SOURCES src/arcade_demo.cpp
-            CONFIG tests/directx.toml ASSETS assets ../assets RENDERER)
+            CONFIG tests/directx.toml ASSETS assets ../assets tests/reference RENDERER)
     endif()
 
     # The check run with the other physics, audio and interface backends. Only its configuration
@@ -55,5 +55,15 @@ if(DREAM_BUILD_TESTS)
         set_tests_properties(dream_arcade_demo_null PROPERTIES
             PASS_REGULAR_EXPRESSION "menu_opened=1 music_volume=0.25 debug_drawn=yes ui_commands=none"
             ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
+    endif()
+
+    # The DirectX check on WARP, Windows' software rasterizer, compares its picture with the
+    # reference image, so build servers without a GPU check it too. See docs/adr/0021.
+    if(WIN32 AND NOT CMAKE_CROSSCOMPILING)
+        dream_add_game(dream_arcade_demo_warp_check SOURCES src/arcade_demo.cpp CONFIG tests/warp.toml
+            ASSETS assets ../assets tests/reference RENDERER)
+        add_test(NAME dream_arcade_demo_warp_check COMMAND dream_arcade_demo_warp_check)
+        set_tests_properties(dream_arcade_demo_warp_check PROPERTIES
+            PASS_REGULAR_EXPRESSION "Screenshot matches")
     endif()
 endif()

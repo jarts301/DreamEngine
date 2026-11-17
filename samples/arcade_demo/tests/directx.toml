@@ -16,6 +16,15 @@ throw = ["key:space"]
 menu = ["key:escape"]
 debug = ["key:f1"]
 
+# Compares frame 30 with the reference image, within a tolerance. See docs/adr/0021.
+[screenshot]
+frame = 30
+save = "arcade_directx_screenshot.png"
+reference = "assets:/screenshots/arcade.png"
+tolerance = 24
+max_differing = 0.01
+quit = false
+
 # Only built on Windows, so only its table is listed.
 [modules.windows]
 platform = ["sdl3"]

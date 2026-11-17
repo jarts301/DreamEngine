@@ -6,6 +6,7 @@
 #include "dream/core/profile.h"
 
 #include "dream/runtime/crash_reports.h"
+#include "dream/runtime/screenshot.h"
 
 #include "memory_guard.h"
 #include "resource_monitor.h"
@@ -14,6 +15,7 @@
 #include <chrono>
 #include <cstdint>
 #include <format>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <string>
@@ -39,6 +41,72 @@ core::Result<std::uint32_t> read_setting(const core::Config& config, std::string
 
 double seconds_since(core::TimePoint start) {
     return std::chrono::duration<double>(core::now() - start).count();
+}
+
+// How many frames a screenshot may wait for one that is drawn, such as while a window appears.
+constexpr std::uint64_t k_screenshot_patience_frames = 120;
+
+// Saves the captured frame, then compares it with the reference if there is one. An error means
+// the screenshot test failed.
+core::Result<void> check_screenshot(const ScreenshotSettings& settings, rhi::CapturedFrame frame,
+                                    const VirtualFileSystem& files) {
+    const ImageData actual{.width = frame.width, .height = frame.height,
+                           .pixels = std::move(frame.pixels)};
+    const std::vector<std::byte> png = encode_png(actual);
+    std::ofstream out(settings.save, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+    if (!out) {
+        return core::Error{core::ErrorCode::IoError,
+                           std::format("Could not save the screenshot to '{}'", settings.save)};
+    }
+    out.close();
+    if (settings.reference.empty()) {
+        DREAM_LOG_INFO("Screenshot saved to '{}' ({}x{})", settings.save, actual.width,
+                       actual.height);
+        return {};
+    }
+
+    core::Result<std::vector<std::byte>> bytes = files.read(settings.reference);
+    if (!bytes.has_value()) {
+        return core::Error{bytes.error().code,
+                           std::format("Screenshot reference: {}. The capture is in '{}'",
+                                       bytes.error().message, settings.save)};
+    }
+    const core::Result<ImageData> expected = decode_image(bytes.value());
+    if (!expected.has_value()) {
+        return expected.error();
+    }
+#if defined(__ANDROID__)
+    // The screen sets the size on a phone, so a reference made on PC rarely fits it.
+    if (actual.width != expected.value().width || actual.height != expected.value().height) {
+        DREAM_LOG_WARNING("Screenshot saved to '{}' but not compared: the screen is {}x{}, and "
+                          "'{}' is {}x{}",
+                          settings.save, actual.width, actual.height, settings.reference,
+                          expected.value().width, expected.value().height);
+        return {};
+    }
+#endif
+    const core::Result<ImageDifference> difference =
+        compare_images(actual, expected.value(), settings.tolerance);
+    if (!difference.has_value()) {
+        return core::Error{difference.error().code,
+                           std::format("Screenshot differs from '{}': {}. The capture is in '{}'",
+                                       settings.reference, difference.error().message,
+                                       settings.save)};
+    }
+    const std::string summary =
+        std::format("{:.3f}% of pixels are off by more than {} (largest {})",
+                    difference.value().differing_share() * 100.0, settings.tolerance,
+                    difference.value().largest);
+    if (difference.value().differing_share() > settings.max_differing) {
+        return core::Error{core::ErrorCode::InvalidArgument,
+                           std::format("Screenshot differs from '{}': {}, over the {:.3f}% "
+                                       "allowed. The capture is in '{}'",
+                                       settings.reference, summary,
+                                       settings.max_differing * 100.0, settings.save)};
+    }
+    DREAM_LOG_INFO("Screenshot matches '{}': {}", settings.reference, summary);
+    return {};
 }
 
 std::string megabytes(const std::optional<std::uint64_t>& bytes) {
@@ -146,6 +214,12 @@ core::Result<void> App::run(Game& game) {
         return crash_config.error();
     }
 
+    const core::Result<std::optional<ScreenshotSettings>> screenshot =
+        ScreenshotSettings::from_config(m_config);
+    if (!screenshot.has_value()) {
+        return screenshot.error();
+    }
+
     const core::Result<MemorySettings> memory_settings = MemorySettings::from_config(m_config);
     if (!memory_settings.has_value()) {
         return memory_settings.error();
@@ -194,6 +268,8 @@ core::Result<void> App::run(Game& game) {
     std::optional<core::TimePoint> previous_frame_end;
     // Counted from 0, as the profiler's frame marks are.
     std::uint64_t frame_number = 0;
+    bool screenshot_asked = false;
+    bool screenshot_done = false;
 
     while (m_running) {
         m_input.begin_frame();
@@ -224,7 +300,11 @@ core::Result<void> App::run(Game& game) {
                 DREAM_PROFILE_ZONE("Queued events");
                 m_events.flush();
             }
-            const core::FrameTime time = clock.tick();
+            core::FrameTime time = clock.tick();
+            if (screenshot.value().has_value()) {
+                // The same moment of the game on every machine, for screenshot tests.
+                time.delta_seconds = m_fixed_steps.step_seconds();
+            }
             const int fixed_steps = m_fixed_steps.advance(time.delta_seconds);
             timing.fixed_steps = fixed_steps;
             for (int step = 0; step < fixed_steps; ++step) {
@@ -244,9 +324,38 @@ core::Result<void> App::run(Game& game) {
                 core::simulate_crash(kind);
             }
 
+            const std::optional<ScreenshotSettings>& shot = screenshot.value();
+            if (shot.has_value() && !screenshot_done && !screenshot_asked &&
+                frame_number >= shot->frame) {
+                if (m_device == nullptr || !m_device->capture_next_frame()) {
+                    outcome = core::Error{core::ErrorCode::InvalidArgument,
+                                          "[screenshot] is set, but the graphics device can't "
+                                          "capture frames"};
+                    break;
+                }
+                screenshot_asked = true;
+            }
+
             outcome = render_frame(game, timing.wait_seconds);
             if (!outcome.has_value()) {
                 break;
+            }
+
+            if (screenshot_asked && !screenshot_done) {
+                if (std::optional<rhi::CapturedFrame> captured = m_device->take_captured_frame()) {
+                    screenshot_done = true;
+                    outcome = check_screenshot(*shot, std::move(*captured), m_files);
+                    if (!outcome.has_value()) {
+                        break;
+                    }
+                    if (shot->quit) {
+                        m_running = false;
+                    }
+                } else if (frame_number > shot->frame + k_screenshot_patience_frames) {
+                    outcome = core::Error{core::ErrorCode::InvalidArgument,
+                                          "[screenshot] asked for a frame, but none was drawn"};
+                    break;
+                }
             }
 
             // Stops the loop using a whole CPU core when nothing else sets the pace.

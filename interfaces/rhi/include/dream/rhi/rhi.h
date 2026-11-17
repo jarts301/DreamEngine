@@ -10,6 +10,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace dream::rhi {
 
@@ -163,6 +164,14 @@ struct MemoryUsage {
     std::uint64_t budget_bytes = 0;
 };
 
+// A finished frame read back from the GPU: width * height pixels of four bytes, red, green, blue
+// and alpha, row by row from the top, with colors as the screen shows them. Alpha is always 255.
+struct CapturedFrame {
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::vector<std::byte> pixels;
+};
+
 // A graphics device and the window surface it presents to.
 //
 // All functions must be called from one thread. Resources outlive the surface: only attach_surface
@@ -226,6 +235,18 @@ public:
     // time yet, and always for a backend that can't measure, which is the default. Call it after
     // end_frame until it returns nothing. Backends keep only the last few times nobody took.
     [[nodiscard]] virtual std::optional<double> take_gpu_frame_seconds() {
+        return std::nullopt;
+    }
+
+    // An optional capability, for screenshot tests: reads back the next frame that is drawn and
+    // presented, for take_captured_frame. It waits for the GPU, so it is slow. False for a backend
+    // that can't, which is the default.
+    [[nodiscard]] virtual bool capture_next_frame() {
+        return false;
+    }
+
+    // The frame capture_next_frame asked for, once it has been presented, given once.
+    [[nodiscard]] virtual std::optional<CapturedFrame> take_captured_frame() {
         return std::nullopt;
     }
 };

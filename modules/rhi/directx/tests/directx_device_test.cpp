@@ -355,6 +355,38 @@ TEST_CASE("DirectX device draws a frame to a hidden window") {
     device->destroy_buffer(vertices);
 }
 
+TEST_CASE("DirectX device captures a presented frame as RGBA") {
+    const auto device = make_device();
+    const HiddenWindow window;
+    if (!window.exists()) {
+        return;
+    }
+    REQUIRE(device->attach_surface(window.native(), k_size).has_value());
+    CHECK_FALSE(device->take_captured_frame().has_value());
+
+    REQUIRE(device->capture_next_frame());
+    CommandList* const commands = device->begin_frame().value();
+    REQUIRE(commands != nullptr);
+    // Pure red, which is the same before and after sRGB encoding, and shows if red and blue swap.
+    commands->begin_render_pass(ClearColor{1.0f, 0.0f, 0.0f, 1.0f});
+    commands->end_render_pass();
+    REQUIRE(device->end_frame().has_value());
+
+    const std::optional<CapturedFrame> frame = device->take_captured_frame();
+    REQUIRE(frame.has_value());
+    CHECK(frame->width == k_size.width);
+    CHECK(frame->height == k_size.height);
+    REQUIRE(frame->pixels.size() == std::size_t{k_size.width} * k_size.height * 4);
+    const std::size_t middle =
+        (std::size_t{k_size.height} / 2 * k_size.width + k_size.width / 2) * 4;
+    CHECK(frame->pixels[middle + 0] == std::byte{255});
+    CHECK(frame->pixels[middle + 1] == std::byte{0});
+    CHECK(frame->pixels[middle + 2] == std::byte{0});
+    CHECK(frame->pixels[middle + 3] == std::byte{255});
+    // Given once.
+    CHECK_FALSE(device->take_captured_frame().has_value());
+}
+
 TEST_CASE("DirectX device limits the vertex data drawn in one frame") {
     const auto device = make_device();
     const HiddenWindow window;

@@ -17,6 +17,16 @@ debug = true
 throw = ["mouse:left"]
 menu = ["key:escape"]
 
+# Compares frame 150 with the reference image, within a tolerance. See docs/adr/0021.
+[screenshot]
+frame = 150
+save = "toppler_directx_screenshot.png"
+# The interface is drawn by markup here, which spaces text a little differently from RmlUi.
+reference = "assets:/screenshots/toppler_markup.png"
+tolerance = 24
+max_differing = 0.01
+quit = false
+
 [modules.windows]
 platform = ["sdl3"]
 rhi = ["directx"]

@@ -24,6 +24,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -467,6 +468,10 @@ public:
             return {};
         }
 
+        if (m_capture_requested) {
+            m_capture_requested = false;
+            capture_back_buffer();
+        }
         const HRESULT result = m_swapchain->Present(1, 0);
         log_debug_messages();
         if (m_frame_error.has_value()) {
@@ -947,6 +952,59 @@ private:
         return create_targets();
     }
 
+    bool capture_next_frame() override {
+        m_capture_requested = true;
+        return true;
+    }
+
+    std::optional<CapturedFrame> take_captured_frame() override {
+        return std::exchange(m_captured, std::nullopt);
+    }
+
+    // Copies the frame about to be presented into a texture the CPU can read, and from there into
+    // m_captured, swapping blue and red, since the back buffer is BGRA.
+    void capture_back_buffer() {
+        ComPtr<ID3D11Texture2D> back_buffer;
+        HRESULT result = m_swapchain->GetBuffer(0, IID_PPV_ARGS(&back_buffer));
+        if (FAILED(result)) {
+            DREAM_LOG_WARNING("Could not capture a frame: {}", directx_error("Reading the back buffer", result).message);
+            return;
+        }
+        D3D11_TEXTURE2D_DESC desc{};
+        back_buffer->GetDesc(&desc);
+        desc.Usage = D3D11_USAGE_STAGING;
+        desc.BindFlags = 0;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        desc.MiscFlags = 0;
+        ComPtr<ID3D11Texture2D> staging;
+        result = m_device->CreateTexture2D(&desc, nullptr, &staging);
+        if (FAILED(result)) {
+            DREAM_LOG_WARNING("Could not capture a frame: {}", directx_error("Making a readable copy", result).message);
+            return;
+        }
+        m_context->CopyResource(staging.Get(), back_buffer.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        result = m_context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped);
+        if (FAILED(result)) {
+            DREAM_LOG_WARNING("Could not capture a frame: {}", directx_error("Reading the copy", result).message);
+            return;
+        }
+        CapturedFrame frame{.width = desc.Width, .height = desc.Height};
+        frame.pixels.resize(std::size_t{desc.Width} * desc.Height * 4);
+        for (UINT y = 0; y < desc.Height; ++y) {
+            const auto* const row = static_cast<const std::byte*>(mapped.pData) + std::size_t{y} * mapped.RowPitch;
+            std::byte* const out = frame.pixels.data() + std::size_t{y} * desc.Width * 4;
+            for (UINT x = 0; x < desc.Width; ++x) {
+                out[x * 4 + 0] = row[x * 4 + 2];
+                out[x * 4 + 1] = row[x * 4 + 1];
+                out[x * 4 + 2] = row[x * 4 + 0];
+                out[x * 4 + 3] = std::byte{255};
+            }
+        }
+        m_context->Unmap(staging.Get(), 0);
+        m_captured = std::move(frame);
+    }
+
     // Objects still alive when the device closes were never destroyed, which over a long session
     // or repeated loads is a leak. Their COM references release them afterwards.
     void warn_about_leftovers() const {
@@ -1222,6 +1280,8 @@ private:
     TextureResource m_white_texture;
 
     ComPtr<IDXGISwapChain1> m_swapchain;
+    std::optional<CapturedFrame> m_captured;
+    bool m_capture_requested = false;
     ComPtr<ID3D11RenderTargetView> m_render_target;
     ComPtr<ID3D11Texture2D> m_depth_buffer;
     ComPtr<ID3D11DepthStencilView> m_depth_view;

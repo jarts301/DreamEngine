@@ -55,6 +55,22 @@ To check the Vulkan backend with the Khronos validation layers, configure with
 The DirectX backend is Direct3D 11 and needs nothing installed. Debug builds turn its debug layer on
 when Windows' "Graphics Tools" feature is present, and the messages appear in the engine log.
 
+## Screenshot tests
+
+A `[screenshot]` table in a game's `dream.toml` captures one frame, saves it next to the program,
+and compares it with a reference image, failing the run if they differ by more than a tolerance:
+
+```toml
+[screenshot]
+frame = 60                                    # Counting from 0.
+reference = "assets:/screenshots/title.png"   # Optional. Without it, the frame is only saved.
+```
+
+The cube, the render demo, the arcade and Toppler have `_warp_check` programs that do this on
+Windows' software rasterizer, which CTest runs, and their Vulkan and DirectX checks do it on the
+GPU. To update a reference, run the check and copy the capture it saves into the sample's
+`tests/reference/screenshots/`. See [ADR 0021](docs/adr/0021-screenshot-tests.md).
+
 ## Play Toppler
 
 Toppler is a small physics puzzle built on the engine: knock every gold crate down within each

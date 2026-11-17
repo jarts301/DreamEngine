@@ -1,10 +1,14 @@
 #include "dream/runtime/app.h"
 
+#include "dream/runtime/screenshot.h"
 #include "fake_device.h"
 #include "fake_platform.h"
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
+#include <cstdio>
+#include <format>
 #include <functional>
 #include <memory>
 #include <ostream> // Needed for doctest to print std::string.
@@ -90,15 +94,53 @@ struct RenderRun {
     FakeDeviceState device;
     RecordingGame game;
 
-    core::Result<void> go(std::deque<Step> script) {
+    core::Result<void> go(std::deque<Step> script, const core::Config& config = k_config) {
         state.script = std::move(script);
-        App app(std::make_unique<FakePlatform>(state), k_config,
+        App app(std::make_unique<FakePlatform>(state), config,
                 std::make_unique<FakeDevice>(device));
         return app.run(game);
     }
 };
 
 } // namespace
+
+TEST_CASE("App captures the screenshot frame, compares it with the reference, and quits") {
+    const std::string save = "dream_app_test_screenshot.png";
+    const core::Config config =
+        core::Config::parse(std::format("[app]\nmax_fps = 0\n[screenshot]\nframe = 1\n"
+                                        "save = \"{}\"\nreference = \"assets:/ref.png\"\n",
+                                        save))
+            .value();
+    rhi::CapturedFrame frame{.width = 2, .height = 1};
+    frame.pixels = std::vector<std::byte>(8, std::byte{200});
+    const ImageData image{.width = 2, .height = 1, .pixels = frame.pixels};
+
+    SUBCASE("a match ends the game after that frame") {
+        RenderRun run;
+        run.device.captured = frame;
+        run.state.assets["ref.png"] = encode_png(image);
+        REQUIRE(run.go({k_end_of_frame, k_end_of_frame, k_end_of_frame, k_end_of_frame}, config)
+                    .has_value());
+        CHECK(run.game.log == Log{"start", "update", "render", "update", "render", "stop"});
+        CHECK(std::ranges::count(run.device.calls, std::string("capture")) == 1);
+    }
+    SUBCASE("a difference fails the run") {
+        RenderRun run;
+        run.device.captured = frame;
+        ImageData other = image;
+        other.pixels[0] = std::byte{0};
+        other.pixels[4] = std::byte{0};
+        run.state.assets["ref.png"] = encode_png(other);
+        const core::Result<void> result = run.go({k_end_of_frame, k_end_of_frame}, config);
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error().message.find("differs") != std::string::npos);
+    }
+    SUBCASE("a device that can't capture fails the run") {
+        RenderRun run;
+        CHECK_FALSE(run.go({k_end_of_frame, k_end_of_frame}, config).has_value());
+    }
+    std::remove(save.c_str());
+}
 
 TEST_CASE("App updates once per frame until asked to quit") {
     Run run;

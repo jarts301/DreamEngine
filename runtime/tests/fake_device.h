@@ -6,6 +6,7 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace dream::runtime::tests {
@@ -24,6 +25,8 @@ struct FakeDeviceState {
     std::optional<rhi::MemoryUsage> memory;
     // What take_gpu_frame_seconds hands out, oldest first.
     std::deque<double> gpu_frame_seconds;
+    // What a frame capture returns. Without it, the device can't capture.
+    std::optional<rhi::CapturedFrame> captured;
 };
 
 class FakeDevice final : public rhi::Device, private rhi::CommandList {
@@ -102,7 +105,21 @@ public:
 
     core::Result<void> end_frame() override {
         m_state.calls.emplace_back("end_frame");
+        if (m_capture_requested) {
+            m_capture_requested = false;
+            m_captured = m_state.captured;
+        }
         return {};
+    }
+
+    bool capture_next_frame() override {
+        m_state.calls.emplace_back("capture");
+        m_capture_requested = m_state.captured.has_value();
+        return m_capture_requested;
+    }
+
+    std::optional<rhi::CapturedFrame> take_captured_frame() override {
+        return std::exchange(m_captured, std::nullopt);
     }
 
 private:
@@ -150,6 +167,8 @@ private:
 
     FakeDeviceState& m_state;
     std::uint32_t m_next_texture = 0;
+    std::optional<rhi::CapturedFrame> m_captured;
+    bool m_capture_requested = false;
 };
 
 } // namespace dream::runtime::tests

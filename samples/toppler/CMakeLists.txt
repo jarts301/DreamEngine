@@ -18,11 +18,11 @@ if(DREAM_BUILD_TESTS)
     # The scripted run on the real GPU and sound hardware. Not a CTest, because build servers have
     # neither.
     dream_add_game(dream_toppler_vulkan_check SOURCES src/toppler.cpp CONFIG tests/vulkan.toml
-        ASSETS assets ../assets RENDERER)
+        ASSETS assets ../assets tests/reference RENDERER)
 
     if(WIN32)
         dream_add_game(dream_toppler_directx_check SOURCES src/toppler.cpp
-            CONFIG tests/directx.toml ASSETS assets ../assets RENDERER)
+            CONFIG tests/directx.toml ASSETS assets ../assets tests/reference RENDERER)
 
         # The check run with the other physics, audio and interface backends.
         dream_add_game(dream_toppler_alternatives_check SOURCES src/toppler.cpp
@@ -41,5 +41,15 @@ if(DREAM_BUILD_TESTS)
                 PASS_REGULAR_EXPRESSION "${toppler_result}"
                 ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
         endif()
+    endif()
+
+    # The DirectX check on WARP, Windows' software rasterizer, compares its picture with the
+    # reference image, so build servers without a GPU check it too. See docs/adr/0021.
+    if(WIN32 AND NOT CMAKE_CROSSCOMPILING)
+        dream_add_game(dream_toppler_warp_check SOURCES src/toppler.cpp CONFIG tests/warp.toml
+            ASSETS assets ../assets tests/reference RENDERER)
+        add_test(NAME dream_toppler_warp_check COMMAND dream_toppler_warp_check)
+        set_tests_properties(dream_toppler_warp_check PROPERTIES
+            PASS_REGULAR_EXPRESSION "Screenshot matches")
     endif()
 endif()
