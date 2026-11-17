@@ -9,7 +9,7 @@
 
 using namespace dream::core;
 
-#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+#if defined(_WIN32) || defined(__linux__)
 
 TEST_CASE("process memory is known, and grows when the process uses more") {
     const std::optional<ProcessMemory> before = process_memory();

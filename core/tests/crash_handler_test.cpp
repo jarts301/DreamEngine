@@ -13,7 +13,7 @@
 #include <string_view>
 #include <system_error>
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__)
 #include <csignal>
 #endif
 
@@ -27,9 +27,8 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// Only the tests of installing a handler use these, and those run where crash reports are caught,
-// which isn't Android.
-#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+// Only the tests of installing a handler use these, and those run where crash reports are caught.
+#if defined(_WIN32) || defined(__linux__)
 
 fs::path fresh_folder(std::string_view name) {
     const fs::path folder = fs::temp_directory_path() / "dream_crash_handler_tests" / name;
@@ -86,7 +85,7 @@ TEST_CASE("crash kinds have names, both ways") {
     CHECK_FALSE(crash_kind_from_name("").has_value());
 }
 
-#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+#if defined(_WIN32) || defined(__linux__)
 
 TEST_CASE("a crash handler makes its folder, and puts back the handlers it replaced") {
     const fs::path folder = fresh_folder("installs") / "nested";

@@ -119,4 +119,4 @@ one whole. `Begin GPU frame` is where the CPU waits for the GPU or the display.
   zone around it.
 - Android was not covered at first. Since Phase 10, the game's working directory there is the
   app's files folder, so `timeline` saves its trace there, but no Android module list includes a
-  profiler by default. Heap counting is still left out of Android builds.
+  profiler by default. Heap counting has covered Android builds since Stage E.

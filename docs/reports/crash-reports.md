@@ -2,9 +2,9 @@
 
 ## Summary
 
-When a game or the engine crashes on Windows or Linux, a report is written saying why it crashed,
-where, and what the game was doing. On Windows a minidump is written beside it, which Visual
-Studio opens at the crash. Every game gets this without any code. The design is recorded in
+When a game or the engine crashes on Windows, Linux or Android, a report is written saying why it
+crashed, where, and what the game was doing. On Windows a minidump is written beside it, which
+Visual Studio opens at the crash. Every game gets this without any code. The design is recorded in
 [ADR 0019](../adr/0019-crash-reports.md).
 
 | Where | What |
@@ -28,13 +28,13 @@ simulate_after_frames = 300
 Set `simulate` to one of these, rebuild, and run the game. About 5 seconds in, after 300 frames at
 60 FPS, it crashes that way and writes a report:
 
-| `simulate` | Crashes with | The report's reason, on Windows / Linux |
+| `simulate` | Crashes with | The report's reason, on Windows / Linux and Android |
 |---|---|---|
 | `"null_pointer"` | A write through a null pointer | Access violation, writing address 0x0 / Segmentation fault (SIGSEGV) |
-| `"divide_by_zero"` | An integer division by zero | Integer division by zero / Arithmetic error (SIGFPE) |
+| `"divide_by_zero"` | An integer division by zero | Integer division by zero / Arithmetic error (SIGFPE); abort() on ARM, which doesn't trap it |
 | `"stack_overflow"` | Endless recursion | Stack overflow / SIGSEGV, "most likely a stack overflow" |
 | `"abort"` | `abort()` | abort() was called |
-| `"assert"` | A failed `DREAM_VERIFY` | Breakpoint / Illegal instruction (SIGILL), with the assertion's message in the log |
+| `"assert"` | A failed `DREAM_VERIFY` | Breakpoint / Illegal instruction (SIGILL), Trap (SIGTRAP) on ARM, with the assertion's message in the log |
 | `"terminate"` | `std::terminate()` | std::terminate was called |
 
 Set it back to `"none"` afterwards. Any game can use the same setting, and code can crash on
@@ -132,13 +132,36 @@ dream::runtime::run_program()                         runtime/src/program.cpp:92
 Use the binary that crashed, from the same build. Lines for libraries such as `libc.so.6` can be
 ignored unless the crash is inside one.
 
+### Android
+
+Reports go to `crash_reports/` in the app's files folder, and logcat says where, under the tag
+`DreamEngine`. A debug build's report can be copied off the phone with:
+
+```sh
+adb exec-out run-as org.dreamengine.hello cat files/crash_reports/crash-<date>-<time>-<process>.txt > crash.txt
+```
+
+Frames look like Linux ones. Those in the game are in `libmain.so`, which the NDK's
+`llvm-addr2line` names from the unstripped copy the same build left in
+`build/<preset>/samples/<game>/dream_<game>_native/arm64-v8a/`:
+
+```bash
+llvm-addr2line -f -C -p -e libmain.so 0x2efdc 0x2eeb8 0x32648
+```
+
+The first frames are the crash handler itself, then `__kernel_rt_sigreturn`, then the code that
+crashed. Libraries the system owns, such as `libc.so`, are named by their exported symbols.
+
+After the report, the crash goes on to Android's own handler, so the system's tombstone and the
+"keeps stopping" dialog still appear, as they would without the engine's handler.
+
 ## 4. Settings
 
 All optional, under `[crash_report]`:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `enabled` | `true`, `false` on Android | Turns crash reports off |
+| `enabled` | `true` | Turns crash reports off |
 | `directory` | `"crash_reports"` | Where reports go, relative to the folder the game is started from. Created if missing |
 | `minidump` | `true` | Windows: a minidump beside each report. About a megabyte, with the stacks and memory they point to |
 | `simulate` | `"none"` | Crashes the game on purpose, to try the reports (section 1) |
@@ -151,9 +174,9 @@ If the folder can't be created, the game still runs, without crash reports, and 
 - **Nothing is allocated after a crash.** The heap may be what broke, so the report is written
   with fixed buffers and the system's own file calls. Details and the last 32 log lines are copied
   into fixed storage while the game runs, and only read after a crash.
-- **On Linux**, the signal handler writes the report on a stack of its own, so a stack overflow is
-  reported too, then restores the previous handler and raises the signal again. The process ends
-  as it would have, with the same exit status and any core dump.
+- **On Linux and Android**, the signal handler writes the report on a stack of its own, so a stack
+  overflow is reported too, then restores the previous handler and raises the signal again. The
+  process ends as it would have, with the same exit status and any core dump.
 - **On Windows**, a writer thread waits from the start. The crashed thread records its registers,
   wakes the writer and waits for it, which works even after a stack overflow. The writer writes
   the text, walks the stack with DbgHelp, and writes the minidump. A crash without an exception,
@@ -185,7 +208,10 @@ If the folder can't be created, the game still runs, without crash reports, and 
   message still followed it.
 
 All of this was compiled with GCC and run on Linux, also under AddressSanitizer and
-ThreadSanitizer. The Windows handler (`crash_handler_windows.cpp`) could not be compiled there.
+ThreadSanitizer. On Android, the core and runtime tests and the probe's six crashes were run from
+`/data/local/tmp` on a Samsung Galaxy A57 (arm64, Android 17). Each wrote a report with its
+reason, frame, detail, log and stack, and `llvm-addr2line` named the probe's frames down to
+`main`. The Windows handler (`crash_handler_windows.cpp`) could not be compiled there.
 Running the `dream_crash_report_*` and `dream_hello_game_crash` tests on Windows confirms it, and
 opening one of their `.dmp` files in Visual Studio confirms the minidump.
 
@@ -194,10 +220,13 @@ opening one of their `.dmp` files in Visual Studio confirms the minidump.
 - **Some endings can't be caught** by anything inside the process: `__fastfail` on Windows, which
   the heap uses for some corruption; being killed, such as by Linux's out-of-memory killer or the
   Task Manager; a hang; power loss.
-- **Linux reports give offsets, not names.** Naming them would need the program's symbols
-  exported, which would break Vulkan loading (ADR 0019). `addr2line` names them (section 3).
-- **A stack overflow on another thread** is reported on Windows, but not on Linux, where only the
-  main thread has a stack for the handler.
+- **Linux and Android reports give offsets, not names**, for the game's own code. Naming them
+  would need the program's symbols exported, which would break Vulkan loading (ADR 0019).
+  `addr2line` names them (section 3).
+- **A stack overflow on another thread** is reported on Windows, but not on Linux or Android,
+  where only the main thread has a stack for the handler.
 - **Reports stay on the machine.** Nothing is uploaded. A game that wants reports from players
   needs to send the files itself, or ask players for them.
-- **Android isn't covered yet.**
+- **A division by zero doesn't crash on ARM**, which returns 0 instead of trapping. The
+  `divide_by_zero` simulation falls back to `abort()` there.
+- **Android reports stay in the app's storage**, which only a debug build lets `adb` read.

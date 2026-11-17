@@ -359,10 +359,9 @@ TEST_CASE("The main loop records frame timing, the heap, and memory from the sys
         CHECK(work_times[frame] <= frame_times[frame]);
     }
     CHECK(log.values("Fixed steps per frame").size() == 3);
-#if (defined(_WIN32) || defined(__linux__)) && !defined(__ANDROID__)
-    // The test program counts its heap, as profiled games do, which runtime/entry/heap_counting.cpp
-    // does on Windows and Linux but not Android. The first frame has no earlier one to compare
-    // with.
+#if defined(_WIN32) || defined(__linux__)
+    // The test program counts its heap, as profiled games do. The first frame has no earlier one
+    // to compare with.
     CHECK(log.values("Heap allocations per frame").size() == 2);
     CHECK(log.values("Heap allocated per frame (KB)").size() == 2);
     CHECK(log.values("Heap in use (MB)").size() == 3);
@@ -385,7 +384,7 @@ TEST_CASE("The main loop records frame timing, the heap, and memory from the sys
     CHECK(log.values("GPU memory (MB)").front() == 256.0);
     CHECK(log.values("GPU memory budget (MB)").front() == 1024.0);
     CHECK(log.count("begin Profiler sampling") >= 1);
-#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+#if defined(_WIN32) || defined(__linux__)
     REQUIRE_FALSE(log.values("Memory resident (MB)").empty());
     CHECK(log.values("Memory resident (MB)").front() > 0.0);
     CHECK(log.values("Memory private (MB)").front() > 0.0);
@@ -428,7 +427,7 @@ TEST_CASE("Frame CPU work leaves out waiting for the frame limiter, and CPU use 
     CHECK(total_time >= 25.0);
     CHECK(total_work + 20.0 < total_time);
 
-#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+#if defined(_WIN32) || defined(__linux__)
     // Each sample after the first measures the CPU use since the one before. A frame that follows
     // an overslept one can come less than the sampling interval later, and then takes no sample, so
     // a busy machine may record one instead of two.

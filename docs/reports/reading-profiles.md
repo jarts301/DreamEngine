@@ -359,8 +359,8 @@ Read this way:
   ADR 0017 explains why: the timeline needs the GPU's clock matched to the CPU's, which Direct3D 11
   can't do.
 - **Android is partly covered.** No profiler is listed there by default, but `timeline` works when
-  listed and saves to the app's files folder; see [Backends](backends.md). Heap counting is left
-  out of Android builds.
+  listed and saves to the app's files folder; see [Backends](backends.md). Heap counting, process
+  memory and CPU time work there as on Linux; memory watching is off by default.
 - **What was verified, and what wasn't.** The process, heap, frame timing, summary and engine
   values were compiled with GCC and run on Linux, including under AddressSanitizer and
   ThreadSanitizer, and the hello game's profiling check reads them from a real trace. The Windows

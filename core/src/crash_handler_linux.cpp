@@ -1,9 +1,9 @@
-// Crash reports on Linux: a signal handler that writes the report with system calls only, on a
-// stack of its own. See crash_report.h.
+// Crash reports on Linux and Android: a signal handler that writes the report with system calls
+// only, on a stack of its own. See crash_report.h.
 
 #include "crash_report.h"
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__)
 
 #include <array>
 #include <cerrno>
@@ -25,12 +25,19 @@
 
 #if defined(__GLIBC__)
 #include <execinfo.h>
+#elif defined(__ANDROID__)
+// Android's C library only has backtrace() from API 33, so the stack is walked with the unwinder
+// the NDK provides, and each address named with dladdr.
+#include <android/log.h>
+#include <dlfcn.h>
+#include <unwind.h>
 #endif
 
 namespace dream::core::crash {
 namespace {
 
-constexpr std::array<int, 5> k_signals{SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT};
+// A failed DREAM_VERIFY stops with __builtin_trap: SIGILL on x86, SIGTRAP on ARM.
+constexpr std::array<int, 6> k_signals{SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGTRAP, SIGABRT};
 std::array<struct sigaction, k_signals.size()> g_previous_actions{};
 stack_t g_previous_stack{};
 bool g_stack_installed = false;
@@ -72,6 +79,8 @@ std::string_view describe(int number, int code) noexcept {
     case SIGILL:
         return "Illegal instruction (SIGILL), which is also how a failed DREAM_VERIFY or "
                "DREAM_ASSERT stops";
+    case SIGTRAP:
+        return "Trap (SIGTRAP), which is how a failed DREAM_VERIFY or DREAM_ASSERT stops on ARM";
     case SIGABRT:
         return "abort() was called (SIGABRT)";
     default:
@@ -80,7 +89,8 @@ std::string_view describe(int number, int code) noexcept {
 }
 
 bool has_address(int number) noexcept {
-    return number == SIGSEGV || number == SIGBUS || number == SIGFPE || number == SIGILL;
+    return number == SIGSEGV || number == SIGBUS || number == SIGFPE || number == SIGILL ||
+           number == SIGTRAP;
 }
 
 // Copies the memory lines of /proc/self/status, read with plain system calls.
@@ -109,6 +119,49 @@ void write_process_memory(ReportWriter& writer) noexcept {
         }
     }
 }
+
+#if defined(__ANDROID__)
+struct StackWalk {
+    std::array<std::uintptr_t, 64> frames{};
+    std::size_t count = 0;
+};
+
+_Unwind_Reason_Code on_frame(_Unwind_Context* context, void* argument) {
+    auto* const walk = static_cast<StackWalk*>(argument);
+    const std::uintptr_t address = _Unwind_GetIP(context);
+    if (address != 0) {
+        walk->frames[walk->count++] = address;
+    }
+    return walk->count == walk->frames.size() ? _URC_END_OF_STACK : _URC_NO_REASON;
+}
+
+// One line a frame: its address, the library and the offset in it, which `llvm-addr2line -f -C -e
+// <library> <offset>` turns into a function and line, and the nearest exported name, if any.
+void write_stack(ReportWriter& writer) noexcept {
+    StackWalk walk;
+    _Unwind_Backtrace(&on_frame, &walk);
+    for (std::size_t i = 0; i < walk.count; ++i) {
+        const std::uintptr_t address = walk.frames[i];
+        writer.text("  #");
+        writer.number(i);
+        writer.text(" ");
+        writer.hex(address);
+        Dl_info info{};
+        if (::dladdr(reinterpret_cast<void*>(address), &info) != 0 && info.dli_fname != nullptr) {
+            writer.text(" ");
+            writer.text(info.dli_fname);
+            writer.text(" (+");
+            writer.hex(address - reinterpret_cast<std::uintptr_t>(info.dli_fbase));
+            writer.text(")");
+            if (info.dli_sname != nullptr) {
+                writer.text(" ");
+                writer.text(info.dli_sname);
+            }
+        }
+        writer.text("\n");
+    }
+}
+#endif
 
 void write_report(std::string_view reason) noexcept {
     const std::int64_t seconds = std::time(nullptr);
@@ -141,6 +194,8 @@ void write_report(std::string_view reason) noexcept {
         void* frames[64];
         const int count = ::backtrace(frames, static_cast<int>(std::size(frames)));
         ::backtrace_symbols_fd(frames, count, out);
+#elif defined(__ANDROID__)
+        write_stack(writer);
 #else
         writer.text("  (not available with this C library)\n");
 #endif
@@ -158,6 +213,12 @@ void write_report(std::string_view reason) noexcept {
         message.text(std::string_view(path, length + 4));
     }
     message.text("\n");
+#if defined(__ANDROID__)
+    // An app's stderr goes nowhere, so the same goes to the system log. The path is NUL-terminated
+    // after ".txt" by the memcpy above.
+    __android_log_write(ANDROID_LOG_FATAL, "DreamEngine", "The program crashed. Crash report:");
+    __android_log_write(ANDROID_LOG_FATAL, "DreamEngine", file >= 0 ? path : "(none written)");
+#endif
 }
 
 std::size_t index_of(int number) noexcept {
@@ -173,12 +234,17 @@ std::size_t index_of(int number) noexcept {
 // thread's stack pointer.
 bool looks_like_stack_overflow([[maybe_unused]] const void* context,
                                [[maybe_unused]] std::uintptr_t address) noexcept {
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__aarch64__)
     if (context == nullptr) {
         return false;
     }
+#if defined(__x86_64__)
     const auto stack_pointer = static_cast<std::uintptr_t>(
         static_cast<const ucontext_t*>(context)->uc_mcontext.gregs[REG_RSP]);
+#else
+    const auto stack_pointer =
+        static_cast<std::uintptr_t>(static_cast<const ucontext_t*>(context)->uc_mcontext.sp);
+#endif
     const std::uintptr_t distance =
         address > stack_pointer ? address - stack_pointer : stack_pointer - address;
     return distance < 64 * 1024;
@@ -237,6 +303,10 @@ bool install_platform() noexcept {
     // The first call loads the unwinder, which allocates. Doing it now keeps that out of a crash.
     void* warm_up[1];
     static_cast<void>(::backtrace(warm_up, 1));
+#elif defined(__ANDROID__)
+    // The same for the NDK's unwinder.
+    StackWalk warm_up;
+    _Unwind_Backtrace(&on_frame, &warm_up);
 #endif
     stack_t stack{};
     stack.ss_sp = g_alternate_stack;

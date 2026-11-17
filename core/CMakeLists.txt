@@ -73,8 +73,9 @@ if(DREAM_BUILD_TESTS)
     target_include_directories(dream_core_tests PRIVATE src)
 
     # Real crashes happen in a program of their own, which crashes the way it is told, and a
-    # script checks the report each one leaves. Crash reports are for PC for now.
-    if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # script checks the report each one leaves. On Android the probe is built to be run on a phone
+    # by hand, since CTest can't run it there.
+    if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR ANDROID)
         add_executable(dream_crash_probe tests/crash_probe.cpp)
         target_link_libraries(dream_crash_probe PRIVATE dream::core)
         dream_configure_target(dream_crash_probe)

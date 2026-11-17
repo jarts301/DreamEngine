@@ -342,8 +342,8 @@ void stop_log_capture() {
     remove_log_sink(g_log_ring);
 }
 
-#if !defined(_WIN32) && !(defined(__linux__) && !defined(__ANDROID__))
-// Crash reports are for PC for now.
+#if !defined(_WIN32) && !defined(__linux__)
+// Crash reports are caught on Windows, Linux and Android.
 bool install_platform() noexcept {
     return false;
 }

@@ -10,8 +10,7 @@
 using namespace dream::core;
 
 // The test program links runtime/entry/heap_counting.cpp, as profiled games do.
-#if !defined(DREAM_DISABLE_PROFILING) && (defined(_WIN32) || defined(__linux__)) &&                \
-    !defined(__ANDROID__)
+#if !defined(DREAM_DISABLE_PROFILING) && (defined(_WIN32) || defined(__linux__))
 
 namespace {
 

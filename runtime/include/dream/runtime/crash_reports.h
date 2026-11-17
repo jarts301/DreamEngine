@@ -13,7 +13,7 @@ namespace dream::runtime {
 // How a game's crashes are reported, from the project configuration, all optional:
 //
 //     [crash_report]
-//     enabled = true                # Off by default on Android, which profiling doesn't cover.
+//     enabled = true
 //     directory = "crash_reports"   # Relative to the folder the game is started from.
 //     minidump = true               # Windows: a minidump beside each report.
 //     simulate = "none"             # Crash on purpose, to try the reports: "null_pointer",

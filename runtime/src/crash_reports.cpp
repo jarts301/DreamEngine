@@ -16,9 +16,6 @@ core::Error setting_error(std::string_view key, std::string_view problem) {
 
 core::Result<CrashReportConfig> CrashReportConfig::from_config(const core::Config& config) {
     CrashReportConfig settings;
-#if defined(__ANDROID__)
-    settings.enabled = false;
-#endif
 
     for (const auto& [key, value] : {std::pair{"enabled", &settings.enabled},
                                      std::pair{"minidump", &settings.minidump}}) {

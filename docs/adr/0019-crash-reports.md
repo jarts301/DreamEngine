@@ -64,7 +64,7 @@ each backend it creates.
 
 ```toml
 [crash_report]
-enabled = true               # Off by default on Android.
+enabled = true
 directory = "crash_reports"  # Relative to the folder the game is started from.
 minidump = true              # Windows only.
 simulate = "none"            # Or "null_pointer", "divide_by_zero", "stack_overflow", "abort",
@@ -95,4 +95,6 @@ simulate_after_frames = 300
   heap uses for some corruption, being killed by the system, such as by Linux's out-of-memory
   killer, and power loss.
 - While installed, the handler replaces any other unhandled exception filter on Windows.
-- Android is not covered yet.
+- Android was not covered at first. Since Stage E, the Linux handler runs there too, walking the
+  stack with the NDK's unwinder, as bionic has no `backtrace` before API 33, and handling SIGTRAP,
+  how a failed check stops on ARM. The report's path is also written to logcat.

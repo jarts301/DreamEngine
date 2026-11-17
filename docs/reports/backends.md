@@ -27,8 +27,8 @@ working directory there. A debug build's trace can be copied off the phone with:
 adb exec-out run-as org.dreamengine.arcade cat files/dream_arcade_trace.json > trace.json
 ```
 
-An Android trace has the same values as a Windows one, except the heap counts, which Android
-builds leave out, and the memory budget values, as memory watching is off there by default.
+An Android trace has the same values as a Windows one, except the memory budget values, as
+memory watching is off there by default.
 
 ## How it was checked
 

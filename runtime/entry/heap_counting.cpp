@@ -3,12 +3,11 @@
 // compiles this directly into a game whose configuration lists a profiler, because a replacement
 // inside a static library might not be linked. See docs/adr/0016-profiling-resources.md.
 //
-// It is empty on Android, which profiling doesn't cover yet, and when DREAM_PROFILING is off.
+// It is empty when DREAM_PROFILING is off. Android counts as Linux here.
 
 #include "dream/core/process_stats.h"
 
-#if !defined(DREAM_DISABLE_PROFILING) && (defined(_WIN32) || defined(__linux__)) &&                \
-    !defined(__ANDROID__)
+#if !defined(DREAM_DISABLE_PROFILING) && (defined(_WIN32) || defined(__linux__))
 
 #include <cstddef>
 #include <cstdlib>
