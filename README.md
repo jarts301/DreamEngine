@@ -73,6 +73,29 @@ programs that do this on Windows' software rasterizer with Direct3D 11 and 12, w
 their Vulkan and DirectX checks do it on the GPU. To update a reference, run the check and copy the capture it saves into the sample's
 `tests/reference/screenshots/`. See [ADR 0021](docs/adr/0021-screenshot-tests.md).
 
+## Cooked textures and packages
+
+PNG files in a `textures` folder among a game's assets are cooked at build time into KTX2 files,
+which the game transcodes to BC7 on PCs and ASTC on phones, with their mipmaps made in advance. A
+model that names `textures/crate.png` loads the cooked `textures/crate.ktx2`. Configure with
+`-DDREAM_COOK_TEXTURES=OFF` to ship the PNGs instead.
+
+On PC, `cmake --build <folder> --target <game>_package` puts the program and an `assets.pak`
+holding all its assets in `<game>_package/`, ready to hand out. See
+[ADR 0024](docs/adr/0024-texture-cooking.md).
+
+## Hot reload
+
+In debug builds on PC, a running game reloads its shaders, models and textures when their files
+change. Edit the source, then build only the game's assets while it keeps running:
+
+```bash
+cmake --build build/windows-debug --target dream_render_demo_assets
+```
+
+The game logs each asset it reloads. `[hot_reload] enabled = false` turns it off. See
+[ADR 0025](docs/adr/0025-hot-reload.md).
+
 ## Play Toppler
 
 Toppler is a small physics puzzle built on the engine: knock every gold crate down within each

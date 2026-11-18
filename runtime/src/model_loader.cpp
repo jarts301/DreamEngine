@@ -1,6 +1,7 @@
 #include "dream/runtime/model.h"
 
 #include "dream/core/math/matrix.h"
+#include "dream/runtime/texture.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
@@ -34,32 +35,56 @@ struct CgltfDeleter {
 using GltfPointer = std::unique_ptr<cgltf_data, CgltfDeleter>;
 
 // Decodes an image once, however many materials use it, and returns its index in `model.images`.
+// A KTX2 image is kept as it is, to be transcoded once the device is known.
 core::Result<int> add_image(const cgltf_image& image, ModelData& model,
-                            std::map<const cgltf_image*, int>& known) {
+                            std::map<const cgltf_image*, int>& known,
+                            const ModelFileReader& read_file) {
     if (const auto existing = known.find(&image); existing != known.end()) {
         return existing->second;
     }
-    if (image.buffer_view == nullptr || image.buffer_view->buffer->data == nullptr) {
-        return model_error("Only images embedded in the file are supported");
+
+    std::vector<std::byte> file;
+    if (image.buffer_view != nullptr && image.buffer_view->buffer->data != nullptr) {
+        const auto* const start = static_cast<const std::byte*>(image.buffer_view->buffer->data) +
+                                  image.buffer_view->offset;
+        file.assign(start, start + image.buffer_view->size);
+    } else if (image.uri != nullptr && std::string_view(image.uri).starts_with("data:")) {
+        return model_error("Images in data URIs aren't supported; embed them or use files");
+    } else if (image.uri != nullptr && read_file) {
+        std::string path(image.uri);
+        cgltf_decode_uri(path.data());
+        path.resize(std::strlen(path.c_str()));
+        core::Result<std::vector<std::byte>> read = read_file(path);
+        if (!read.has_value()) {
+            return core::Error{read.error().code,
+                               std::format("The model's image '{}': {}", path, read.error().message)};
+        }
+        file = std::move(read).value();
+    } else {
+        return model_error("The model's image is in a file of its own, which can't be read here");
     }
 
-    const auto* const start = static_cast<const std::byte*>(image.buffer_view->buffer->data) +
-                              image.buffer_view->offset;
-    core::Result<ImageData> decoded =
-        decode_image(std::span<const std::byte>(start, image.buffer_view->size));
-    if (!decoded.has_value()) {
-        return decoded.error();
+    ImageData data;
+    if (is_ktx2(file)) {
+        data.ktx2 = std::move(file);
+    } else {
+        core::Result<ImageData> decoded = decode_image(file);
+        if (!decoded.has_value()) {
+            return decoded.error();
+        }
+        data = std::move(decoded).value();
     }
 
     const int index = static_cast<int>(model.images.size());
-    model.images.push_back(std::move(decoded).value());
+    model.images.push_back(std::move(data));
     known.emplace(&image, index);
     return index;
 }
 
 core::Result<std::uint32_t> add_material(const cgltf_material* material, ModelData& model,
                                          std::map<const cgltf_material*, std::uint32_t>& known,
-                                         std::map<const cgltf_image*, int>& images) {
+                                         std::map<const cgltf_image*, int>& images,
+                                         const ModelFileReader& read_file) {
     if (const auto existing = known.find(material); existing != known.end()) {
         return existing->second;
     }
@@ -70,9 +95,14 @@ core::Result<std::uint32_t> add_material(const cgltf_material* material, ModelDa
         data.base_color = core::Vec4{pbr.base_color_factor[0], pbr.base_color_factor[1],
                                      pbr.base_color_factor[2], pbr.base_color_factor[3]};
 
+        // KHR_texture_basisu gives a texture a KTX2 image, preferred over its plain one.
         const cgltf_texture* const texture = pbr.base_color_texture.texture;
-        if (texture != nullptr && texture->image != nullptr) {
-            core::Result<int> image = add_image(*texture->image, model, images);
+        const cgltf_image* const source =
+            texture == nullptr ? nullptr
+            : texture->has_basisu && texture->basisu_image != nullptr ? texture->basisu_image
+                                                                       : texture->image;
+        if (source != nullptr) {
+            core::Result<int> image = add_image(*source, model, images, read_file);
             if (!image.has_value()) {
                 return image.error();
             }
@@ -89,7 +119,8 @@ core::Result<std::uint32_t> add_material(const cgltf_material* material, ModelDa
 core::Result<void> add_primitive(const cgltf_primitive& primitive, const core::Mat4& world,
                                  const core::Mat4& normal_matrix, ModelData& model,
                                  std::map<const cgltf_material*, std::uint32_t>& materials,
-                                 std::map<const cgltf_image*, int>& images) {
+                                 std::map<const cgltf_image*, int>& images,
+                                 const ModelFileReader& read_file) {
     if (primitive.type != cgltf_primitive_type_triangles) {
         return model_error("Only triangles are supported");
     }
@@ -135,7 +166,7 @@ core::Result<void> add_primitive(const cgltf_primitive& primitive, const core::M
     }
 
     core::Result<std::uint32_t> material =
-        add_material(primitive.material, model, materials, images);
+        add_material(primitive.material, model, materials, images, read_file);
     if (!material.has_value()) {
         return material.error();
     }
@@ -179,12 +210,13 @@ core::Result<ImageData> decode_image(std::span<const std::byte> file) {
     const std::size_t size = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4;
     const auto* const start = reinterpret_cast<const std::byte*>(pixels);
     ImageData image{static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height),
-                    std::vector<std::byte>(start, start + size)};
+                    std::vector<std::byte>(start, start + size), {}};
     stbi_image_free(pixels);
     return image;
 }
 
-core::Result<ModelData> parse_glb(std::span<const std::byte> file) {
+core::Result<ModelData> parse_glb(std::span<const std::byte> file,
+                                  const ModelFileReader& read_file) {
     cgltf_options options{};
     options.type = cgltf_file_type_glb;
 
@@ -221,8 +253,9 @@ core::Result<ModelData> parse_glb(std::span<const std::byte> file) {
         const core::Mat4 normal_matrix = inverted.has_value() ? core::transpose(*inverted) : world;
 
         for (cgltf_size index = 0; index < node.mesh->primitives_count; ++index) {
-            if (core::Result<void> added = add_primitive(node.mesh->primitives[index], world,
-                                                         normal_matrix, model, materials, images);
+            if (core::Result<void> added =
+                    add_primitive(node.mesh->primitives[index], world, normal_matrix, model,
+                                  materials, images, read_file);
                 !added.has_value()) {
                 return added.error();
             }
@@ -253,8 +286,17 @@ core::Result<ModelAsset> create_model_asset(rhi::Device& device, const ModelData
     std::vector<GpuTexture> textures;
     textures.reserve(data.images.size());
     for (const ImageData& image : data.images) {
-        const auto texture = device.create_texture(
-            rhi::TextureDesc{.width = image.width, .height = image.height}, image.pixels);
+        core::Result<rhi::TextureHandle> texture = rhi::TextureHandle{};
+        if (!image.ktx2.empty()) {
+            const core::Result<TextureData> loaded = load_ktx2(image.ktx2, device);
+            if (!loaded.has_value()) {
+                return loaded.error();
+            }
+            texture = device.create_texture(loaded.value().desc, loaded.value().pixels);
+        } else {
+            texture = device.create_texture(
+                rhi::TextureDesc{.width = image.width, .height = image.height}, image.pixels);
+        }
         if (!texture.has_value()) {
             return texture.error();
         }

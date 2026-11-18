@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Generates the original models shared by the samples, in samples/assets/models, as .glb files.
 
+Textures are PNG files of their own in models/textures, which the build cooks into KTX2 (see
+docs/adr/0024-texture-cooking.md); the models refer to them by name.
+
 Usage: python tools/make_sample_models.py
 
 Needs only Python's standard library. The results are committed, so this runs only to change them.
@@ -37,7 +40,8 @@ def png_bytes(width, height, pixel):
 
 
 def write_glb(path, positions, normals, uvs, indices, base_color, image=None):
-    """Writes one mesh with one material, and optionally one embedded PNG."""
+    """Writes one mesh with one material, and optionally a texture: (file name, PNG bytes), saved
+    in the textures folder beside the model."""
     views = []
     accessors = []
     binary = bytearray()
@@ -106,7 +110,10 @@ def write_glb(path, positions, normals, uvs, indices, base_color, image=None):
     }
 
     if image is not None:
-        gltf["images"] = [{"bufferView": add(image), "mimeType": "image/png"}]
+        name, png = image
+        (path.parent / "textures").mkdir(exist_ok=True)
+        (path.parent / "textures" / name).write_bytes(png)
+        gltf["images"] = [{"uri": f"textures/{name}"}]
         gltf["samplers"] = [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}]
         gltf["textures"] = [{"source": 0, "sampler": 0}]
         material["pbrMetallicRoughness"]["baseColorTexture"] = {"index": 0}
@@ -181,11 +188,11 @@ def cube(path, image):
 
 def make_block():
     # Nearly white, so scenes can give each block any color with a tint.
-    cube(OUTPUT / "block.glb", png_bytes(64, 64, block_pixel))
+    cube(OUTPUT / "block.glb", ("block.png", png_bytes(64, 64, block_pixel)))
 
 
 def make_crate():
-    cube(OUTPUT / "crate.glb", png_bytes(64, 64, wood_pixel))
+    cube(OUTPUT / "crate.glb", ("crate.png", png_bytes(64, 64, wood_pixel)))
 
 
 def make_ground():
@@ -199,7 +206,7 @@ def make_ground():
         uvs,
         [0, 1, 2, 0, 2, 3],
         (1, 1, 1, 1),
-        png_bytes(64, 64, checker_pixel),
+        ("ground.png", png_bytes(64, 64, checker_pixel)),
     )
 
 

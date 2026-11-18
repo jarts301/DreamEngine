@@ -77,7 +77,7 @@ ModelAsset make_model(rhi::Device& device, std::uint32_t parts, bool textured) {
     data.vertices.resize(3);
     data.indices = {0, 1, 2};
     if (textured) {
-        data.images.push_back(ImageData{1, 1, std::vector<std::byte>(4)});
+        data.images.push_back(ImageData{1, 1, std::vector<std::byte>(4), {}});
     }
     data.materials.push_back(ModelMaterialData{{1, 1, 1, 1}, textured ? 0 : -1});
     for (std::uint32_t part = 0; part < parts; ++part) {

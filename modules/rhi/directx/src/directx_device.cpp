@@ -79,9 +79,22 @@ std::string to_utf8(const WCHAR* text) {
     return result;
 }
 
+// ASTC has no DirectX format.
 DXGI_FORMAT to_directx(TextureFormat format) {
-    return format == TextureFormat::Rgba8Srgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
-                                              : DXGI_FORMAT_R8G8B8A8_UNORM;
+    switch (format) {
+    case TextureFormat::Rgba8Srgb:
+        return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    case TextureFormat::Rgba8Unorm:
+        return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case TextureFormat::Bc7Srgb:
+        return DXGI_FORMAT_BC7_UNORM_SRGB;
+    case TextureFormat::Bc7Unorm:
+        return DXGI_FORMAT_BC7_UNORM;
+    case TextureFormat::Astc4x4Srgb:
+    case TextureFormat::Astc4x4Unorm:
+        return DXGI_FORMAT_UNKNOWN;
+    }
+    return DXGI_FORMAT_UNKNOWN;
 }
 
 DXGI_FORMAT to_directx(VertexFormat format) {
@@ -254,6 +267,15 @@ public:
 
     std::string_view shader_file_suffix() const override {
         return ".dxbc";
+    }
+
+    // BC7 is part of feature level 11.0, so every device here has it.
+    bool supports_texture_format(TextureFormat format) const override {
+        const DXGI_FORMAT dxgi = to_directx(format);
+        UINT support = 0;
+        return dxgi != DXGI_FORMAT_UNKNOWN &&
+               SUCCEEDED(m_device->CheckFormatSupport(dxgi, &support)) &&
+               (support & D3D11_FORMAT_SUPPORT_TEXTURE2D) != 0;
     }
 
     std::optional<double> take_gpu_frame_seconds() override {
@@ -825,18 +847,18 @@ private:
 
     core::Result<TextureResource> upload_texture(const TextureDesc& desc,
                                                  std::span<const std::byte> pixels) {
-        if (desc.width == 0 || desc.height == 0) {
-            return invalid("A texture can't be empty");
+        if (const auto problem = texture_problem(desc, pixels.size())) {
+            return invalid(*problem);
         }
-        if (pixels.size() != std::size_t{desc.width} * desc.height * 4) {
-            return invalid("The pixels don't match the texture's size");
+        if (!supports_texture_format(desc.format)) {
+            return invalid("This device doesn't support the texture's format");
         }
 
         const DXGI_FORMAT format = to_directx(desc.format);
         UINT support = 0;
         m_device->CheckFormatSupport(format, &support);
-        const bool mipmaps = desc.generate_mipmaps && (desc.width > 1 || desc.height > 1) &&
-                             (support & D3D11_FORMAT_SUPPORT_MIP_AUTOGEN) != 0;
+        const bool mipmaps =
+            generates_mipmaps(desc) && (support & D3D11_FORMAT_SUPPORT_MIP_AUTOGEN) != 0;
 
         D3D11_TEXTURE2D_DESC texture_desc{};
         texture_desc.Width = desc.width;
@@ -845,9 +867,18 @@ private:
         texture_desc.Format = format;
         texture_desc.SampleDesc.Count = 1;
         texture_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        D3D11_SUBRESOURCE_DATA data{};
-        data.pSysMem = pixels.data();
-        data.SysMemPitch = desc.width * 4;
+
+        // Each level's rows, packed one after another, as the pixels hold them.
+        std::vector<D3D11_SUBRESOURCE_DATA> levels(desc.mip_levels);
+        std::size_t offset = 0;
+        for (std::uint32_t level = 0; level < desc.mip_levels; ++level) {
+            const std::uint32_t width = mip_size(desc.width, level);
+            const std::uint32_t height = mip_size(desc.height, level);
+            levels[level].pSysMem = pixels.data() + offset;
+            levels[level].SysMemPitch = static_cast<UINT>(
+                texture_level_bytes(desc.format, width, 1));
+            offset += texture_level_bytes(desc.format, width, height);
+        }
 
         TextureResource texture;
         HRESULT result = S_OK;
@@ -859,13 +890,13 @@ private:
             texture_desc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
             result = m_device->CreateTexture2D(&texture_desc, nullptr, &texture.texture);
             if (SUCCEEDED(result)) {
-                m_context->UpdateSubresource(texture.texture.Get(), 0, nullptr, data.pSysMem,
-                                             data.SysMemPitch, 0);
+                m_context->UpdateSubresource(texture.texture.Get(), 0, nullptr, levels[0].pSysMem,
+                                             levels[0].SysMemPitch, 0);
             }
         } else {
-            texture_desc.MipLevels = 1;
+            texture_desc.MipLevels = desc.mip_levels;
             texture_desc.Usage = D3D11_USAGE_IMMUTABLE;
-            result = m_device->CreateTexture2D(&texture_desc, &data, &texture.texture);
+            result = m_device->CreateTexture2D(&texture_desc, levels.data(), &texture.texture);
         }
         if (FAILED(result)) {
             return directx_error("Creating a texture", result);

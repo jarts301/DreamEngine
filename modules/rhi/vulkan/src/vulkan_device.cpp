@@ -125,7 +125,21 @@ struct StagingBuffer {
 };
 
 VkFormat to_vulkan(TextureFormat format) {
-    return format == TextureFormat::Rgba8Srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    switch (format) {
+    case TextureFormat::Rgba8Srgb:
+        return VK_FORMAT_R8G8B8A8_SRGB;
+    case TextureFormat::Rgba8Unorm:
+        return VK_FORMAT_R8G8B8A8_UNORM;
+    case TextureFormat::Bc7Srgb:
+        return VK_FORMAT_BC7_SRGB_BLOCK;
+    case TextureFormat::Bc7Unorm:
+        return VK_FORMAT_BC7_UNORM_BLOCK;
+    case TextureFormat::Astc4x4Srgb:
+        return VK_FORMAT_ASTC_4x4_SRGB_BLOCK;
+    case TextureFormat::Astc4x4Unorm:
+        return VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
+    }
+    return VK_FORMAT_UNDEFINED;
 }
 
 VkFormat to_vulkan(VertexFormat format) {
@@ -351,6 +365,21 @@ public:
             return uploaded.error();
         }
         return handle_cast<BufferTag>(m_buffers.create(resource));
+    }
+
+    bool supports_texture_format(TextureFormat format) const override {
+        switch (format) {
+        case TextureFormat::Rgba8Srgb:
+        case TextureFormat::Rgba8Unorm:
+            return true;
+        case TextureFormat::Bc7Srgb:
+        case TextureFormat::Bc7Unorm:
+            return m_has_bc && can_sample(to_vulkan(format));
+        case TextureFormat::Astc4x4Srgb:
+        case TextureFormat::Astc4x4Unorm:
+            return m_has_astc && can_sample(to_vulkan(format));
+        }
+        return false;
     }
 
     core::Result<TextureHandle> create_texture(const TextureDesc& desc,
@@ -1026,12 +1055,23 @@ private:
         if (has_memory_budget) {
             extensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
         }
+        // Compressed textures need their feature turned on: BC on PCs, ASTC on phones. Each is
+        // used only where the GPU has it.
+        VkPhysicalDeviceFeatures available{};
+        vkGetPhysicalDeviceFeatures(m_physical_device, &available);
+        const VkPhysicalDeviceFeatures enabled{
+            .textureCompressionASTC_LDR = available.textureCompressionASTC_LDR,
+            .textureCompressionBC = available.textureCompressionBC,
+        };
+        m_has_bc = available.textureCompressionBC == VK_TRUE;
+        m_has_astc = available.textureCompressionASTC_LDR == VK_TRUE;
         const VkDeviceCreateInfo info{
             .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
             .queueCreateInfoCount = 1,
             .pQueueCreateInfos = &queue,
             .enabledExtensionCount = static_cast<std::uint32_t>(extensions.size()),
             .ppEnabledExtensionNames = extensions.data(),
+            .pEnabledFeatures = &enabled,
         };
         if (const VkResult result = vkCreateDevice(m_physical_device, &info, nullptr, &m_device);
             result != VK_SUCCESS) {
@@ -1207,6 +1247,15 @@ private:
         }
     }
 
+    [[nodiscard]] bool can_sample(VkFormat format) const {
+        VkFormatProperties properties{};
+        vkGetPhysicalDeviceFormatProperties(m_physical_device, format, &properties);
+        constexpr VkFormatFeatureFlags k_needed = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                                  VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+                                                  VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+        return (properties.optimalTilingFeatures & k_needed) == k_needed;
+    }
+
     [[nodiscard]] bool can_generate_mipmaps(VkFormat format) const {
         VkFormatProperties properties{};
         vkGetPhysicalDeviceFormatProperties(m_physical_device, format, &properties);
@@ -1218,17 +1267,19 @@ private:
 
     core::Result<TextureResource> upload_texture(const TextureDesc& desc,
                                                  std::span<const std::byte> pixels) {
-        if (desc.width == 0 || desc.height == 0) {
-            return invalid("A texture can't be empty");
+        if (const auto problem = texture_problem(desc, pixels.size())) {
+            return invalid(*problem);
         }
-        if (pixels.size() != std::size_t{desc.width} * desc.height * 4) {
-            return invalid("The pixels don't match the texture's size");
+        if (!supports_texture_format(desc.format)) {
+            return invalid("This device doesn't support the texture's format");
         }
 
         const VkFormat format = to_vulkan(desc.format);
-        std::uint32_t mip_levels = 1;
-        if (desc.generate_mipmaps && can_generate_mipmaps(format)) {
-            mip_levels += static_cast<std::uint32_t>(std::bit_width(std::max(desc.width, desc.height))) - 1;
+        // Levels after `given_levels` are made on the GPU from the one before.
+        const std::uint32_t given_levels = desc.mip_levels;
+        std::uint32_t mip_levels = given_levels;
+        if (generates_mipmaps(desc) && can_generate_mipmaps(format)) {
+            mip_levels = full_mip_chain(desc.width, desc.height);
         }
 
         const VkImageCreateInfo image_info{
@@ -1282,17 +1333,33 @@ private:
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
                     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-            const VkBufferImageCopy copy{
-                .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                .imageExtent = {desc.width, desc.height, 1},
-            };
+            // The given levels lie one after another in the staging buffer.
+            std::vector<VkBufferImageCopy> copies;
+            VkDeviceSize offset = 0;
+            for (std::uint32_t level = 0; level < given_levels; ++level) {
+                const std::uint32_t width = mip_size(desc.width, level);
+                const std::uint32_t height = mip_size(desc.height, level);
+                copies.push_back(VkBufferImageCopy{
+                    .bufferOffset = offset,
+                    .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1},
+                    .imageExtent = {width, height, 1},
+                });
+                offset += texture_level_bytes(desc.format, width, height);
+            }
             vkCmdCopyBufferToImage(commands, staging.value().buffer, texture.image,
-                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   static_cast<std::uint32_t>(copies.size()), copies.data());
+            if (given_levels > 1) {
+                barrier(commands, 0, given_levels - 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+            }
 
             // Each level is made from the one before it, then becomes readable by shaders.
             auto width = static_cast<std::int32_t>(desc.width);
             auto height = static_cast<std::int32_t>(desc.height);
-            for (std::uint32_t level = 1; level < mip_levels; ++level) {
+            for (std::uint32_t level = given_levels; level < mip_levels; ++level) {
                 barrier(commands, level - 1, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
                         VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -2009,6 +2076,9 @@ private:
     VkInstance m_instance = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT m_messenger = VK_NULL_HANDLE;
     VkPhysicalDevice m_physical_device = VK_NULL_HANDLE;
+    // Whether the device turned on BC or ASTC textures.
+    bool m_has_bc = false;
+    bool m_has_astc = false;
     VkDevice m_device = VK_NULL_HANDLE;
     VkQueue m_queue = VK_NULL_HANDLE;
     std::uint32_t m_queue_family = 0;

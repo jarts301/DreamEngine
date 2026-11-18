@@ -30,6 +30,10 @@ struct FakeState {
     bool text_input = false;
     std::map<std::string, std::vector<std::byte>, std::less<>> assets;
     std::map<std::string, std::vector<std::byte>, std::less<>> user_files;
+    // What file_version reports for assets, once a test turns it on: the version given here, 1 for
+    // other assets that exist, and 0 for missing ones. Off, it reports nothing, as an APK does.
+    bool reports_versions = false;
+    std::map<std::string, std::int64_t, std::less<>> asset_versions;
 };
 
 class FakePlatform final : public platform::Platform {
@@ -91,6 +95,18 @@ public:
             return core::Error{core::ErrorCode::NotFound, std::format("Not found: {}", path)};
         }
         return file->second;
+    }
+
+    std::optional<std::int64_t> file_version(platform::FileRoot root,
+                                             std::string_view path) override {
+        if (!m_state.reports_versions || root != platform::FileRoot::Assets) {
+            return std::nullopt;
+        }
+        if (const auto version = m_state.asset_versions.find(path);
+            version != m_state.asset_versions.end()) {
+            return version->second;
+        }
+        return m_state.assets.contains(path) ? 1 : 0;
     }
 
     core::Result<void> write_user_file(std::string_view path,

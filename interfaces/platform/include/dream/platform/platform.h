@@ -69,6 +69,14 @@ public:
     // Writes into FileRoot::User, creating parent directories and replacing any existing file.
     [[nodiscard]] virtual core::Result<void> write_user_file(std::string_view path,
                                                              std::span<const std::byte> data) = 0;
+
+    // An optional capability, for hot reloading: a number that changes whenever the file does,
+    // such as its modification time, and 0 for a file that doesn't exist. Nothing when the platform
+    // can't tell, which is the default, as for files inside an APK or an archive.
+    [[nodiscard]] virtual std::optional<std::int64_t> file_version(FileRoot /*root*/,
+                                                                   std::string_view /*path*/) {
+        return std::nullopt;
+    }
 };
 
 } // namespace dream::platform

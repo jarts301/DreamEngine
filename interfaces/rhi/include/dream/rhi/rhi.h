@@ -44,15 +44,100 @@ inline constexpr std::size_t k_max_frame_vertex_bytes = 2 * 1024 * 1024;
 
 enum class BufferUsage : std::uint8_t { Vertex, Index };
 
-// Both are four bytes per pixel. Srgb is for colors, and Unorm is for data such as normal maps.
-enum class TextureFormat : std::uint8_t { Rgba8Srgb, Rgba8Unorm };
+// Srgb is for colors, and Unorm for data such as normal maps. Rgba8 is four bytes per pixel. The
+// compressed formats store each block of 4x4 pixels in 16 bytes, with blocks at the right and
+// bottom edges covering pixels past them: BC7 is the PC's, and ASTC 4x4 the phone's. Only the Rgba8
+// formats work everywhere; see Device::supports_texture_format.
+enum class TextureFormat : std::uint8_t {
+    Rgba8Srgb,
+    Rgba8Unorm,
+    Bc7Srgb,
+    Bc7Unorm,
+    Astc4x4Srgb,
+    Astc4x4Unorm,
+};
+
+[[nodiscard]] constexpr bool is_compressed(TextureFormat format) noexcept {
+    return format != TextureFormat::Rgba8Srgb && format != TextureFormat::Rgba8Unorm;
+}
+
+[[nodiscard]] constexpr bool is_srgb(TextureFormat format) noexcept {
+    return format == TextureFormat::Rgba8Srgb || format == TextureFormat::Bc7Srgb ||
+           format == TextureFormat::Astc4x4Srgb;
+}
 
 struct TextureDesc {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     TextureFormat format = TextureFormat::Rgba8Srgb;
+
+    // How many levels the pixels hold, the full size first and each next one half as wide and
+    // high, rounded down, but at least 1.
+    std::uint32_t mip_levels = 1;
+
+    // The device makes the rest of the chain itself. Only for the Rgba8 formats, with one level.
     bool generate_mipmaps = true;
 };
+
+// The size of one level of a texture, in pixels.
+[[nodiscard]] constexpr std::uint32_t mip_size(std::uint32_t full, std::uint32_t level) noexcept {
+    const std::uint32_t size = level < 32 ? full >> level : 0;
+    return size > 0 ? size : 1;
+}
+
+// Levels down to 1x1.
+[[nodiscard]] constexpr std::uint32_t full_mip_chain(std::uint32_t width,
+                                                     std::uint32_t height) noexcept {
+    std::uint32_t levels = 1;
+    for (std::uint32_t size = width > height ? width : height; size > 1; size /= 2) {
+        ++levels;
+    }
+    return levels;
+}
+
+// Bytes in one level of a texture, rows packed with nothing between them.
+[[nodiscard]] constexpr std::size_t texture_level_bytes(TextureFormat format, std::uint32_t width,
+                                                        std::uint32_t height) noexcept {
+    if (!is_compressed(format)) {
+        return std::size_t{width} * height * 4;
+    }
+    return std::size_t{(width + 3) / 4} * ((height + 3) / 4) * 16;
+}
+
+// The bytes the pixels of a texture with `desc` take, every level after the one before.
+[[nodiscard]] constexpr std::size_t texture_bytes(const TextureDesc& desc) noexcept {
+    std::size_t total = 0;
+    for (std::uint32_t level = 0; level < desc.mip_levels; ++level) {
+        total += texture_level_bytes(desc.format, mip_size(desc.width, level),
+                                     mip_size(desc.height, level));
+    }
+    return total;
+}
+
+// What is wrong with a texture's description and pixels, if anything, as every backend checks it.
+// Compressed textures must be a whole number of blocks wide and high, which Direct3D requires.
+[[nodiscard]] constexpr std::optional<std::string_view>
+texture_problem(const TextureDesc& desc, std::size_t pixel_bytes) noexcept {
+    if (desc.width == 0 || desc.height == 0) {
+        return "A texture can't be empty";
+    }
+    if (desc.mip_levels == 0 || desc.mip_levels > full_mip_chain(desc.width, desc.height)) {
+        return "A texture's mip levels must be from 1 down to 1x1 at most";
+    }
+    if (is_compressed(desc.format) && (desc.width % 4 != 0 || desc.height % 4 != 0)) {
+        return "A compressed texture's width and height must be multiples of 4";
+    }
+    if (pixel_bytes != texture_bytes(desc)) {
+        return "The pixels don't match the texture's size";
+    }
+    return std::nullopt;
+}
+
+// Whether the device makes a texture's mipmaps itself.
+[[nodiscard]] constexpr bool generates_mipmaps(const TextureDesc& desc) noexcept {
+    return desc.generate_mipmaps && desc.mip_levels == 1 && !is_compressed(desc.format) &&
+           (desc.width > 1 || desc.height > 1);
+}
 
 enum class ShaderStage : std::uint8_t { Vertex, Fragment };
 enum class IndexFormat : std::uint8_t { UInt16, UInt32 };
@@ -198,10 +283,15 @@ public:
     [[nodiscard]] virtual core::Result<BufferHandle>
     create_buffer(BufferUsage usage, std::span<const std::byte> contents) = 0;
 
-    // `pixels` holds width * height pixels of four bytes, row by row from the top of the image.
-    // The contents are fixed at creation.
+    // `pixels` holds each level, row by row from the top of the image, texture_bytes(desc) in all.
+    // The contents are fixed at creation. A format the device doesn't support is an error.
     [[nodiscard]] virtual core::Result<TextureHandle>
     create_texture(const TextureDesc& desc, std::span<const std::byte> pixels) = 0;
+
+    // Whether create_texture takes textures of `format`. The Rgba8 formats always work.
+    [[nodiscard]] virtual bool supports_texture_format(TextureFormat format) const {
+        return !is_compressed(format);
+    }
 
     [[nodiscard]] virtual core::Result<ShaderHandle>
     create_shader(ShaderStage stage, std::span<const std::byte> code) = 0;

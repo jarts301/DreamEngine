@@ -205,3 +205,50 @@ TEST_CASE("Null device takes per-frame indexed geometry and scissors inside a pa
     commands->end_render_pass();
     CHECK(device->end_frame().has_value());
 }
+
+// The sizes every backend checks textures against, from rhi.h.
+TEST_CASE("Texture sizes count every level, in pixels or 4x4 blocks") {
+    static_assert(mip_size(16, 0) == 16 && mip_size(16, 4) == 1 && mip_size(16, 9) == 1);
+    static_assert(mip_size(6, 1) == 3 && mip_size(6, 2) == 1);
+    static_assert(full_mip_chain(1, 1) == 1 && full_mip_chain(16, 4) == 5);
+    static_assert(full_mip_chain(5, 3) == 3);
+
+    static_assert(texture_level_bytes(TextureFormat::Rgba8Srgb, 3, 2) == 24);
+    static_assert(texture_level_bytes(TextureFormat::Bc7Srgb, 4, 4) == 16);
+    // Levels smaller than a block still take a whole one.
+    static_assert(texture_level_bytes(TextureFormat::Astc4x4Unorm, 1, 1) == 16);
+    static_assert(texture_level_bytes(TextureFormat::Bc7Unorm, 8, 12) == 6 * 16);
+
+    // 8x8 BC7 with all four levels: 4 blocks, then 1, 1 and 1.
+    constexpr TextureDesc k_bc7{
+        .width = 8, .height = 8, .format = TextureFormat::Bc7Srgb, .mip_levels = 4};
+    static_assert(texture_bytes(k_bc7) == 7 * 16);
+    CHECK_FALSE(texture_problem(k_bc7, 7 * 16).has_value());
+    CHECK(texture_problem(k_bc7, 6 * 16).has_value());
+
+    // Too many levels, and compressed sizes that aren't whole blocks, are refused.
+    CHECK(texture_problem(TextureDesc{.width = 8, .height = 8, .mip_levels = 5}, 0).has_value());
+    CHECK(texture_problem(TextureDesc{.width = 6, .height = 8, .format = TextureFormat::Bc7Srgb},
+                          texture_level_bytes(TextureFormat::Bc7Srgb, 6, 8))
+              .has_value());
+    CHECK(texture_problem(TextureDesc{.width = 8, .height = 8, .mip_levels = 0}, 0).has_value());
+
+    // Only one level of an uncompressed texture is made into a chain by the device.
+    CHECK(generates_mipmaps(TextureDesc{.width = 8, .height = 8}));
+    CHECK_FALSE(generates_mipmaps(TextureDesc{.width = 8, .height = 8, .mip_levels = 2}));
+    CHECK_FALSE(
+        generates_mipmaps(TextureDesc{.width = 8, .height = 8, .format = TextureFormat::Bc7Srgb}));
+    CHECK_FALSE(generates_mipmaps(TextureDesc{.width = 1, .height = 1}));
+}
+
+TEST_CASE("Null device takes compressed textures with their levels") {
+    const auto device = make_device();
+    CHECK(device->supports_texture_format(TextureFormat::Astc4x4Srgb));
+    // 2 blocks, then 1, 1 and 1.
+    const std::vector<std::byte> blocks(5 * 16);
+    const auto texture = device->create_texture(
+        TextureDesc{.width = 8, .height = 4, .format = TextureFormat::Astc4x4Srgb, .mip_levels = 4},
+        blocks);
+    REQUIRE(texture.has_value());
+    device->destroy_texture(texture.value());
+}

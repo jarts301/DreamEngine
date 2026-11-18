@@ -1,3 +1,5 @@
+#include "dream/core/archive.h"
+#include "dream/core/log.h"
 #include "dream/core/module_registry.h"
 #include "dream/platform/platform.h"
 
@@ -234,6 +236,15 @@ public:
     }
 
     core::Result<std::vector<std::byte>> read_file(FileRoot root, std::string_view path) override {
+#if !defined(SDL_PLATFORM_ANDROID)
+        // A packaged game has its assets in assets.pak next to the program, read in place of an
+        // assets folder.
+        if (root == FileRoot::Assets) {
+            if (core::ArchiveReader* const archive = asset_archive()) {
+                return archive->read(path);
+            }
+        }
+#endif
         const core::Result<std::string> full_path = resolve(root, path);
         if (!full_path.has_value()) {
             return full_path.error();
@@ -249,6 +260,30 @@ public:
         std::vector<std::byte> contents(bytes, bytes + size);
         SDL_free(data);
         return contents;
+    }
+
+    // Modification times, in nanoseconds. Assets inside the APK or an archive have none.
+    std::optional<std::int64_t> file_version(FileRoot root, std::string_view path) override {
+#if defined(SDL_PLATFORM_ANDROID)
+        if (root == FileRoot::Assets) {
+            return std::nullopt;
+        }
+#else
+        if (root == FileRoot::Assets && asset_archive() != nullptr) {
+            return std::nullopt;
+        }
+#endif
+        const core::Result<std::string> full_path = resolve(root, path);
+        if (!full_path.has_value()) {
+            return std::nullopt;
+        }
+        SDL_PathInfo info{};
+        if (!SDL_GetPathInfo(full_path.value().c_str(), &info) ||
+            info.type != SDL_PATHTYPE_FILE) {
+            return 0;
+        }
+        // Never 0, which means a missing file.
+        return info.modify_time != 0 ? info.modify_time : 1;
     }
 
     core::Result<void> write_user_file(std::string_view path,
@@ -293,6 +328,28 @@ private:
         return std::format("{}assets/{}", base, path);
 #endif
     }
+
+#if !defined(SDL_PLATFORM_ANDROID)
+    // Looked for once, at the first asset read.
+    core::ArchiveReader* asset_archive() {
+        if (!m_archive_checked) {
+            m_archive_checked = true;
+            if (const char* const base = SDL_GetBasePath()) {
+                core::Result<core::ArchiveReader> archive =
+                    core::ArchiveReader::open(std::format("{}assets.pak", base));
+                if (archive.has_value()) {
+                    DREAM_LOG_INFO("Reading assets from assets.pak, {} files",
+                                   archive.value().file_count());
+                    m_archive.emplace(std::move(archive).value());
+                } else if (archive.error().code != core::ErrorCode::NotFound) {
+                    DREAM_LOG_ERROR("{}; reading the assets folder instead",
+                                    archive.error().message);
+                }
+            }
+        }
+        return m_archive.has_value() ? &*m_archive : nullptr;
+    }
+#endif
 
     core::Result<std::string> user_root(std::string_view path) {
         if (m_user_root.empty()) {
@@ -440,6 +497,10 @@ private:
     std::string m_organization;
     std::string m_application;
     std::string m_user_root;
+#if !defined(SDL_PLATFORM_ANDROID)
+    std::optional<core::ArchiveReader> m_archive;
+    bool m_archive_checked = false;
+#endif
     SDL_Window* m_window = nullptr;
     std::mutex m_pending_mutex;
     std::deque<Event> m_pending;

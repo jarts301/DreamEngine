@@ -53,13 +53,16 @@ public:
 
     core::Result<TextureHandle> create_texture(const TextureDesc& desc,
                                                std::span<const std::byte> pixels) override {
-        if (desc.width == 0 || desc.height == 0) {
-            return invalid("A texture can't be empty");
-        }
-        if (pixels.size() != std::size_t{desc.width} * desc.height * 4) {
-            return invalid("The pixels don't match the texture's size");
+        if (const auto problem = texture_problem(desc, pixels.size())) {
+            return invalid(*problem);
         }
         return handle_cast<TextureTag>(m_textures.create());
+    }
+
+    // Nothing is drawn, so every format is taken, which lets code that picks a compressed format
+    // run without a GPU.
+    bool supports_texture_format(TextureFormat /*format*/) const override {
+        return true;
     }
 
     core::Result<ShaderHandle> create_shader(ShaderStage /*stage*/,

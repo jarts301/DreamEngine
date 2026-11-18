@@ -51,52 +51,115 @@ function(dream_add_game name)
         target_sources(${name} PRIVATE "${DreamEngine_SOURCE_DIR}/runtime/entry/heap_counting.cpp")
     endif()
 
-    # Each directory's contents are merged into the game's assets.
+    # Each directory's contents are merged into the game's assets, and what the build makes from
+    # them, compiled shaders and cooked textures, comes last.
     set(asset_dirs "")
     foreach(asset_dir IN LISTS ARG_ASSETS)
         cmake_path(ABSOLUTE_PATH asset_dir NORMALIZE)
         list(APPEND asset_dirs "${asset_dir}")
     endforeach()
+    set(generated_assets "${CMAKE_CURRENT_BINARY_DIR}/${name}_generated_assets")
     if(ARG_SHADERS)
         dream_module_shader_formats(${name} shader_formats)
         if(shader_formats)
-            set(generated_assets "${CMAKE_CURRENT_BINARY_DIR}/${name}_generated_assets")
             _dream_compile_shaders(${name} "${generated_assets}/shaders" "${shader_formats}"
                 ${ARG_SHADERS})
-            list(APPEND asset_dirs "${generated_assets}")
         else()
             message(STATUS "${name} has shaders, but none of its modules loads compiled shaders, "
                            "so they are not compiled.")
         endif()
     endif()
+    if(DREAM_COOK_TEXTURES)
+        _dream_cook_textures(${name} "${generated_assets}" ${asset_dirs})
+    endif()
+    list(APPEND asset_dirs "${generated_assets}")
+
+    # A target of its own that runs on every build, so a changed asset is copied even when the
+    # program itself is up to date. On PC it fills the assets folder next to the program, naming
+    # the program's folder directly, since naming the program would make each target wait for the
+    # other. On Android the APK packages the staged folder.
+    if(ANDROID)
+        set(staged_dir "${CMAKE_CURRENT_BINARY_DIR}/${name}_staged_assets")
+    else()
+        set(staged_dir "${CMAKE_CURRENT_BINARY_DIR}/${name}")
+        get_property(multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+        if(multi_config)
+            string(APPEND staged_dir "/$<CONFIG>")
+        endif()
+        string(APPEND staged_dir "/assets")
+    endif()
+    list(JOIN asset_dirs "|" joined_dirs)
+    add_custom_target(${name}_assets
+        COMMAND ${CMAKE_COMMAND} "-DSOURCES=${joined_dirs}" "-DDESTINATION=${staged_dir}"
+            "-DCOOKED=${DREAM_COOK_TEXTURES}"
+            -P "${DreamEngine_SOURCE_DIR}/cmake/DreamStageAssets.cmake"
+        VERBATIM)
+    foreach(made IN ITEMS shaders textures)
+        if(TARGET ${name}_${made})
+            add_dependencies(${name}_assets ${name}_${made})
+        endif()
+    endforeach()
 
     if(ANDROID)
         if(ARG_APPLICATION_ID)
-            _dream_add_apk(${name} "${native_dir}" "${asset_dirs}" "${ARG_APPLICATION_ID}"
+            _dream_add_apk(${name} "${native_dir}" "${staged_dir}" "${ARG_APPLICATION_ID}"
                 "${ARG_DISPLAY_NAME}")
-        endif()
-    else()
-        # A target of its own that runs on every build, so a changed asset is copied even when the
-        # program itself is up to date. It names the program's folder directly, since naming the
-        # program would make each target wait for the other.
-        set(game_dir "${CMAKE_CURRENT_BINARY_DIR}/${name}")
-        get_property(multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
-        if(multi_config)
-            string(APPEND game_dir "/$<CONFIG>")
-        endif()
-        set(copy_commands "")
-        foreach(asset_dir IN LISTS asset_dirs)
-            list(APPEND copy_commands COMMAND ${CMAKE_COMMAND} -E copy_directory "${asset_dir}"
-                "${game_dir}/assets")
-        endforeach()
-        if(copy_commands)
-            add_custom_target(${name}_assets ${copy_commands} VERBATIM)
-            add_dependencies(${name} ${name}_assets)
-            # Compiled shaders are among the assets.
-            if(TARGET ${name}_shaders)
-                add_dependencies(${name}_assets ${name}_shaders)
+            if(TARGET ${name}_apk)
+                add_dependencies(${name}_apk ${name}_assets)
             endif()
         endif()
+    else()
+        add_dependencies(${name} ${name}_assets)
+
+        # The game ready to hand out: the program, and its assets packed into assets.pak, which it
+        # reads in place of the assets folder. See docs/adr/0024-texture-cooking.md.
+        if(TARGET dream_pack)
+            set(package_dir "${CMAKE_CURRENT_BINARY_DIR}/${name}_package")
+            add_custom_target(${name}_package
+                COMMAND ${CMAKE_COMMAND} -E rm -rf "${package_dir}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${package_dir}"
+                COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:${name}>" "${package_dir}"
+                COMMAND dream_pack "${staged_dir}" "${package_dir}/assets.pak"
+                COMMENT "Packaging ${name} in ${package_dir}"
+                VERBATIM)
+            add_dependencies(${name}_package ${name} dream_pack)
+        endif()
+    endif()
+endfunction()
+
+# Cooks every PNG in a folder named "textures" among the asset folders into a KTX2 file of the same
+# name in `output_dir`, with UASTC data and every mip level, compressed with zstd. The game loads it
+# in place of the PNG and transcodes it for its GPU. Cooking runs on the build machine, with the
+# ktx tool vcpkg builds for it. See docs/adr/0024-texture-cooking.md.
+function(_dream_cook_textures target output_dir)
+    file(GLOB ktx_dirs "${VCPKG_INSTALLED_DIR}/*/tools/ktx")
+    find_program(DREAM_KTX ktx HINTS ${ktx_dirs} NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
+
+    set(outputs "")
+    foreach(asset_dir IN LISTS ARGN)
+        file(GLOB_RECURSE sources CONFIGURE_DEPENDS "${asset_dir}/*.png" "${asset_dir}/*.PNG")
+        foreach(source IN LISTS sources)
+            file(RELATIVE_PATH relative "${asset_dir}" "${source}")
+            if(NOT "/${relative}" MATCHES "/textures/")
+                continue()
+            endif()
+            string(REGEX REPLACE "\.[Pp][Nn][Gg]$" ".ktx2" relative "${relative}")
+            set(output "${output_dir}/${relative}")
+            cmake_path(GET output PARENT_PATH output_parent)
+            add_custom_command(
+                OUTPUT "${output}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${output_parent}"
+                COMMAND "${DREAM_KTX}" create --format R8G8B8A8_SRGB --assign-tf srgb --encode uastc
+                    --uastc-quality 2 --zstd 18 --generate-mipmap
+                    "${source}" "${output}"
+                DEPENDS "${source}"
+                COMMENT "Cooking ${relative}"
+                VERBATIM)
+            list(APPEND outputs "${output}")
+        endforeach()
+    endforeach()
+    if(outputs)
+        add_custom_target(${target}_textures DEPENDS ${outputs})
     endif()
 endfunction()
 

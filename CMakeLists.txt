@@ -7,6 +7,8 @@ option(DREAM_BUILD_SAMPLES "Build the sample programs" ${PROJECT_IS_TOP_LEVEL})
 option(DREAM_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 # Which profiler records the zones is chosen in the project configuration. OFF removes the zones
 # from the engine and games altogether, for builds that ship. See docs/adr/0015-profiling.md.
+# Off ships textures as their source PNGs, for checking whether a problem comes from cooking.
+option(DREAM_COOK_TEXTURES "Cook game textures into compressed KTX2 files" ON)
 option(DREAM_PROFILING "Compile profiling zones into the engine and games" ON)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -38,6 +40,11 @@ add_subdirectory(core)
 add_subdirectory(interfaces)
 add_subdirectory(libraries)
 add_subdirectory(runtime)
+
+# Tools that run on the build machine, such as packing a PC game's assets.
+if(NOT CMAKE_CROSSCOMPILING)
+    add_subdirectory(tools/pack)
+endif()
 
 if(DREAM_BUILD_SAMPLES)
     add_subdirectory(samples)

@@ -2,6 +2,8 @@
 find_package(EnTT CONFIG REQUIRED GLOBAL)
 find_package(Stb REQUIRED)
 find_path(DREAM_CGLTF_INCLUDE_DIR cgltf.h REQUIRED)
+# Reads cooked KTX2 textures and transcodes them for the device. Apache 2.0.
+find_package(Ktx CONFIG REQUIRED)
 
 add_library(dream_runtime STATIC
     src/app.cpp
@@ -10,6 +12,7 @@ add_library(dream_runtime STATIC
     src/crash_reports.cpp
     src/debug_lines.cpp
     src/event_bus.cpp
+    src/hot_reload.cpp
     src/input_actions.cpp
     src/memory_budget.cpp
     src/memory_guard.cpp
@@ -22,6 +25,7 @@ add_library(dream_runtime STATIC
     src/resource_monitor.cpp
     src/scene_loader.cpp
     src/screenshot.cpp
+    src/texture.cpp
     src/ui.cpp
     src/virtual_file_system.cpp
     src/world.cpp
@@ -35,6 +39,7 @@ target_link_libraries(dream_runtime PUBLIC
     dream::core dream::interface_platform dream::interface_rhi dream::interface_physics2d
     dream::interface_physics3d dream::interface_audio dream::interface_ui
     dream::interface_debug_ui dream::interface_profiler EnTT::EnTT)
+target_link_libraries(dream_runtime PRIVATE KTX::ktx)
 dream_configure_target(dream_runtime)
 
 if(DREAM_BUILD_TESTS)
@@ -55,6 +60,7 @@ if(DREAM_BUILD_TESTS)
             tests/renderer_test.cpp
             tests/scene_loader_test.cpp
             tests/screenshot_test.cpp
+            tests/texture_test.cpp
             tests/ui_test.cpp
             tests/virtual_file_system_test.cpp
             tests/world_test.cpp
@@ -62,6 +68,7 @@ if(DREAM_BUILD_TESTS)
             entry/heap_counting.cpp
         LIBRARIES
             dream::runtime
+            KTX::ktx
     )
 
     # Runs a game out of memory under a limit the program sets on itself, which can't be lifted,

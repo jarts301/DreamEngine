@@ -1,4 +1,5 @@
 #include "dream/runtime/asset_manager.h"
+#include "dream/runtime/hot_reload.h"
 
 #include "fake_platform.h"
 
@@ -199,4 +200,120 @@ TEST_CASE_FIXTURE(Fixture, "AssetManager rejects unsafe paths through the file s
     const auto asset = assets.load<TextAsset>("assets:/../secret");
     REQUIRE_FALSE(asset.has_value());
     CHECK(asset.error().code == core::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE_FIXTURE(Fixture, "AssetManager reloads an asset whose file changed, for every reference") {
+    state.reports_versions = true;
+    state.assets["a.txt"] = bytes("first");
+    const AssetRef<TextAsset> one = assets.load<TextAsset>("assets:/a.txt").value();
+    const AssetRef<TextAsset> two = assets.load<TextAsset>("assets:/a.txt").value();
+    CHECK(assets.reload_changed().empty());
+    CHECK(text_loads == 1);
+
+    state.assets["a.txt"] = bytes("second");
+    state.asset_versions["a.txt"] = 2;
+    CHECK(assets.reload_changed() == std::vector<std::string>{"assets:/a.txt"});
+    CHECK(text_loads == 2);
+    CHECK(one->text == "second");
+    CHECK(two->text == "second");
+    CHECK(one.version() == 1);
+    CHECK(one == two);
+    // Once is enough.
+    CHECK(assets.reload_changed().empty());
+
+    SUBCASE("a failed reload keeps the last version, until the file changes again") {
+        state.assets["a.txt"] = bytes("third");
+        state.asset_versions["a.txt"] = 3;
+        assets.register_loader<TextAsset>([](AssetLoadContext&) -> core::Result<TextAsset> {
+            return core::Error{core::ErrorCode::ParseError, "broken"};
+        });
+        CHECK(assets.reload_changed().empty());
+        CHECK(one->text == "second");
+        CHECK(one.version() == 1);
+        CHECK(assets.reload_changed().empty());
+    }
+}
+
+TEST_CASE_FIXTURE(Fixture, "AssetManager doesn't reload assets nobody uses, or that can't change") {
+    state.assets["a.txt"] = bytes("first");
+    SUBCASE("released") {
+        state.reports_versions = true;
+        { const auto released = assets.load<TextAsset>("assets:/a.txt"); }
+        state.asset_versions["a.txt"] = 2;
+        CHECK(assets.reload_changed().empty());
+    }
+    SUBCASE("the platform can't tell") {
+        const auto kept = assets.load<TextAsset>("assets:/a.txt");
+        state.asset_versions["a.txt"] = 2;
+        CHECK(assets.reload_changed().empty());
+    }
+    CHECK(text_loads == 1);
+}
+
+TEST_CASE_FIXTURE(Fixture, "AssetManager reloads a dependency, which its users then see") {
+    state.reports_versions = true;
+    state.assets["link"] = bytes("assets:/target.txt");
+    state.assets["target.txt"] = bytes("the target");
+    int link_loads = 0;
+    assets.register_loader<LinkAsset>(
+        [&link_loads](AssetLoadContext& context) -> core::Result<LinkAsset> {
+            ++link_loads;
+            core::Error error;
+            bool ok = false;
+            const std::string target = read_text(context, error, ok);
+            if (!ok) {
+                return error;
+            }
+            auto loaded = context.assets.load<TextAsset>(target);
+            if (!loaded.has_value()) {
+                return loaded.error();
+            }
+            return LinkAsset{loaded.value()};
+        });
+    const AssetRef<LinkAsset> link = assets.load<LinkAsset>("assets:/link").value();
+
+    // The target's file belongs to the target, not to the link that loaded it.
+    state.assets["target.txt"] = bytes("changed");
+    state.asset_versions["target.txt"] = 2;
+    CHECK(assets.reload_changed() == std::vector<std::string>{"assets:/target.txt"});
+    CHECK(link_loads == 1);
+    CHECK(link->target->text == "changed");
+}
+
+TEST_CASE_FIXTURE(Fixture, "AssetManager watches files an asset looked for but didn't find") {
+    state.reports_versions = true;
+    state.assets["plain.txt"] = bytes("plain");
+    // Prefers a cooked file, as model textures do.
+    assets.register_loader<LengthAsset>([](AssetLoadContext& context) -> core::Result<LengthAsset> {
+        auto file = context.files.read("assets:/cooked.txt");
+        if (!file.has_value()) {
+            file = context.files.read("assets:/plain.txt");
+        }
+        if (!file.has_value()) {
+            return file.error();
+        }
+        return LengthAsset{file.value().size()};
+    });
+    const AssetRef<LengthAsset> asset = assets.load<LengthAsset>("assets:/thing").value();
+    CHECK(asset->length == 5);
+
+    state.assets["cooked.txt"] = bytes("cooked!");
+    CHECK(assets.reload_changed() == std::vector<std::string>{"assets:/thing"});
+    CHECK(asset->length == 7);
+}
+
+TEST_CASE("Hot reload settings come from [hot_reload]") {
+    const core::Config on =
+        core::Config::parse("[hot_reload]\nenabled = true\ninterval_ms = 250\n").value();
+    const core::Result<HotReloadSettings> settings = HotReloadSettings::from_config(on);
+    REQUIRE(settings.has_value());
+    CHECK(settings.value().enabled);
+    CHECK(settings.value().interval_ms == 250);
+
+    const core::Config off = core::Config::parse("[hot_reload]\nenabled = false\n").value();
+    CHECK_FALSE(HotReloadSettings::from_config(off).value().enabled);
+    CHECK(HotReloadSettings::from_config(off).value().interval_ms == 500);
+
+    const core::Config bad = core::Config::parse("[hot_reload]\ninterval_ms = 10\n").value();
+    CHECK_FALSE(HotReloadSettings::from_config(bad).has_value());
 }

@@ -12,6 +12,14 @@
     "entt",
     "imgui",
     "joltphysics",
+    "ktx",
+    {
+      "name": "ktx",
+      "host": true,
+      "features": [
+        "tools"
+      ]
+    },
     "miniaudio",
     {
       "name": "portaudio",

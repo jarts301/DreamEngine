@@ -220,6 +220,11 @@ core::Result<void> App::run(Game& game) {
         return screenshot.error();
     }
 
+    const core::Result<HotReloadSettings> hot_reload = HotReloadSettings::from_config(m_config);
+    if (!hot_reload.has_value()) {
+        return hot_reload.error();
+    }
+
     const core::Result<MemorySettings> memory_settings = MemorySettings::from_config(m_config);
     if (!memory_settings.has_value()) {
         return memory_settings.error();
@@ -270,6 +275,13 @@ core::Result<void> App::run(Game& game) {
     std::uint64_t frame_number = 0;
     bool screenshot_asked = false;
     bool screenshot_done = false;
+    // Screenshot tests compare a fixed moment, which a reload mustn't change.
+    const bool reloading = hot_reload.value().enabled && !screenshot.value().has_value();
+    const auto reload_period = std::chrono::milliseconds(hot_reload.value().interval_ms);
+    core::TimePoint next_reload_check = core::now() + reload_period;
+    if (reloading) {
+        DREAM_LOG_INFO("Hot reloading is on: assets reload when their files change");
+    }
 
     while (m_running) {
         m_input.begin_frame();
@@ -295,6 +307,16 @@ core::Result<void> App::run(Game& game) {
             // First, so the game hears of a change before it updates.
             if (const std::optional<MemoryPressureChanged> change = memory.check(core::now())) {
                 handle_memory_pressure(game, *change, true);
+            }
+            // Between frames, so nothing the GPU still draws with is replaced mid-frame, and
+            // before the events, so the game hears of the reload this frame.
+            if (reloading && core::now() >= next_reload_check) {
+                next_reload_check = core::now() + reload_period;
+                DREAM_PROFILE_ZONE("Hot reload");
+                std::vector<std::string> reloaded = m_assets.reload_changed();
+                if (!reloaded.empty()) {
+                    m_events.publish(AssetsReloaded{std::move(reloaded)});
+                }
             }
             {
                 DREAM_PROFILE_ZONE("Queued events");

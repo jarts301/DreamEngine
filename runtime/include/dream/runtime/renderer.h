@@ -90,6 +90,20 @@ struct CameraRay {
 //     ambient = 0.3
 //
 // The game needs the RENDERER option on dream_add_game, for the shaders.
+// The renderer's shaders and the pipelines made from them, loaded as one asset.
+struct RendererPipelines {
+    GpuShader vertex_shader;
+    GpuShader fragment_shader;
+    GpuPipeline pipeline;
+    GpuShader line_vertex_shader;
+    GpuShader line_fragment_shader;
+    GpuPipeline line_pipeline;
+    GpuShader ui_vertex_shader;
+    GpuShader ui_fragment_shader;
+    GpuPipeline ui_pipeline;
+    GpuPipeline ui_premultiplied_pipeline;
+};
+
 class Renderer {
 public:
     Renderer();
@@ -145,16 +159,8 @@ private:
     void draw_debug_lines(rhi::CommandList& commands);
     void draw_ui(rhi::CommandList& commands, platform::SurfaceSize size);
 
-    std::optional<GpuShader> m_vertex_shader;
-    std::optional<GpuShader> m_fragment_shader;
-    std::optional<GpuPipeline> m_pipeline;
-    std::optional<GpuShader> m_line_vertex_shader;
-    std::optional<GpuShader> m_line_fragment_shader;
-    std::optional<GpuPipeline> m_line_pipeline;
-    std::optional<GpuShader> m_ui_vertex_shader;
-    std::optional<GpuShader> m_ui_fragment_shader;
-    std::optional<GpuPipeline> m_ui_pipeline;
-    std::optional<GpuPipeline> m_ui_premultiplied_pipeline;
+    // Reloaded when the shader files change.
+    AssetRef<RendererPipelines> m_pipelines;
     std::unique_ptr<UiTextures> m_ui_textures;
     std::array<ui::DrawList, static_cast<std::size_t>(UiLayer::Count)> m_ui_layers;
     std::array<core::Vec2, static_cast<std::size_t>(UiLayer::Count)> m_ui_offsets{};

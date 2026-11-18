@@ -2,6 +2,7 @@
 
 #include "dream/rhi/rhi.h"
 
+#include <algorithm>
 #include <deque>
 #include <format>
 #include <optional>
@@ -27,6 +28,10 @@ struct FakeDeviceState {
     std::deque<double> gpu_frame_seconds;
     // What a frame capture returns. Without it, the device can't capture.
     std::optional<rhi::CapturedFrame> captured;
+    // Compressed formats the device takes, besides the Rgba8 ones every device does.
+    std::vector<rhi::TextureFormat> compressed_formats;
+    // Each texture made, as it was described.
+    std::vector<rhi::TextureDesc> textures;
 };
 
 class FakeDevice final : public rhi::Device, private rhi::CommandList {
@@ -78,7 +83,14 @@ public:
     core::Result<rhi::TextureHandle> create_texture(const rhi::TextureDesc& desc,
                                                     std::span<const std::byte>) override {
         m_state.calls.push_back(std::format("texture {}x{}", desc.width, desc.height));
+        m_state.textures.push_back(desc);
         return rhi::TextureHandle{.index = ++m_next_texture, .generation = 1};
+    }
+
+    bool supports_texture_format(rhi::TextureFormat format) const override {
+        return !rhi::is_compressed(format) ||
+               std::ranges::find(m_state.compressed_formats, format) !=
+                   m_state.compressed_formats.end();
     }
 
     core::Result<rhi::ShaderHandle> create_shader(rhi::ShaderStage,

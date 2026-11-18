@@ -1,8 +1,10 @@
 #include "dream/runtime/renderer.h"
 
 #include "dream/core/assert.h"
+#include "dream/core/log.h"
 #include "dream/core/profile.h"
 #include "dream/runtime/app.h"
+#include "dream/runtime/texture.h"
 
 #include <algorithm>
 #include <array>
@@ -56,10 +58,10 @@ Vec4 extend(Vec3 v, float w) {
     return Vec4{v.x, v.y, v.z, w};
 }
 
-core::Result<GpuShader> load_shader(App& app, rhi::Device& device, std::string_view name,
-                                    rhi::ShaderStage stage) {
+core::Result<GpuShader> load_shader(VirtualFileSystem& files, rhi::Device& device,
+                                    std::string_view name, rhi::ShaderStage stage) {
     const auto code =
-        app.files().read(std::format("assets:/shaders/{}{}", name, device.shader_file_suffix()));
+        files.read(std::format("assets:/shaders/{}{}", name, device.shader_file_suffix()));
     if (!code.has_value()) {
         return core::Error{code.error().code,
                            std::format("{} (does the game use the RENDERER option?)",
@@ -254,7 +256,7 @@ void Renderer::release_ui_textures() {
 }
 
 void Renderer::draw_ui(rhi::CommandList& commands, platform::SurfaceSize size) {
-    if (!m_ui_pipeline.has_value() || size.width == 0 || size.height == 0) {
+    if (m_pipelines == nullptr || size.width == 0 || size.height == 0) {
         return;
     }
     const float width = static_cast<float>(size.width);
@@ -266,8 +268,9 @@ void Renderer::draw_ui(rhi::CommandList& commands, platform::SurfaceSize size) {
         if (list.commands.empty() || list.vertices.empty()) {
             continue;
         }
-        commands.bind_pipeline(list.premultiplied_alpha ? m_ui_premultiplied_pipeline->get()
-                                                        : m_ui_pipeline->get());
+        commands.bind_pipeline(list.premultiplied_alpha
+                                   ? m_pipelines->ui_premultiplied_pipeline.get()
+                                   : m_pipelines->ui_pipeline.get());
         if (!commands.bind_frame_geometry(std::as_bytes(std::span(list.vertices)),
                                           list.indices)) {
             continue;
@@ -356,20 +359,19 @@ std::optional<CameraRay> camera_ray(const World& world, platform::SurfaceSize si
     return CameraRay{.origin = camera->eye, .direction = direction};
 }
 
-core::Result<void> Renderer::initialize(App& app) {
-    rhi::Device* const device = app.device();
-    if (device == nullptr) {
-        return core::Error{core::ErrorCode::InvalidArgument,
-                           "The renderer needs a graphics module in the project configuration"};
-    }
+// The renderer's shaders and pipelines, made from the compiled shader files. The asset manager
+// loads them like any asset, so hot reloading rebuilds them all when one of the files changes.
+static core::Result<RendererPipelines> create_pipelines(VirtualFileSystem& files,
+                                                     rhi::Device& device_ref) {
+    rhi::Device* const device = &device_ref;
 
     core::Result<GpuShader> vertex =
-        load_shader(app, *device, "forward.vert", rhi::ShaderStage::Vertex);
+        load_shader(files, *device, "forward.vert", rhi::ShaderStage::Vertex);
     if (!vertex.has_value()) {
         return vertex.error();
     }
     core::Result<GpuShader> fragment =
-        load_shader(app, *device, "forward.frag", rhi::ShaderStage::Fragment);
+        load_shader(files, *device, "forward.frag", rhi::ShaderStage::Fragment);
     if (!fragment.has_value()) {
         return fragment.error();
     }
@@ -389,17 +391,15 @@ core::Result<void> Renderer::initialize(App& app) {
         return pipeline.error();
     }
 
-    m_vertex_shader.emplace(std::move(vertex).value());
-    m_fragment_shader.emplace(std::move(fragment).value());
-    m_pipeline.emplace(*device, pipeline.value());
+    GpuPipeline forward_pipeline(*device, pipeline.value());
 
     core::Result<GpuShader> line_vertex =
-        load_shader(app, *device, "debug_lines.vert", rhi::ShaderStage::Vertex);
+        load_shader(files, *device, "debug_lines.vert", rhi::ShaderStage::Vertex);
     if (!line_vertex.has_value()) {
         return line_vertex.error();
     }
     core::Result<GpuShader> line_fragment =
-        load_shader(app, *device, "debug_lines.frag", rhi::ShaderStage::Fragment);
+        load_shader(files, *device, "debug_lines.frag", rhi::ShaderStage::Fragment);
     if (!line_fragment.has_value()) {
         return line_fragment.error();
     }
@@ -419,17 +419,15 @@ core::Result<void> Renderer::initialize(App& app) {
     if (!line_pipeline.has_value()) {
         return line_pipeline.error();
     }
-    m_line_vertex_shader.emplace(std::move(line_vertex).value());
-    m_line_fragment_shader.emplace(std::move(line_fragment).value());
-    m_line_pipeline.emplace(*device, line_pipeline.value());
+    GpuPipeline lines(*device, line_pipeline.value());
 
     core::Result<GpuShader> ui_vertex =
-        load_shader(app, *device, "ui.vert", rhi::ShaderStage::Vertex);
+        load_shader(files, *device, "ui.vert", rhi::ShaderStage::Vertex);
     if (!ui_vertex.has_value()) {
         return ui_vertex.error();
     }
     core::Result<GpuShader> ui_fragment =
-        load_shader(app, *device, "ui.frag", rhi::ShaderStage::Fragment);
+        load_shader(files, *device, "ui.frag", rhi::ShaderStage::Fragment);
     if (!ui_fragment.has_value()) {
         return ui_fragment.error();
     }
@@ -451,16 +449,45 @@ core::Result<void> Renderer::initialize(App& app) {
     if (!ui_pipeline.has_value()) {
         return ui_pipeline.error();
     }
-    m_ui_pipeline.emplace(*device, ui_pipeline.value());
+    GpuPipeline ui(*device, ui_pipeline.value());
     ui_desc.blend = rhi::BlendMode::PremultipliedAlpha;
     const auto premultiplied_pipeline = device->create_pipeline(ui_desc);
     if (!premultiplied_pipeline.has_value()) {
         return premultiplied_pipeline.error();
     }
-    m_ui_premultiplied_pipeline.emplace(*device, premultiplied_pipeline.value());
-    m_ui_vertex_shader.emplace(std::move(ui_vertex).value());
-    m_ui_fragment_shader.emplace(std::move(ui_fragment).value());
+    GpuPipeline ui_premultiplied(*device, premultiplied_pipeline.value());
+    return RendererPipelines{
+        .vertex_shader = std::move(vertex).value(),
+        .fragment_shader = std::move(fragment).value(),
+        .pipeline = std::move(forward_pipeline),
+        .line_vertex_shader = std::move(line_vertex).value(),
+        .line_fragment_shader = std::move(line_fragment).value(),
+        .line_pipeline = std::move(lines),
+        .ui_vertex_shader = std::move(ui_vertex).value(),
+        .ui_fragment_shader = std::move(ui_fragment).value(),
+        .ui_pipeline = std::move(ui),
+        .ui_premultiplied_pipeline = std::move(ui_premultiplied),
+    };
+}
+
+core::Result<void> Renderer::initialize(App& app) {
+    rhi::Device* const device = app.device();
+    if (device == nullptr) {
+        return core::Error{core::ErrorCode::InvalidArgument,
+                           "The renderer needs a graphics module in the project configuration"};
+    }
+
+    app.assets().register_loader<RendererPipelines>(
+        [device](AssetLoadContext& context) { return create_pipelines(context.files, *device); });
+    core::Result<AssetRef<RendererPipelines>> pipelines =
+        app.assets().load<RendererPipelines>("assets:/shaders/renderer");
+    if (!pipelines.has_value()) {
+        return pipelines.error();
+    }
+    m_pipelines = std::move(pipelines).value();
     m_ui_textures = std::make_unique<UiTextures>(app, *device);
+    DREAM_LOG_INFO("Cooked textures load as {}",
+                   texture_format_name(cooked_color_format(*device)));
 
     app.assets().register_loader<ModelAsset>(
         [device](AssetLoadContext& context) -> core::Result<ModelAsset> {
@@ -468,7 +495,22 @@ core::Result<void> Renderer::initialize(App& app) {
             if (!file.has_value()) {
                 return file.error();
             }
-            const core::Result<ModelData> data = parse_glb(file.value());
+            // A model's texture files are beside it, and a cooked one is used in place of its
+            // source when the build made one.
+            const std::string_view model_path = context.path;
+            const std::string_view folder = model_path.substr(0, model_path.rfind('/') + 1);
+            const ModelFileReader read_file = [&context, folder](std::string_view relative)
+                -> core::Result<std::vector<std::byte>> {
+                const std::string path = std::string(folder) + std::string(relative);
+                if (!relative.ends_with(".ktx2")) {
+                    if (auto cooked = context.files.read(cooked_texture_path(path));
+                        cooked.has_value()) {
+                        return cooked;
+                    }
+                }
+                return context.files.read(path);
+            };
+            const core::Result<ModelData> data = parse_glb(file.value(), read_file);
             if (!data.has_value()) {
                 return data.error();
             }
@@ -482,10 +524,10 @@ core::Result<void> Renderer::initialize(App& app) {
 }
 
 void Renderer::draw_debug_lines(rhi::CommandList& commands) {
-    if (!m_line_pipeline.has_value() || m_debug_lines.empty()) {
+    if (m_pipelines == nullptr || m_debug_lines.empty()) {
         return;
     }
-    commands.bind_pipeline(m_line_pipeline->get());
+    commands.bind_pipeline(m_pipelines->line_pipeline.get());
 
     // Drawn in pieces that fit the frame's vertex memory, until it is used up.
     constexpr std::size_t k_vertices_per_draw = 8192;
@@ -511,7 +553,7 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
     const Registry& registry = world.registry();
     const std::optional<CameraView> camera = camera_view(world, size);
 
-    if (camera.has_value() && m_pipeline.has_value()) {
+    if (camera.has_value() && m_pipelines != nullptr) {
         FrameUniforms uniforms{
             .view_projection = camera->view_projection,
             .camera_position = extend(camera->eye, 1.0f),
@@ -525,7 +567,7 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
             uniforms.light_color_and_ambient = extend(light.color * light.intensity, light.ambient);
         }
 
-        commands.bind_pipeline(m_pipeline->get());
+        commands.bind_pipeline(m_pipelines->pipeline.get());
         commands.set_uniforms(std::as_bytes(std::span(&uniforms, 1)));
 
         for (const auto [entity, transform, mesh] :

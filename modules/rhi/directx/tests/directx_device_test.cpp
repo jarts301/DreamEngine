@@ -444,3 +444,27 @@ TEST_CASE("DirectX device measures how long the GPU takes for each frame") {
     }
     CHECK(std::ranges::any_of(seconds, [](double time) { return time > 0.0; }));
 }
+
+TEST_CASE("DirectX device takes BC7 textures with their levels, but not ASTC") {
+    const auto device = make_device();
+    CHECK(device->supports_texture_format(TextureFormat::Bc7Srgb));
+    CHECK(device->supports_texture_format(TextureFormat::Bc7Unorm));
+    CHECK_FALSE(device->supports_texture_format(TextureFormat::Astc4x4Srgb));
+
+    // 8x8 with every level: 4 blocks, then 1, 1 and 1. Mode 6 blocks of one opaque color.
+    std::vector<std::byte> blocks(7 * 16);
+    for (std::size_t block = 0; block < 7; ++block) {
+        blocks[block * 16] = std::byte{0x40};
+    }
+    const auto texture = device->create_texture(
+        TextureDesc{.width = 8, .height = 8, .format = TextureFormat::Bc7Srgb, .mip_levels = 4},
+        blocks);
+    REQUIRE_MESSAGE(texture.has_value(), texture.error().message);
+    device->destroy_texture(texture.value());
+
+    CHECK_FALSE(device
+                    ->create_texture(TextureDesc{.width = 4, .height = 4,
+                                                 .format = TextureFormat::Astc4x4Srgb},
+                                     std::span(blocks).first(16))
+                    .has_value());
+}

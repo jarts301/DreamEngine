@@ -194,7 +194,7 @@ TEST_CASE("create_model_asset creates one texture per image and links materials 
     ModelData data;
     data.vertices.resize(3);
     data.indices = {0, 1, 2};
-    data.images.push_back(ImageData{2, 1, std::vector<std::byte>(8)});
+    data.images.push_back(ImageData{2, 1, std::vector<std::byte>(8), {}});
     data.materials.push_back(ModelMaterialData{{1, 1, 1, 1}, 0});
     data.materials.push_back(ModelMaterialData{{1, 0, 0, 1}, -1});
     data.parts.push_back(ModelPart{0, 3, 1});
@@ -209,4 +209,78 @@ TEST_CASE("create_model_asset creates one texture per image and links materials 
     REQUIRE(asset.value().materials.size() == 2);
     CHECK(asset.value().materials[0].texture.is_valid());
     CHECK_FALSE(asset.value().materials[1].texture.is_valid());
+}
+
+namespace {
+
+// The triangle with a texture whose images are in files of their own, `images` as glTF JSON. The
+// texture's own JSON is `texture`.
+std::vector<std::byte> textured_glb(const std::string& texture, const std::string& images) {
+    std::string json = model_json(R"({"mesh":0})", k_attributes,
+                                  std::format(R"(,"textures":[{}],"images":{})", texture, images));
+    const std::string plain = R"("pbrMetallicRoughness":{"baseColorFactor":[0.5,0.25,0.75,1]})";
+    const std::string textured =
+        R"("pbrMetallicRoughness":{"baseColorFactor":[0.5,0.25,0.75,1],)"
+        R"("baseColorTexture":{"index":0}})";
+    json.replace(json.find(plain), plain.size(), textured);
+    return make_glb(json, triangle_binary());
+}
+
+// A file that starts like a KTX2 texture, enough for parse_glb, which only keeps it.
+std::vector<std::byte> ktx2_lookalike() {
+    constexpr unsigned char k_identifier[] = {0xAB, 'K',  'T',  'X',  ' ',  '2',
+                                              '0',  0xBB, '\r', '\n', 0x1A, '\n'};
+    const auto bytes = std::as_bytes(std::span(k_identifier));
+    return {bytes.begin(), bytes.end()};
+}
+
+} // namespace
+
+TEST_CASE("parse_glb reads an image from a file beside the model") {
+    const std::vector<std::byte> file =
+        textured_glb(R"({"source":0})", R"([{"uri":"textures/two%20pixels.png"}])");
+    std::vector<std::string> asked;
+    const ModelFileReader read = [&](std::string_view path) -> core::Result<std::vector<std::byte>> {
+        asked.emplace_back(path);
+        return std::vector<std::byte>(png_file().begin(), png_file().end());
+    };
+
+    const core::Result<ModelData> model = parse_glb(file, read);
+    REQUIRE_MESSAGE(model.has_value(), model.error().message);
+    // The URI is decoded.
+    CHECK(asked == std::vector<std::string>{"textures/two pixels.png"});
+    REQUIRE(model.value().images.size() == 1);
+    CHECK(model.value().images[0].width == 2);
+    CHECK(model.value().images[0].ktx2.empty());
+    CHECK(model.value().materials[0].image == 0);
+
+    SUBCASE("which needs a reader") {
+        CHECK_FALSE(parse_glb(file).has_value());
+    }
+    SUBCASE("and reports a file that can't be read") {
+        const ModelFileReader missing = [](std::string_view) -> core::Result<std::vector<std::byte>> {
+            return core::Error{core::ErrorCode::NotFound, "no such file"};
+        };
+        const core::Result<ModelData> failed = parse_glb(file, missing);
+        REQUIRE_FALSE(failed.has_value());
+        CHECK(failed.error().message.find("textures/two pixels.png") != std::string::npos);
+    }
+}
+
+TEST_CASE("parse_glb keeps a KTX2 image, preferring KHR_texture_basisu's") {
+    const std::vector<std::byte> file = textured_glb(
+        R"({"source":0,"extensions":{"KHR_texture_basisu":{"source":1}}})",
+        R"([{"uri":"plain.png"},{"uri":"cooked.ktx2"}])");
+    std::vector<std::string> asked;
+    const ModelFileReader read = [&](std::string_view path) -> core::Result<std::vector<std::byte>> {
+        asked.emplace_back(path);
+        return ktx2_lookalike();
+    };
+
+    const core::Result<ModelData> model = parse_glb(file, read);
+    REQUIRE_MESSAGE(model.has_value(), model.error().message);
+    CHECK(asked == std::vector<std::string>{"cooked.ktx2"});
+    REQUIRE(model.value().images.size() == 1);
+    CHECK(model.value().images[0].ktx2 == ktx2_lookalike());
+    CHECK(model.value().images[0].pixels.empty());
 }

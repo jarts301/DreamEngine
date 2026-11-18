@@ -7,7 +7,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -49,11 +51,13 @@ struct ModelVertex {
     core::Vec2 uv;
 };
 
-// Four bytes per pixel, row by row from the top.
+// Four bytes per pixel, row by row from the top. A cooked image instead keeps its KTX2 file in
+// `ktx2`, transcoded for the device when the model goes to the GPU, and the rest is left empty.
 struct ImageData {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::vector<std::byte> pixels;
+    std::vector<std::byte> ktx2;
 };
 
 struct ModelMaterialData {
@@ -81,9 +85,16 @@ struct ModelData {
 // Reads a PNG or JPEG.
 [[nodiscard]] core::Result<ImageData> decode_image(std::span<const std::byte> file);
 
+// Reads a file a model refers to, such as a texture, by its path relative to the model's folder.
+using ModelFileReader =
+    std::function<core::Result<std::vector<std::byte>>(std::string_view relative_path)>;
+
 // Reads a binary glTF (.glb) file. Node transforms are baked into the vertices, and only triangles
-// with normals are accepted. Animation and skinning are ignored.
-[[nodiscard]] core::Result<ModelData> parse_glb(std::span<const std::byte> file);
+// with normals are accepted. Animation and skinning are ignored. Images are PNG, JPEG or KTX2,
+// embedded or in files of their own, which `read_file` reads; textures with the KHR_texture_basisu
+// extension use their KTX2 image.
+[[nodiscard]] core::Result<ModelData> parse_glb(std::span<const std::byte> file,
+                                                const ModelFileReader& read_file = {});
 
 struct ModelMaterial {
     core::Vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};

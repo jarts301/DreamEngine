@@ -28,6 +28,8 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0021](0021-screenshot-tests.md) | Screenshot tests: frame capture in the graphics backends, compared with reference images |
 | [0022](0022-licenses-and-frozen-libraries.md) | Wider third-party licenses, frozen in-house libraries, and Windows and Android as the targets |
 | [0023](0023-direct3d-12.md) | A Direct3D 12 backend beside Direct3D 11, loading the same shaders |
+| [0024](0024-texture-cooking.md) | Textures cooked to KTX2 and transcoded to BC7 or ASTC, and PC games packaged with an asset archive |
+| [0025](0025-hot-reload.md) | Hot reloading shaders and assets while a game runs |
 
 ## Template
 

@@ -4,6 +4,9 @@
 #include "dream/platform/platform.h"
 
 #include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -28,8 +31,19 @@ public:
     [[nodiscard]] core::Result<void> write(std::string_view path,
                                            std::span<const std::byte> data) const;
 
+    // A number that changes when the file does, 0 when it doesn't exist, or nothing when the
+    // platform can't tell. See platform::Platform::file_version.
+    [[nodiscard]] std::optional<std::int64_t> version(std::string_view path) const;
+
+    // Called with the path of every read, whether it succeeds or not, so the asset manager can
+    // tell which files an asset came from. Empty for none.
+    void set_read_observer(std::function<void(std::string_view path)> observer) {
+        m_read_observer = std::move(observer);
+    }
+
 private:
     platform::Platform& m_platform;
+    std::function<void(std::string_view)> m_read_observer;
 };
 
 } // namespace dream::runtime

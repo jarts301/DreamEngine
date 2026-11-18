@@ -9,6 +9,7 @@
 #include "dream/runtime/asset_manager.h"
 #include "dream/runtime/event_bus.h"
 #include "dream/runtime/game.h"
+#include "dream/runtime/hot_reload.h"
 #include "dream/runtime/input_actions.h"
 #include "dream/runtime/memory_budget.h"
 #include "dream/runtime/scene_loader.h"

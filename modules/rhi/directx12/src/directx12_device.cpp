@@ -98,9 +98,22 @@ std::string to_utf8(const WCHAR* text) {
     return result;
 }
 
+// ASTC has no DirectX format.
 DXGI_FORMAT to_directx(TextureFormat format) {
-    return format == TextureFormat::Rgba8Srgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
-                                              : DXGI_FORMAT_R8G8B8A8_UNORM;
+    switch (format) {
+    case TextureFormat::Rgba8Srgb:
+        return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    case TextureFormat::Rgba8Unorm:
+        return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case TextureFormat::Bc7Srgb:
+        return DXGI_FORMAT_BC7_UNORM_SRGB;
+    case TextureFormat::Bc7Unorm:
+        return DXGI_FORMAT_BC7_UNORM;
+    case TextureFormat::Astc4x4Srgb:
+    case TextureFormat::Astc4x4Unorm:
+        return DXGI_FORMAT_UNKNOWN;
+    }
+    return DXGI_FORMAT_UNKNOWN;
 }
 
 DXGI_FORMAT to_directx(VertexFormat format) {
@@ -383,6 +396,17 @@ public:
 
     std::string_view shader_file_suffix() const override {
         return ".dxbc";
+    }
+
+    // BC7 is part of feature level 11.0, so every device here has it.
+    bool supports_texture_format(TextureFormat format) const override {
+        D3D12_FEATURE_DATA_FORMAT_SUPPORT support{.Format = to_directx(format),
+                                                  .Support1 = {},
+                                                  .Support2 = {}};
+        return support.Format != DXGI_FORMAT_UNKNOWN &&
+               SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &support,
+                                                       sizeof(support))) &&
+               (support.Support1 & D3D12_FORMAT_SUPPORT1_TEXTURE2D) != 0;
     }
 
     std::optional<double> take_gpu_frame_seconds() override {
@@ -1230,11 +1254,11 @@ private:
 
     core::Result<TextureResource> upload_texture(const TextureDesc& desc,
                                                  std::span<const std::byte> pixels) {
-        if (desc.width == 0 || desc.height == 0) {
-            return invalid("A texture can't be empty");
+        if (const auto problem = texture_problem(desc, pixels.size())) {
+            return invalid(*problem);
         }
-        if (pixels.size() != std::size_t{desc.width} * desc.height * 4) {
-            return invalid("The pixels don't match the texture's size");
+        if (!supports_texture_format(desc.format)) {
+            return invalid("This device doesn't support the texture's format");
         }
         if (m_free_descriptors.empty()) {
             release_retired();
@@ -1244,12 +1268,22 @@ private:
             }
         }
 
-        const bool srgb = desc.format == TextureFormat::Rgba8Srgb;
-        std::vector<MipLevel> levels;
-        if (desc.generate_mipmaps && (desc.width > 1 || desc.height > 1)) {
-            levels = make_mipmaps(desc.width, desc.height, pixels, srgb);
+        // Each level's packed rows: made here, or given, one after another, in the pixels.
+        std::vector<MipLevel> made;
+        std::vector<std::span<const std::byte>> levels;
+        if (generates_mipmaps(desc)) {
+            made = make_mipmaps(desc.width, desc.height, pixels, is_srgb(desc.format));
+            for (const MipLevel& level : made) {
+                levels.emplace_back(level.pixels);
+            }
         } else {
-            levels.push_back(MipLevel{desc.width, desc.height, {pixels.begin(), pixels.end()}});
+            std::size_t offset = 0;
+            for (std::uint32_t level = 0; level < desc.mip_levels; ++level) {
+                const std::size_t size = texture_level_bytes(
+                    desc.format, mip_size(desc.width, level), mip_size(desc.height, level));
+                levels.push_back(pixels.subspan(offset, size));
+                offset += size;
+            }
         }
         const auto level_count = static_cast<UINT>(levels.size());
 
@@ -1283,13 +1317,14 @@ private:
         if (!staging.has_value()) {
             return staging.error();
         }
+        // A row here is a row of pixels, or of 4x4 blocks for a compressed format.
         for (UINT level = 0; level < level_count; ++level) {
             const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint = footprints[level];
-            const std::size_t source_pitch = std::size_t{levels[level].width} * 4;
+            const auto source_pitch = static_cast<std::size_t>(row_bytes[level]);
             for (UINT row = 0; row < rows[level]; ++row) {
                 std::memcpy(staging.value().mapped + footprint.Offset +
                                 std::size_t{row} * footprint.Footprint.RowPitch,
-                            levels[level].pixels.data() + row * source_pitch, source_pitch);
+                            levels[level].data() + row * source_pitch, source_pitch);
             }
         }
 

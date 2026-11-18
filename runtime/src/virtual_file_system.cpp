@@ -57,11 +57,22 @@ core::Result<ParsedPath> parse_path(std::string_view path) {
 } // namespace
 
 core::Result<std::vector<std::byte>> VirtualFileSystem::read(std::string_view path) const {
+    if (m_read_observer) {
+        m_read_observer(path);
+    }
     const core::Result<ParsedPath> parsed = parse_path(path);
     if (!parsed.has_value()) {
         return parsed.error();
     }
     return m_platform.read_file(parsed.value().root, parsed.value().relative);
+}
+
+std::optional<std::int64_t> VirtualFileSystem::version(std::string_view path) const {
+    const core::Result<ParsedPath> parsed = parse_path(path);
+    if (!parsed.has_value()) {
+        return std::nullopt;
+    }
+    return m_platform.file_version(parsed.value().root, parsed.value().relative);
 }
 
 core::Result<void> VirtualFileSystem::write(std::string_view path,
