@@ -8,7 +8,11 @@ struct FrameUniforms {
     float4 direction_to_light;
     float4 light_color_and_ambient;
     float4x4 light_view_projection;
+    float4x4 cascades[4];
+    float4 cascade_far;
+    float4 cascade_normal_offset;
     float4 shadow_settings;
+    float4 camera_forward;
 };
 
 struct DrawConstants {

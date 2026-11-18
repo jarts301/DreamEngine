@@ -11,11 +11,18 @@ struct FrameUniforms {
     float4 camera_position;
     float4 direction_to_light;
     float4 light_color_and_ambient;
-    // From world space to the shadow map's clip space (ADR 0029).
+    // The cascade the shadow pass draws, which this shader doesn't read (ADR 0029).
     float4x4 light_view_projection;
-    // x: 1 with a shadow map. y: one texel of it, in texture coordinates. z: a depth bias. w: how
-    // far to move a surface along its normal before looking it up, in world units.
+    // From world space to each cascade's part of the shadow map, in its clip space.
+    float4x4 cascades[4];
+    // How far from the camera each cascade reaches, along its view.
+    float4 cascade_far;
+    // How far to move a surface along its normal before looking it up, per cascade, in world units.
+    float4 cascade_normal_offset;
+    // x: how many cascades, 0 without shadows. y and w: one texel of the shadow map, across and
+    // down, in texture coordinates. z: a depth bias.
     float4 shadow_settings;
+    float4 camera_forward;
 };
 
 struct DrawConstants {
@@ -49,7 +56,6 @@ struct VertexOutput {
     float3 world_position : POSITION;
     float3 world_normal : NORMAL;
     float2 uv : TEXCOORD0;
-    float4 light_position : TEXCOORD1;
 };
 
 [shader("vertex")]
@@ -62,30 +68,53 @@ VertexOutput vertex_main(VertexInput input) {
     output.world_normal = draw.normal_x.xyz * input.normal.x + draw.normal_y.xyz * input.normal.y +
                           draw.normal_z.xyz * input.normal.z;
     output.uv = input.uv;
-    // Moved a little along the normal, which keeps lit surfaces from shadowing themselves.
-    const float3 offset = normalize(output.world_normal) * frame.shadow_settings.w;
-    output.light_position = mul(frame.light_view_projection, float4(world.xyz + offset, 1.0));
     return output;
 }
 
 // How much of the sun reaches a point: 1 lit, 0 in shadow, and between at the edges, from nine
-// filtered comparisons around it. Outside the shadow map, everything is lit.
-float sunlight(float4 light_position) {
-    if (frame.shadow_settings.x < 0.5) {
+// filtered comparisons around it in the nearest cascade that covers it. Past the last cascade, and
+// without shadows, everything is lit.
+float sunlight(float3 world_position, float3 normal) {
+    const int count = int(frame.shadow_settings.x + 0.5);
+    if (count == 0) {
         return 1.0;
     }
+    const float depth = dot(world_position - frame.camera_position.xyz, frame.camera_forward.xyz);
+    int cascade = -1;
+    for (int index = 3; index >= 0; --index) {
+        if (index < count && depth < frame.cascade_far[index]) {
+            cascade = index;
+        }
+    }
+    if (cascade < 0) {
+        return 1.0;
+    }
+
+    // Moved a little along the normal, which keeps lit surfaces from shadowing themselves.
+    const float3 moved = world_position + normal * frame.cascade_normal_offset[cascade];
+    const float4 clip = mul(frame.cascades[cascade], float4(moved, 1.0));
     // Clip space has +Y up and depth from 0 to 1, and a texture's first row is its top.
-    const float3 position = light_position.xyz / light_position.w;
+    const float3 position = clip.xyz / clip.w;
     const float2 uv = float2(position.x * 0.5 + 0.5, 0.5 - position.y * 0.5);
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || position.z > 1.0) {
+    if (position.z > 1.0) {
         return 1.0;
     }
-    const float depth = position.z - frame.shadow_settings.z;
-    const float texel = frame.shadow_settings.y;
+
+    // The cascades lie side by side in the map, two across and then two down. The samples stay
+    // inside this one's part.
+    const float columns = count > 1 ? 2.0 : 1.0;
+    const float rows = count > 2 ? 2.0 : 1.0;
+    const float2 cell = float2(float(cascade % 2), float(cascade / 2));
+    const float2 texel = frame.shadow_settings.yw;
+    const float2 low = cell / float2(columns, rows) + texel * 1.5;
+    const float2 high = (cell + 1.0) / float2(columns, rows) - texel * 1.5;
+
+    const float reference = position.z - frame.shadow_settings.z;
     float lit = 0.0;
     for (int y = -1; y <= 1; ++y) {
         for (int x = -1; x <= 1; ++x) {
-            lit += shadow_map.SampleCmpLevelZero(uv + float2(x, y) * texel, depth);
+            const float2 at = clamp(uv + float2(x, y) * texel, low, high);
+            lit += shadow_map.SampleCmpLevelZero(at, reference);
         }
     }
     return lit / 9.0;
@@ -103,7 +132,7 @@ float4 fragment_main(VertexOutput input) : SV_Target {
     const float3 light = frame.light_color_and_ambient.rgb;
     const float ambient = frame.light_color_and_ambient.a;
 
-    const float sun = sunlight(input.light_position);
+    const float sun = sunlight(input.world_position, normal);
     const float diffuse = saturate(dot(normal, to_light)) * sun;
     const float specular =
         diffuse > 0.0 ? pow(saturate(dot(normal, halfway)), 32.0) * 0.15 * sun : 0.0;

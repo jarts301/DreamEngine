@@ -33,7 +33,11 @@ struct FrameUniforms {
     Vec4 direction_to_light;
     Vec4 light_color_and_ambient;
     Mat4 light_view_projection;
+    std::array<Mat4, 4> cascades;
+    Vec4 cascade_far;
+    Vec4 cascade_normal_offset;
     Vec4 shadow_settings;
+    Vec4 camera_forward;
 };
 
 struct DrawConstants {
@@ -76,6 +80,28 @@ struct UiConstants {
 };
 
 static_assert(sizeof(FrameUniforms) <= rhi::k_max_uniform_size);
+// The layout of the block in runtime/shaders/forward.slang and shadow.slang.
+static_assert(sizeof(FrameUniforms) == 496);
+
+constexpr std::uint32_t k_max_cascades = 4;
+
+// Where cascade `index` of `count` lies in the shadow atlas, in cells: two across, then two down.
+struct CascadeCell {
+    std::uint32_t column = 0;
+    std::uint32_t row = 0;
+};
+
+CascadeCell cascade_cell(std::uint32_t index) {
+    return CascadeCell{index % 2, index / 2};
+}
+
+std::uint32_t atlas_columns(std::uint32_t cascades) {
+    return cascades > 1 ? 2 : 1;
+}
+
+std::uint32_t atlas_rows(std::uint32_t cascades) {
+    return cascades > 2 ? 2 : 1;
+}
 
 static_assert(sizeof(DrawConstants) <= rhi::k_max_push_constant_size);
 
@@ -456,11 +482,21 @@ core::Result<RendererSettings> RendererSettings::from_config(const core::Config&
     // Shadows, per device unless the game says otherwise.
 #if defined(__ANDROID__)
     constexpr std::uint32_t k_default_shadow_resolution = 1024;
+    constexpr std::uint32_t k_default_cascades = 3;
     constexpr bool k_phone = true;
 #else
     constexpr std::uint32_t k_default_shadow_resolution = 2048;
+    constexpr std::uint32_t k_default_cascades = 4;
     constexpr bool k_phone = false;
 #endif
+    const std::int64_t cascades = config.get_int("renderer.shadows.cascades").value_or(0);
+    if (cascades < 0 || cascades > k_max_cascades) {
+        return setting_error(std::format("Setting 'renderer.shadows.cascades' must be from 0 to {}, "
+                                         "not {}",
+                                         k_max_cascades, cascades));
+    }
+    settings.shadow_cascades =
+        cascades != 0 ? static_cast<std::uint32_t>(cascades) : k_default_cascades;
     const bool depth_targets = device.supports_render_target(k_hdr_depth_format);
     const std::string_view shadows = config.get_string("renderer.shadows.mode").value_or("auto");
     const std::int64_t resolution = config.get_int("renderer.shadows.resolution").value_or(0);
@@ -501,6 +537,9 @@ core::Result<RendererSettings> RendererSettings::from_config(const core::Config&
                                          distance));
     }
     settings.shadow_distance = static_cast<float>(distance);
+    if (settings.shadow_resolution == 0) {
+        settings.shadow_cascades = 0;
+    }
     return settings;
 }
 
@@ -705,20 +744,24 @@ core::Result<void> Renderer::initialize(App& app) {
         DREAM_LOG_INFO("The scene is drawn straight to the window, without HDR");
     }
     if (m_settings.shadow_resolution > 0) {
+        // The cascades side by side in one map, since shaders read one shadow texture.
         const core::Result<rhi::TextureHandle> shadow_map = device->create_texture(
-            rhi::TextureDesc{.width = m_settings.shadow_resolution,
-                             .height = m_settings.shadow_resolution,
-                             .format = k_hdr_depth_format,
-                             .render_target = true},
+            rhi::TextureDesc{
+                .width = m_settings.shadow_resolution * atlas_columns(m_settings.shadow_cascades),
+                .height = m_settings.shadow_resolution * atlas_rows(m_settings.shadow_cascades),
+                .format = k_hdr_depth_format,
+                .render_target = true},
             {});
         if (!shadow_map.has_value()) {
             DREAM_LOG_WARNING("Could not make the shadow map, so there are no shadows: {}",
                               shadow_map.error().message);
             m_settings.shadow_resolution = 0;
+            m_settings.shadow_cascades = 0;
         } else {
             m_shadow_map.emplace(*device, shadow_map.value());
-            DREAM_LOG_INFO("Shadows: a {0}x{0} map, reaching {1} from the camera",
-                           m_settings.shadow_resolution, m_settings.shadow_distance);
+            DREAM_LOG_INFO("Shadows: {0} cascades of {1}x{1}, reaching {2} from the camera",
+                           m_settings.shadow_cascades, m_settings.shadow_resolution,
+                           m_settings.shadow_distance);
         }
     } else {
         DREAM_LOG_INFO("Shadows are off");
@@ -830,25 +873,28 @@ void Renderer::fit_hdr_targets(platform::SurfaceSize size) {
 
 namespace {
 
-// The sun's view for the shadow map: an orthographic box around the part of the camera's view
-// within `distance`, reaching back toward the sun by as far again, so casters behind the camera
-// still shadow what it sees. The box's size depends only on that part of the view, not on which
-// way the camera turns, and it moves in whole texels of the map, so shadow edges hold still.
-Mat4 fit_shadow_view(const CameraView& camera, Vec3 light_direction, float distance,
-                     std::uint32_t resolution) {
+// The depth, in clip space, at `distance` in front of the camera, as perspective() maps it.
+float clip_depth(const CameraView& camera, float distance) {
+    const float near = camera.z_near;
+    const float far = camera.z_far;
+    const float clamped = std::clamp(distance, near, far);
+    return far * (clamped - near) / (clamped * (far - near));
+}
+
+// The sun's view for one cascade: an orthographic box around the part of the camera's view from
+// `from` to `to` in front of it, reaching back toward the sun by `reach_back` more, so casters
+// behind the camera still shadow what it sees. The box's size depends only on that part of the
+// view, not on which way the camera turns, and it moves in whole texels of its map, so shadow edges
+// hold still.
+Mat4 fit_shadow_view(const CameraView& camera, Vec3 light_direction, float from, float to,
+                     float reach_back, std::uint32_t resolution) {
     const std::optional<Mat4> clip_to_world = core::inverse(camera.view_projection);
     if (!clip_to_world.has_value()) {
         return Mat4{};
     }
-    // The depth, in clip space, at `distance` in front of the camera, as perspective() maps it.
-    const float near = camera.z_near;
-    const float far = camera.z_far;
-    const float reach = std::clamp(distance, near * 2.0f, far);
-    const float far_depth = far * (reach - near) / (reach * (far - near));
-
     std::array<Vec3, 8> corners{};
     std::size_t corner = 0;
-    for (const float depth : {0.0f, far_depth}) {
+    for (const float depth : {clip_depth(camera, from), clip_depth(camera, to)}) {
         for (const float y : {-1.0f, 1.0f}) {
             for (const float x : {-1.0f, 1.0f}) {
                 const Vec4 point = *clip_to_world * Vec4{x, y, depth, 1.0f};
@@ -869,7 +915,7 @@ Mat4 fit_shadow_view(const CameraView& camera, Vec3 light_direction, float dista
 
     const Vec3 direction = core::normalized(light_direction);
     const Vec3 up = std::abs(direction.y) > 0.99f ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{0.0f, 1.0f, 0.0f};
-    const float back = radius + distance;
+    const float back = radius + reach_back;
     const Mat4 view = core::look_at(center - direction * back, center, up);
     Mat4 projection = core::orthographic(-radius, radius, -radius, radius, 0.0f, back + radius);
 
@@ -881,6 +927,79 @@ Mat4 fit_shadow_view(const CameraView& camera, Vec3 light_direction, float dista
     projection.columns[3].x += (std::round(x) - x) / half;
     projection.columns[3].y += (std::round(y) - y) / half;
     return projection * view;
+}
+
+} // namespace
+
+// Splits the shadowed part of the view among the cascades, near ones short and far ones long, as
+// a blend of even and logarithmic steps, and fits each one's box into its cell of the atlas.
+namespace {
+
+void set_component(Vec4& vector, std::uint32_t index, float value) {
+    switch (index) {
+    case 0:
+        vector.x = value;
+        break;
+    case 1:
+        vector.y = value;
+        break;
+    case 2:
+        vector.z = value;
+        break;
+    default:
+        vector.w = value;
+        break;
+    }
+}
+
+void fit_cascades(FrameUniforms& frame, const CameraView& camera, Vec3 light_direction,
+                  const RendererSettings& settings) {
+    const std::uint32_t count = settings.shadow_cascades;
+    const std::uint32_t resolution = settings.shadow_resolution;
+    const float near = camera.z_near;
+    const float reach = std::clamp(settings.shadow_distance, near * 2.0f, camera.z_far);
+    constexpr float k_logarithmic = 0.7f;
+
+    const std::uint32_t columns = atlas_columns(count);
+    const std::uint32_t rows = atlas_rows(count);
+    float from = near;
+    for (std::uint32_t cascade = 0; cascade < count; ++cascade) {
+        const float step = static_cast<float>(cascade + 1) / static_cast<float>(count);
+        const float even = near + (reach - near) * step;
+        const float logarithmic = near * std::pow(reach / near, step);
+        const float to = cascade + 1 == count ? reach
+                                              : k_logarithmic * logarithmic +
+                                                    (1.0f - k_logarithmic) * even;
+
+        const Mat4 view = fit_shadow_view(camera, light_direction, from, to, reach, resolution);
+        // The world's size of one texel sets how far a surface moves along its normal.
+        const Vec4 x_axis = view.columns[0];
+        const float world_texel =
+            2.0f / (static_cast<float>(resolution) *
+                    std::max(core::length(Vec3{x_axis.x, x_axis.y, x_axis.z}), 1e-6f));
+
+        // Squeezed into its cell: a quarter of clip space, or a half with two cascades.
+        const CascadeCell cell = cascade_cell(cascade);
+        const float scale_x = 1.0f / static_cast<float>(columns);
+        const float scale_y = 1.0f / static_cast<float>(rows);
+        const float offset_x = -1.0f + static_cast<float>(2 * cell.column + 1) * scale_x;
+        const float offset_y = 1.0f - static_cast<float>(2 * cell.row + 1) * scale_y;
+        frame.cascades[cascade] = core::translation(Vec3{offset_x, offset_y, 0.0f}) *
+                                  core::scaling(Vec3{scale_x, scale_y, 1.0f}) * view;
+        set_component(frame.cascade_far, cascade, to);
+        set_component(frame.cascade_normal_offset, cascade, world_texel * 1.5f);
+        from = to;
+    }
+    frame.shadow_settings =
+        Vec4{static_cast<float>(count), 1.0f / static_cast<float>(resolution * columns), 0.0005f,
+             1.0f / static_cast<float>(resolution * rows)};
+
+    // The camera's forward direction: through the middle of the near plane.
+    if (const std::optional<Mat4> clip_to_world = core::inverse(camera.view_projection)) {
+        const Vec4 middle = *clip_to_world * Vec4{0.0f, 0.0f, 0.0f, 1.0f};
+        const Vec3 point = Vec3{middle.x, middle.y, middle.z} * (1.0f / middle.w);
+        frame.camera_forward = extend(core::normalized(point - camera.eye), 0.0f);
+    }
 }
 
 } // namespace
@@ -941,7 +1060,11 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
             .direction_to_light = Vec4{0.0f, 1.0f, 0.0f, 0.0f},
             .light_color_and_ambient = Vec4{0.0f, 0.0f, 0.0f, 0.2f},
             .light_view_projection = Mat4{},
+            .cascades = {},
+            .cascade_far = Vec4{},
+            .cascade_normal_offset = Vec4{},
             .shadow_settings = Vec4{},
+            .camera_forward = Vec4{},
         };
         const auto lights = world.registry().view<const DirectionalLight>();
         if (const Entity light_entity = lights.front(); light_entity != k_no_entity) {
@@ -951,16 +1074,7 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
             shadows = light.casts_shadows && m_shadow_map.has_value() &&
                       m_pipelines->shadow_pipeline.has_value();
             if (shadows) {
-                const std::uint32_t resolution = m_settings.shadow_resolution;
-                frame.light_view_projection = fit_shadow_view(
-                    *camera, light.direction, m_settings.shadow_distance, resolution);
-                // The world's size of one texel sets how far a surface moves along its normal.
-                const float texel = 1.0f / static_cast<float>(resolution);
-                const Vec4 x_axis = frame.light_view_projection.columns[0];
-                const float world_texel =
-                    2.0f / (static_cast<float>(resolution) *
-                            std::max(core::length(Vec3{x_axis.x, x_axis.y, x_axis.z}), 1e-6f));
-                frame.shadow_settings = Vec4{1.0f, texel, 0.0005f, world_texel * 1.5f};
+                fit_cascades(frame, *camera, light.direction, m_settings);
             }
         }
         uniforms = frame;
@@ -968,11 +1082,22 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
     const auto uniform_bytes = [&] { return std::as_bytes(std::span(&*uniforms, 1)); };
 
     if (shadows) {
+        // Each cascade into its own part of the map, kept there by a scissor.
         DREAM_PROFILE_ZONE("Shadow map");
         commands.begin_render_pass(rhi::RenderTargets{.depth = m_shadow_map->get()});
         commands.bind_pipeline(m_pipelines->shadow_pipeline->get());
-        commands.set_uniforms(uniform_bytes());
-        draw_meshes(world, commands, true);
+        FrameUniforms cascade_uniforms = *uniforms;
+        const std::uint32_t cell_size = m_settings.shadow_resolution;
+        for (std::uint32_t cascade = 0; cascade < m_settings.shadow_cascades; ++cascade) {
+            const CascadeCell cell = cascade_cell(cascade);
+            commands.set_scissor(rhi::ScissorRect{.x = static_cast<std::int32_t>(cell.column * cell_size),
+                                                  .y = static_cast<std::int32_t>(cell.row * cell_size),
+                                                  .width = cell_size,
+                                                  .height = cell_size});
+            cascade_uniforms.light_view_projection = uniforms->cascades[cascade];
+            commands.set_uniforms(std::as_bytes(std::span(&cascade_uniforms, 1)));
+            draw_meshes(world, commands, true);
+        }
         commands.end_render_pass();
     }
 

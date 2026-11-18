@@ -119,7 +119,8 @@ enum class ToneMapping : std::uint8_t {
 //
 //     [renderer.shadows]
 //     mode = "auto"             # "auto", "on" or "off".
-//     resolution = 0            # The shadow map's width and height; 0 picks one per device.
+//     resolution = 0            # Each cascade's width and height; 0 picks one per device.
+//     cascades = 0              # From 1 to 4; 0 picks one per device.
 //     distance = 40.0           # How far from the camera shadows reach, in world units.
 //
 // "auto" picks R11G11B10 float where the device can draw into it and filter it, since it takes
@@ -127,15 +128,17 @@ enum class ToneMapping : std::uint8_t {
 // only that works. "off", or a device with neither, draws straight to the window, with no tone
 // mapping.
 //
-// Shadows, with "auto", are a 2048x2048 map on PCs, and 1024x1024 on phones that can draw depth
-// targets and have at least 4 GB of memory; phones with less, the weakest GPUs, have none, as has
-// any device that can't draw depth targets. "on" turns them on wherever depth targets work.
+// Shadows, with "auto", are four cascades of 2048x2048 on PCs, and three of 1024x1024 on phones that
+// can draw depth targets and have at least 4 GB of memory; phones with less, the weakest GPUs,
+// have none, as has any device that can't draw depth targets. "on" turns them on wherever depth
+// targets work.
 struct RendererSettings {
     std::optional<rhi::TextureFormat> hdr_format;
     ToneMapping tone_mapping = ToneMapping::PbrNeutral;
     float exposure = 1.0f;
-    // The shadow map's width and height, or 0 for no shadows.
+    // Each cascade's width and height, or 0 for no shadows.
     std::uint32_t shadow_resolution = 0;
+    std::uint32_t shadow_cascades = 0;
     float shadow_distance = 40.0f;
 
     [[nodiscard]] static core::Result<RendererSettings> from_config(const core::Config& config,
@@ -210,7 +213,8 @@ public:
     // on_render; DebugOverlay and UserInterface call it from their updates.
     void release_ui_textures();
 
-    // How many parts of models the last call to render drew into the shadow map.
+    // How many parts of models the last call to render drew into the shadow map, once for each
+    // cascade.
     [[nodiscard]] std::uint32_t last_shadow_caster_count() const noexcept {
         return m_last_shadow_caster_count;
     }

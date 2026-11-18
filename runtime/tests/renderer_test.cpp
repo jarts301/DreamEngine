@@ -493,6 +493,9 @@ TEST_CASE("Renderer settings give PCs shadows, unless the device can't draw dept
     CHECK(settings("").value().shadow_resolution == 2048);
     CHECK(settings("[renderer.shadows]\nresolution = 1024").value().shadow_resolution == 1024);
     CHECK(settings("[renderer.shadows]\nmode = \"off\"").value().shadow_resolution == 0);
+    CHECK(settings("").value().shadow_cascades == 4);
+    CHECK(settings("[renderer.shadows]\ncascades = 2").value().shadow_cascades == 2);
+    CHECK_FALSE(settings("[renderer.shadows]\ncascades = 5").has_value());
     CHECK(settings("[renderer.shadows]\ndistance = 25.0").value().shadow_distance ==
           Approx(25.0f));
 
@@ -520,8 +523,8 @@ TEST_CASE_FIXTURE(RenderFixture, "Renderer draws shadow casters into the shadow 
         world.registry().clear();
     });
 
-    // Both parts of the first model cast shadows, and every part is drawn.
-    CHECK(casters == 2);
+    // Both parts of the first model cast shadows, into each cascade, and every part is drawn.
+    CHECK(casters == 2 * 4);
     CHECK(draws == 3);
 
     // The shadow pass comes first, then the scene reads the shadow map in the shadow slot.
@@ -536,7 +539,7 @@ TEST_CASE_FIXTURE(RenderFixture, "Renderer draws shadow casters into the shadow 
 
     const auto shadow_map = std::ranges::find_if(device_state.textures, [](const auto& desc) {
         return desc.render_target && desc.format == rhi::TextureFormat::Depth32Float &&
-               desc.width == 2048;
+               desc.width == 4096 && desc.height == 4096;
     });
     CHECK(shadow_map != device_state.textures.end());
 }

@@ -81,9 +81,9 @@ exposure = 1.0
 
 See [ADR 0028](docs/adr/0028-hdr-and-tone-mapping.md).
 
-The sun casts shadows: a 2048x2048 shadow map on PCs, and 1024x1024 on phones with at least 4 GB of
-memory, with soft edges. `[renderer.shadows]` sets `mode` (`auto`, `on` or `off`), `resolution`
-and `distance`, and lights and meshes take `casts_shadows = false`. See
+The sun casts shadows, in cascades: four of 2048x2048 on PCs, and three of 1024x1024 on phones with at
+least 4 GB of memory, with soft edges. `[renderer.shadows]` sets `mode` (`auto`, `on` or `off`),
+`resolution`, `cascades` and `distance`, and lights and meshes take `casts_shadows = false`. See
 [ADR 0029](docs/adr/0029-directional-shadows.md).
 
 ## Screenshot tests

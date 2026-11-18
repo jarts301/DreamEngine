@@ -37,7 +37,7 @@ template <typename To, typename From>
 inline constexpr std::size_t k_max_push_constant_size = 128;
 
 // The largest block accepted by CommandList::set_uniforms.
-inline constexpr std::size_t k_max_uniform_size = 256;
+inline constexpr std::size_t k_max_uniform_size = 512;
 
 // How many bytes CommandList::draw_vertices can take in one frame, over all its calls.
 inline constexpr std::size_t k_max_frame_vertex_bytes = 2 * 1024 * 1024;

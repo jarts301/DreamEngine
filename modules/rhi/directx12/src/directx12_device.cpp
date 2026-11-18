@@ -71,7 +71,10 @@ constexpr UINT k_max_textures = 4096;
 // Uniform blocks are written to upload memory in chunks of this size, and a frame takes more chunks
 // when it sets more uniforms than one holds.
 constexpr UINT64 k_constant_chunk_bytes = 1024 * 1024;
-constexpr UINT64 k_constant_block_bytes = D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
+// Each block is the largest uniform block, rounded up to where constant buffers can start.
+constexpr UINT64 k_constant_block_bytes =
+    (k_max_uniform_size + D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1) /
+    D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT * D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
 static_assert(k_max_uniform_size <= k_constant_block_bytes);
 
 // How many measured frames are kept for take_gpu_frame_seconds before the oldest are dropped.
