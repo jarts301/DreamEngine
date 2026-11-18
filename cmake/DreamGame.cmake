@@ -21,6 +21,7 @@ function(dream_add_game name)
         list(APPEND ARG_SHADERS
             "${DreamEngine_SOURCE_DIR}/runtime/shaders/forward.slang"
             "${DreamEngine_SOURCE_DIR}/runtime/shaders/debug_lines.slang"
+            "${DreamEngine_SOURCE_DIR}/runtime/shaders/tonemap.slang"
             "${DreamEngine_SOURCE_DIR}/runtime/shaders/ui.slang")
     endif()
 

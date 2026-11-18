@@ -46,6 +46,8 @@ struct RenderFixture {
         state.assets["shaders/debug_lines.frag.fake"] = fake_shader();
         state.assets["shaders/ui.vert.fake"] = fake_shader();
         state.assets["shaders/ui.frag.fake"] = fake_shader();
+        state.assets["shaders/tonemap.vert.fake"] = fake_shader();
+        state.assets["shaders/tonemap.frag.fake"] = fake_shader();
     }
 
     // Calls `body` from inside a frame, with everything set up.
@@ -394,4 +396,86 @@ TEST_CASE("DebugLines builds shapes out of line pairs") {
     for (const DebugVertex& vertex : lines.vertices()) {
         CHECK(std::abs(vertex.position.y) <= 1.5f + 1e-4f);
     }
+}
+
+TEST_CASE("Renderer settings pick an HDR format the device draws into") {
+    FakeDeviceState state;
+    const FakeDevice device(state);
+    const auto settings = [&](std::string_view text) {
+        return RendererSettings::from_config(core::Config::parse(text).value(), device);
+    };
+
+    // Neither float format: straight to the window.
+    CHECK_FALSE(settings("").value().hdr_format.has_value());
+
+    state.render_target_formats = {rhi::TextureFormat::Rgba16Float,
+                                   rhi::TextureFormat::Depth32Float};
+    CHECK(settings("").value().hdr_format == rhi::TextureFormat::Rgba16Float);
+
+    // The smaller format wins where both work.
+    state.render_target_formats.push_back(rhi::TextureFormat::Rg11B10Float);
+    CHECK(settings("").value().hdr_format == rhi::TextureFormat::Rg11B10Float);
+    CHECK(settings("[renderer]\nhdr = \"rgba16f\"").value().hdr_format ==
+          rhi::TextureFormat::Rgba16Float);
+    CHECK_FALSE(settings("[renderer]\nhdr = \"off\"").value().hdr_format.has_value());
+
+    // Without a depth target to go with it, there is no HDR.
+    state.render_target_formats = {rhi::TextureFormat::Rg11B10Float};
+    CHECK_FALSE(settings("").value().hdr_format.has_value());
+
+    CHECK(settings("").value().tone_mapping == ToneMapping::PbrNeutral);
+    CHECK(settings("[renderer]\ntone_mapping = \"none\"").value().tone_mapping ==
+          ToneMapping::Clamp);
+    CHECK(settings("[renderer]\nexposure = 2.5").value().exposure == Approx(2.5f));
+
+    CHECK_FALSE(settings("[renderer]\nhdr = \"yes\"").has_value());
+    CHECK_FALSE(settings("[renderer]\ntone_mapping = \"filmic\"").has_value());
+    CHECK_FALSE(settings("[renderer]\nexposure = 0.0").has_value());
+}
+
+TEST_CASE_FIXTURE(RenderFixture, "Renderer draws the scene in HDR, then tone-maps it onto the window") {
+    device_state.render_target_formats = {rhi::TextureFormat::Rg11B10Float,
+                                          rhi::TextureFormat::Depth32Float};
+    World world;
+    std::optional<rhi::TextureFormat> chosen;
+
+    const Calls calls = in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
+        add_camera(world);
+        add_model(app, world, 1, false);
+        world.update_transforms();
+        renderer.render(world, commands, k_size);
+        chosen = renderer.settings().hdr_format;
+        world.registry().clear();
+    });
+
+    CHECK(chosen == rhi::TextureFormat::Rg11B10Float);
+
+    // A color and a depth target the size of the surface.
+    std::vector<rhi::TextureFormat> targets;
+    for (const rhi::TextureDesc& desc : device_state.textures) {
+        if (desc.render_target) {
+            CHECK(desc.width == k_size.width);
+            CHECK(desc.height == k_size.height);
+            targets.push_back(desc.format);
+        }
+    }
+    CHECK(targets == std::vector{rhi::TextureFormat::Rg11B10Float,
+                                 rhi::TextureFormat::Depth32Float});
+
+    // The model is drawn in the pass into the targets, and the tone mapping reads the color target
+    // in slot 1 afterwards.
+    const auto at = [&](std::string_view call) {
+        return std::ranges::find_if(calls, [&](const std::string& c) { return c.starts_with(call); }) -
+               calls.begin();
+    };
+    const auto pass = at("render_targets");
+    const auto model = at("draw 0+3");
+    const auto tone_map = at("bind_texture");
+    REQUIRE(pass < static_cast<std::ptrdiff_t>(calls.size()));
+    CHECK(pass < model);
+    const auto read = std::ranges::find_if(
+        calls, [](const std::string& c) { return c.ends_with(" at 1"); });
+    REQUIRE(read != calls.end());
+    CHECK(read - calls.begin() > model);
+    CHECK(tone_map < static_cast<std::ptrdiff_t>(calls.size()));
 }

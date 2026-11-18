@@ -68,6 +68,19 @@ depth targets for shadow maps, three texture slots with a shadow comparison samp
 pipelines. `samples/render_targets` uses them all, and its picture matches one reference on every
 backend. See [ADR 0027](docs/adr/0027-render-targets.md).
 
+The renderer draws its scene in HDR, into R11G11B10 float where the device takes it and RGBA16 float
+where only that works, and tone-maps it onto the window with Khronos PBR Neutral. Debug lines and
+the interface are drawn after, at their exact colors. A `[renderer]` table sets it:
+
+```toml
+[renderer]
+hdr = "auto"              # "auto", "r11g11b10", "rgba16f" or "off".
+tone_mapping = "neutral"  # "neutral" or "none".
+exposure = 1.0
+```
+
+See [ADR 0028](docs/adr/0028-hdr-and-tone-mapping.md).
+
 ## Screenshot tests
 
 A `[screenshot]` table in a game's `dream.toml` captures one frame, saves it next to the program,

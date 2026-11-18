@@ -32,6 +32,8 @@ struct FakeDeviceState {
     std::vector<rhi::TextureFormat> compressed_formats;
     // Each texture made, as it was described.
     std::vector<rhi::TextureDesc> textures;
+    // Formats the device draws into, besides the Rgba8 ones every device does.
+    std::vector<rhi::TextureFormat> render_target_formats;
 };
 
 class FakeDevice final : public rhi::Device, private rhi::CommandList {
@@ -91,6 +93,12 @@ public:
         return !rhi::is_compressed(format) ||
                std::ranges::find(m_state.compressed_formats, format) !=
                    m_state.compressed_formats.end();
+    }
+
+    bool supports_render_target(rhi::TextureFormat format) const override {
+        return format == rhi::TextureFormat::Rgba8Srgb || format == rhi::TextureFormat::Rgba8Unorm ||
+               std::ranges::find(m_state.render_target_formats, format) !=
+                   m_state.render_target_formats.end();
     }
 
     core::Result<rhi::ShaderHandle> create_shader(rhi::ShaderStage,

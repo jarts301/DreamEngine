@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <format>
 #include <span>
 #include <string>
@@ -40,6 +41,30 @@ struct DrawConstants {
     Vec4 base_color;
 };
 
+// Matches ToneMapConstants in runtime/shaders/tonemap.slang.
+struct ToneMapConstants {
+    Vec4 settings;
+};
+
+// Covers the window, with texture coordinates from the top left, for the tone-mapping pass.
+struct ScreenVertex {
+    float position[2];
+    float uv[2];
+};
+
+constexpr std::array<ScreenVertex, 3> k_screen_triangle{{
+    {{-1.0f, -1.0f}, {0.0f, 1.0f}},
+    {{3.0f, -1.0f}, {2.0f, 1.0f}},
+    {{-1.0f, 3.0f}, {0.0f, -1.0f}},
+}};
+
+// The scene's depth, beside the HDR color target.
+constexpr rhi::TextureFormat k_hdr_depth_format = rhi::TextureFormat::Depth32Float;
+
+core::Error setting_error(std::string_view message) {
+    return core::Error{core::ErrorCode::InvalidArgument, std::string(message)};
+}
+
 // Matches UiConstants in runtime/shaders/ui.slang.
 struct UiConstants {
     core::Vec2 scale;
@@ -48,6 +73,8 @@ struct UiConstants {
 };
 
 static_assert(sizeof(FrameUniforms) <= rhi::k_max_uniform_size);
+// Renderer::draw_scene returns these bytes, sized in renderer.h.
+static_assert(sizeof(FrameUniforms) == 112);
 static_assert(sizeof(DrawConstants) <= rhi::k_max_push_constant_size);
 
 Vec4 multiply(Vec4 a, Vec4 b) {
@@ -359,11 +386,67 @@ std::optional<CameraRay> camera_ray(const World& world, platform::SurfaceSize si
     return CameraRay{.origin = camera->eye, .direction = direction};
 }
 
+core::Result<RendererSettings> RendererSettings::from_config(const core::Config& config,
+                                                             const rhi::Device& device) {
+    RendererSettings settings;
+
+    const std::string_view hdr = config.get_string("renderer.hdr").value_or("auto");
+    const auto usable = [&](rhi::TextureFormat format) {
+        return device.supports_render_target(format) &&
+               device.supports_render_target(k_hdr_depth_format);
+    };
+    if (hdr == "auto") {
+        for (const rhi::TextureFormat format :
+             {rhi::TextureFormat::Rg11B10Float, rhi::TextureFormat::Rgba16Float}) {
+            if (usable(format)) {
+                settings.hdr_format = format;
+                break;
+            }
+        }
+    } else if (hdr == "r11g11b10" || hdr == "rgba16f") {
+        const rhi::TextureFormat format = hdr == "r11g11b10" ? rhi::TextureFormat::Rg11B10Float
+                                                             : rhi::TextureFormat::Rgba16Float;
+        if (usable(format)) {
+            settings.hdr_format = format;
+        } else {
+            DREAM_LOG_WARNING("The graphics device can't draw into the format renderer.hdr asks "
+                              "for, so the scene is drawn without HDR");
+        }
+    } else if (hdr != "off") {
+        return setting_error(std::format("Setting 'renderer.hdr' must be \"auto\", "
+                                         "\"r11g11b10\", \"rgba16f\" or \"off\", not \"{}\"",
+                                         hdr));
+    }
+
+    const std::string_view tone_mapping =
+        config.get_string("renderer.tone_mapping").value_or("neutral");
+    if (tone_mapping == "neutral") {
+        settings.tone_mapping = ToneMapping::PbrNeutral;
+    } else if (tone_mapping == "none") {
+        settings.tone_mapping = ToneMapping::Clamp;
+    } else {
+        return setting_error(std::format("Setting 'renderer.tone_mapping' must be \"neutral\" or "
+                                         "\"none\", not \"{}\"",
+                                         tone_mapping));
+    }
+
+    const double exposure = config.get_float("renderer.exposure").value_or(1.0);
+    if (!(exposure > 0.0 && exposure <= 1000.0)) {
+        return setting_error(std::format("Setting 'renderer.exposure' must be above 0 and at most "
+                                         "1000, not {}",
+                                         exposure));
+    }
+    settings.exposure = static_cast<float>(exposure);
+    return settings;
+}
+
 // The renderer's shaders and pipelines, made from the compiled shader files. The asset manager
 // loads them like any asset, so hot reloading rebuilds them all when one of the files changes.
 static core::Result<RendererPipelines> create_pipelines(VirtualFileSystem& files,
-                                                     rhi::Device& device_ref) {
+                                                     rhi::Device& device_ref,
+                                                     const RendererSettings& settings) {
     rhi::Device* const device = &device_ref;
+    const std::optional<rhi::TextureFormat> hdr = settings.hdr_format;
 
     core::Result<GpuShader> vertex =
         load_shader(files, *device, "forward.vert", rhi::ShaderStage::Vertex);
@@ -386,6 +469,8 @@ static core::Result<RendererPipelines> create_pipelines(VirtualFileSystem& files
         .fragment_shader = fragment.value().get(),
         .vertex_stride = sizeof(ModelVertex),
         .attributes = k_attributes,
+        .color_target = hdr,
+        .depth_target = hdr.has_value() ? std::optional(k_hdr_depth_format) : std::nullopt,
     });
     if (!pipeline.has_value()) {
         return pipeline.error();
@@ -456,6 +541,40 @@ static core::Result<RendererPipelines> create_pipelines(VirtualFileSystem& files
         return premultiplied_pipeline.error();
     }
     GpuPipeline ui_premultiplied(*device, premultiplied_pipeline.value());
+
+    std::optional<GpuShader> tone_map_vertex;
+    std::optional<GpuShader> tone_map_fragment;
+    std::optional<GpuPipeline> tone_map;
+    if (hdr.has_value()) {
+        core::Result<GpuShader> loaded_vertex =
+            load_shader(files, *device, "tonemap.vert", rhi::ShaderStage::Vertex);
+        if (!loaded_vertex.has_value()) {
+            return loaded_vertex.error();
+        }
+        core::Result<GpuShader> loaded_fragment =
+            load_shader(files, *device, "tonemap.frag", rhi::ShaderStage::Fragment);
+        if (!loaded_fragment.has_value()) {
+            return loaded_fragment.error();
+        }
+        constexpr std::array k_screen_attributes{
+            rhi::VertexAttribute{0, rhi::VertexFormat::Float2, offsetof(ScreenVertex, position)},
+            rhi::VertexAttribute{1, rhi::VertexFormat::Float2, offsetof(ScreenVertex, uv)},
+        };
+        const auto tone_map_pipeline = device->create_pipeline(rhi::PipelineDesc{
+            .vertex_shader = loaded_vertex.value().get(),
+            .fragment_shader = loaded_fragment.value().get(),
+            .vertex_stride = sizeof(ScreenVertex),
+            .attributes = k_screen_attributes,
+            .depth_test = false,
+            .cull = rhi::CullMode::None,
+        });
+        if (!tone_map_pipeline.has_value()) {
+            return tone_map_pipeline.error();
+        }
+        tone_map_vertex.emplace(std::move(loaded_vertex).value());
+        tone_map_fragment.emplace(std::move(loaded_fragment).value());
+        tone_map.emplace(*device, tone_map_pipeline.value());
+    }
     return RendererPipelines{
         .vertex_shader = std::move(vertex).value(),
         .fragment_shader = std::move(fragment).value(),
@@ -467,6 +586,9 @@ static core::Result<RendererPipelines> create_pipelines(VirtualFileSystem& files
         .ui_fragment_shader = std::move(ui_fragment).value(),
         .ui_pipeline = std::move(ui),
         .ui_premultiplied_pipeline = std::move(ui_premultiplied),
+        .tone_map_vertex_shader = std::move(tone_map_vertex),
+        .tone_map_fragment_shader = std::move(tone_map_fragment),
+        .tone_map_pipeline = std::move(tone_map),
     };
 }
 
@@ -477,8 +599,24 @@ core::Result<void> Renderer::initialize(App& app) {
                            "The renderer needs a graphics module in the project configuration"};
     }
 
+    core::Result<RendererSettings> settings = RendererSettings::from_config(app.config(), *device);
+    if (!settings.has_value()) {
+        return settings.error();
+    }
+    m_settings = settings.value();
+    m_device = device;
+    if (m_settings.hdr_format.has_value()) {
+        DREAM_LOG_INFO("The scene is drawn in HDR, into {}, with {} tone mapping",
+                       texture_format_name(*m_settings.hdr_format),
+                       m_settings.tone_mapping == ToneMapping::PbrNeutral ? "PBR Neutral" : "no");
+    } else {
+        DREAM_LOG_INFO("The scene is drawn straight to the window, without HDR");
+    }
+
     app.assets().register_loader<RendererPipelines>(
-        [device](AssetLoadContext& context) { return create_pipelines(context.files, *device); });
+        [device, chosen = m_settings](AssetLoadContext& context) {
+            return create_pipelines(context.files, *device, chosen);
+        });
     core::Result<AssetRef<RendererPipelines>> pipelines =
         app.assets().load<RendererPipelines>("assets:/shaders/renderer");
     if (!pipelines.has_value()) {
@@ -542,66 +680,145 @@ void Renderer::draw_debug_lines(rhi::CommandList& commands) {
     }
 }
 
+void Renderer::fit_hdr_targets(platform::SurfaceSize size) {
+    if (size == m_hdr_size && m_hdr_color.has_value()) {
+        return;
+    }
+    // Made between passes, before anything this frame reads the old ones.
+    m_hdr_color.reset();
+    m_hdr_depth.reset();
+    m_hdr_size = {};
+    if (size.width == 0 || size.height == 0 || m_device == nullptr) {
+        return;
+    }
+    const auto make = [&](rhi::TextureFormat format) -> std::optional<GpuTexture> {
+        const core::Result<rhi::TextureHandle> texture = m_device->create_texture(
+            rhi::TextureDesc{.width = size.width, .height = size.height, .format = format,
+                             .render_target = true},
+            {});
+        if (!texture.has_value()) {
+            DREAM_LOG_ERROR("Could not make the renderer's HDR target: {}",
+                            texture.error().message);
+            return std::nullopt;
+        }
+        return GpuTexture(*m_device, texture.value());
+    };
+    if (std::optional<GpuTexture> color = make(*m_settings.hdr_format)) {
+        m_hdr_color.emplace(std::move(*color));
+    }
+    if (std::optional<GpuTexture> depth = make(k_hdr_depth_format)) {
+        m_hdr_depth.emplace(std::move(*depth));
+    }
+    if (!m_hdr_color.has_value() || !m_hdr_depth.has_value()) {
+        m_hdr_color.reset();
+        m_hdr_depth.reset();
+        return;
+    }
+    m_hdr_size = size;
+}
+
+// Returns the frame's uniforms, which the debug lines read too, or nothing without a camera.
+std::optional<std::array<std::byte, sizeof(FrameUniforms)>>
+Renderer::draw_scene(const World& world, rhi::CommandList& commands, platform::SurfaceSize size) {
+    const Registry& registry = world.registry();
+    const std::optional<CameraView> camera = camera_view(world, size);
+    if (!camera.has_value() || m_pipelines == nullptr) {
+        return std::nullopt;
+    }
+    FrameUniforms uniforms{
+        .view_projection = camera->view_projection,
+        .camera_position = extend(camera->eye, 1.0f),
+        .direction_to_light = Vec4{0.0f, 1.0f, 0.0f, 0.0f},
+        .light_color_and_ambient = Vec4{0.0f, 0.0f, 0.0f, 0.2f},
+    };
+    const auto lights = registry.view<const DirectionalLight>();
+    if (const Entity light_entity = lights.front(); light_entity != k_no_entity) {
+        const DirectionalLight& light = lights.get<const DirectionalLight>(light_entity);
+        uniforms.direction_to_light = extend(core::normalized(-light.direction), 0.0f);
+        uniforms.light_color_and_ambient = extend(light.color * light.intensity, light.ambient);
+    }
+
+    commands.bind_pipeline(m_pipelines->pipeline.get());
+    commands.set_uniforms(std::as_bytes(std::span(&uniforms, 1)));
+
+    for (const auto [entity, transform, mesh] :
+         registry.view<const WorldTransform, const MeshRenderer>().each()) {
+        if (mesh.model == nullptr) {
+            continue;
+        }
+        const ModelAsset& model = *mesh.model;
+
+        const std::optional<Mat4> inverted = core::inverse(transform.matrix);
+        const Mat4 normals = inverted.has_value() ? core::transpose(*inverted) : transform.matrix;
+
+        commands.bind_vertex_buffer(model.vertices.get());
+        commands.bind_index_buffer(model.indices.get(), rhi::IndexFormat::UInt32);
+
+        for (const ModelPart& part : model.parts) {
+            const ModelMaterial& material = model.materials[part.material];
+            const DrawConstants constants{
+                .model = transform.matrix,
+                .normal_x = normals.columns[0],
+                .normal_y = normals.columns[1],
+                .normal_z = normals.columns[2],
+                .base_color = multiply(material.base_color, mesh.tint),
+            };
+            commands.bind_texture(material.texture);
+            commands.push_constants(std::as_bytes(std::span(&constants, 1)));
+            commands.draw_indexed_range(part.first_index, part.index_count);
+            ++m_last_draw_count;
+        }
+    }
+    std::array<std::byte, sizeof(FrameUniforms)> bytes{};
+    std::memcpy(bytes.data(), &uniforms, sizeof(uniforms));
+    return bytes;
+}
+
 void Renderer::render(const World& world, rhi::CommandList& commands, platform::SurfaceSize size,
                       rhi::ClearColor clear_color) {
     DREAM_PROFILE_ZONE("Draw scene");
     m_last_draw_count = 0;
     m_last_line_count = 0;
     m_last_ui_command_count = 0;
-    commands.begin_render_pass(clear_color);
 
-    const Registry& registry = world.registry();
-    const std::optional<CameraView> camera = camera_view(world, size);
+    const bool hdr = m_settings.hdr_format.has_value() && m_pipelines != nullptr &&
+                     m_pipelines->tone_map_pipeline.has_value();
+    if (hdr) {
+        fit_hdr_targets(size);
+    }
+    std::optional<std::array<std::byte, sizeof(FrameUniforms)>> uniforms;
+    if (hdr && m_hdr_color.has_value()) {
+        // The scene in HDR, then tone-mapped onto the window, with the lines and interface over it.
+        commands.begin_render_pass(rhi::RenderTargets{.color = m_hdr_color->get(),
+                                                      .depth = m_hdr_depth->get(),
+                                                      .clear_color = clear_color});
+        uniforms = draw_scene(world, commands, size);
+        commands.end_render_pass();
 
-    if (camera.has_value() && m_pipelines != nullptr) {
-        FrameUniforms uniforms{
-            .view_projection = camera->view_projection,
-            .camera_position = extend(camera->eye, 1.0f),
-            .direction_to_light = Vec4{0.0f, 1.0f, 0.0f, 0.0f},
-            .light_color_and_ambient = Vec4{0.0f, 0.0f, 0.0f, 0.2f},
-        };
-        const auto lights = registry.view<const DirectionalLight>();
-        if (const Entity light_entity = lights.front(); light_entity != k_no_entity) {
-            const DirectionalLight& light = lights.get<const DirectionalLight>(light_entity);
-            uniforms.direction_to_light = extend(core::normalized(-light.direction), 0.0f);
-            uniforms.light_color_and_ambient = extend(light.color * light.intensity, light.ambient);
+        commands.begin_render_pass(rhi::ClearColor{0.0f, 0.0f, 0.0f, 1.0f});
+        {
+            DREAM_PROFILE_ZONE("Tone mapping");
+            const ToneMapConstants constants{.settings = Vec4{
+                m_settings.exposure,
+                m_settings.tone_mapping == ToneMapping::PbrNeutral ? 1.0f : 0.0f, 0.0f, 0.0f}};
+            commands.bind_pipeline(m_pipelines->tone_map_pipeline->get());
+            commands.bind_texture(1, m_hdr_color->get());
+            commands.push_constants(std::as_bytes(std::span(&constants, 1)));
+            commands.draw_vertices(std::as_bytes(std::span(k_screen_triangle)),
+                                   static_cast<std::uint32_t>(k_screen_triangle.size()));
         }
-
-        commands.bind_pipeline(m_pipelines->pipeline.get());
-        commands.set_uniforms(std::as_bytes(std::span(&uniforms, 1)));
-
-        for (const auto [entity, transform, mesh] :
-             registry.view<const WorldTransform, const MeshRenderer>().each()) {
-            if (mesh.model == nullptr) {
-                continue;
-            }
-            const ModelAsset& model = *mesh.model;
-
-            const std::optional<Mat4> inverted = core::inverse(transform.matrix);
-            const Mat4 normals = inverted.has_value() ? core::transpose(*inverted) : transform.matrix;
-
-            commands.bind_vertex_buffer(model.vertices.get());
-            commands.bind_index_buffer(model.indices.get(), rhi::IndexFormat::UInt32);
-
-            for (const ModelPart& part : model.parts) {
-                const ModelMaterial& material = model.materials[part.material];
-                const DrawConstants constants{
-                    .model = transform.matrix,
-                    .normal_x = normals.columns[0],
-                    .normal_y = normals.columns[1],
-                    .normal_z = normals.columns[2],
-                    .base_color = multiply(material.base_color, mesh.tint),
-                };
-                commands.bind_texture(material.texture);
-                commands.push_constants(std::as_bytes(std::span(&constants, 1)));
-                commands.draw_indexed_range(part.first_index, part.index_count);
-                ++m_last_draw_count;
-            }
+        // A pass starts without the scene's uniforms on some backends, and the lines read them.
+        if (uniforms.has_value()) {
+            commands.set_uniforms(*uniforms);
         }
-
-        draw_debug_lines(commands);
+    } else {
+        commands.begin_render_pass(clear_color);
+        uniforms = draw_scene(world, commands, size);
     }
 
+    if (uniforms.has_value()) {
+        draw_debug_lines(commands);
+    }
     m_debug_lines.clear();
     draw_ui(commands, size);
     commands.end_render_pass();

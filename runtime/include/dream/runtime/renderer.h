@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dream/core/config.h"
 #include "dream/core/math/matrix.h"
 #include "dream/core/math/vector.h"
 #include "dream/core/result.h"
@@ -90,10 +91,41 @@ struct CameraRay {
 //     ambient = 0.3
 //
 // The game needs the RENDERER option on dream_add_game, for the shaders.
+
+// How the renderer turns its HDR scene into the window's colors (ADR 0028).
+enum class ToneMapping : std::uint8_t {
+    // Khronos PBR Neutral: colors as the materials have them up to about 0.8, and brighter ones
+    // rolled off toward white.
+    PbrNeutral,
+    // Only exposure, then clamped to 1, as without HDR.
+    Clamp,
+};
+
+// The [renderer] table of a game's dream.toml:
+//
+//     [renderer]
+//     hdr = "auto"              # "auto", "r11g11b10", "rgba16f" or "off".
+//     tone_mapping = "neutral"  # "neutral" or "none".
+//     exposure = 1.0            # A factor on the scene's colors, before tone mapping.
+//
+// "auto" picks R11G11B10 float where the device can draw into it and filter it, since it takes
+// half the memory bandwidth of RGBA16 float, which matters most on phones, and RGBA16 float where
+// only that works. "off", or a device with neither, draws straight to the window, with no tone
+// mapping.
+struct RendererSettings {
+    std::optional<rhi::TextureFormat> hdr_format;
+    ToneMapping tone_mapping = ToneMapping::PbrNeutral;
+    float exposure = 1.0f;
+
+    [[nodiscard]] static core::Result<RendererSettings> from_config(const core::Config& config,
+                                                                    const rhi::Device& device);
+};
+
 // The renderer's shaders and the pipelines made from them, loaded as one asset.
 struct RendererPipelines {
     GpuShader vertex_shader;
     GpuShader fragment_shader;
+    // Draws into the HDR targets, or into the window without HDR.
     GpuPipeline pipeline;
     GpuShader line_vertex_shader;
     GpuShader line_fragment_shader;
@@ -102,6 +134,10 @@ struct RendererPipelines {
     GpuShader ui_fragment_shader;
     GpuPipeline ui_pipeline;
     GpuPipeline ui_premultiplied_pipeline;
+    // Only with HDR.
+    std::optional<GpuShader> tone_map_vertex_shader;
+    std::optional<GpuShader> tone_map_fragment_shader;
+    std::optional<GpuPipeline> tone_map_pipeline;
 };
 
 class Renderer {
@@ -116,8 +152,10 @@ public:
     // loaded. Game::on_start is the place for it.
     [[nodiscard]] core::Result<void> initialize(App& app);
 
-    // Draws the world's first camera and light, then the debug lines, which it clears. Without a
-    // camera, this only clears the screen.
+    // Draws the world's first camera and light, into the HDR targets, then tone-maps them onto the
+    // window, and draws the debug lines, which it clears, and the interface layers over them.
+    // Without a camera, this only clears the screen. The HDR targets follow the surface's size, and
+    // are made again here when it changes.
     void render(const World& world, rhi::CommandList& commands, platform::SurfaceSize size,
                 rhi::ClearColor clear_color = rhi::ClearColor{0.45f, 0.60f, 0.80f, 1.0f});
 
@@ -153,15 +191,29 @@ public:
         return m_last_ui_command_count;
     }
 
+    // As read from the configuration and the device, valid after initialize.
+    [[nodiscard]] const RendererSettings& settings() const noexcept {
+        return m_settings;
+    }
+
 private:
     class UiTextures;
 
     void draw_debug_lines(rhi::CommandList& commands);
     void draw_ui(rhi::CommandList& commands, platform::SurfaceSize size);
+    std::optional<std::array<std::byte, 112>> draw_scene(const World& world,
+                                                         rhi::CommandList& commands,
+                                                         platform::SurfaceSize size);
+    void fit_hdr_targets(platform::SurfaceSize size);
 
     // Reloaded when the shader files change.
     AssetRef<RendererPipelines> m_pipelines;
     std::unique_ptr<UiTextures> m_ui_textures;
+    rhi::Device* m_device = nullptr;
+    RendererSettings m_settings;
+    std::optional<GpuTexture> m_hdr_color;
+    std::optional<GpuTexture> m_hdr_depth;
+    platform::SurfaceSize m_hdr_size;
     std::array<ui::DrawList, static_cast<std::size_t>(UiLayer::Count)> m_ui_layers;
     std::array<core::Vec2, static_cast<std::size_t>(UiLayer::Count)> m_ui_offsets{};
     DebugLines m_debug_lines;
