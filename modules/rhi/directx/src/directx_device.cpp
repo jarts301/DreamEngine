@@ -39,6 +39,7 @@ using Microsoft::WRL::ComPtr;
 // push constants, which DirectX has no special kind of buffer for.
 constexpr UINT k_uniform_register = 0;
 constexpr UINT k_push_constant_register = 1;
+// Slot n of bind_texture reads register tn with sampler sn (ADR 0027).
 constexpr UINT k_texture_register = 0;
 constexpr UINT k_sampler_register = 0;
 
@@ -93,6 +94,13 @@ DXGI_FORMAT to_directx(TextureFormat format) {
     case TextureFormat::Astc4x4Srgb:
     case TextureFormat::Astc4x4Unorm:
         return DXGI_FORMAT_UNKNOWN;
+    case TextureFormat::Rgba16Float:
+        return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    case TextureFormat::Rg11B10Float:
+        return DXGI_FORMAT_R11G11B10_FLOAT;
+    // Typeless, so it has a depth view to draw into and a float view to read.
+    case TextureFormat::Depth32Float:
+        return DXGI_FORMAT_R32_TYPELESS;
     }
     return DXGI_FORMAT_UNKNOWN;
 }
@@ -150,11 +158,18 @@ struct PipelineResource {
     ComPtr<ID3D11BlendState> blend;
     D3D11_PRIMITIVE_TOPOLOGY topology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     UINT vertex_stride = 0;
+    std::optional<TextureFormat> color_target;
+    std::optional<TextureFormat> depth_target;
 };
 
 struct TextureResource {
     ComPtr<ID3D11Texture2D> texture;
     ComPtr<ID3D11ShaderResourceView> view;
+    // For render targets, the view a pass draws through.
+    ComPtr<ID3D11RenderTargetView> target;
+    ComPtr<ID3D11DepthStencilView> depth;
+    TextureFormat format = TextureFormat::Rgba8Srgb;
+    platform::SurfaceSize size;
 };
 
 // A graphics device on Direct3D 11, feature level 11.0, presenting with the DXGI flip model that
@@ -202,6 +217,18 @@ public:
             return white.error();
         }
         m_white_texture = std::move(white).value();
+
+        // The shadow slot's default: a depth at the far plane, so every comparison passes.
+        core::Result<TextureResource> far_depth = upload_texture(
+            TextureDesc{.width = 1, .height = 1, .format = TextureFormat::Depth32Float,
+                        .render_target = true},
+            {});
+        if (!far_depth.has_value()) {
+            return far_depth.error();
+        }
+        m_far_depth_texture = std::move(far_depth).value();
+        m_context->ClearDepthStencilView(m_far_depth_texture.depth.Get(), D3D11_CLEAR_DEPTH, 1.0f,
+                                         0);
         return {};
     }
 
@@ -271,11 +298,31 @@ public:
 
     // BC7 is part of feature level 11.0, so every device here has it.
     bool supports_texture_format(TextureFormat format) const override {
+        if (is_render_target_only(format)) {
+            return false;
+        }
         const DXGI_FORMAT dxgi = to_directx(format);
         UINT support = 0;
         return dxgi != DXGI_FORMAT_UNKNOWN &&
                SUCCEEDED(m_device->CheckFormatSupport(dxgi, &support)) &&
                (support & D3D11_FORMAT_SUPPORT_TEXTURE2D) != 0;
+    }
+
+    // Feature level 11.0 draws into and filters all of these, but the driver is asked anyway.
+    bool supports_render_target(TextureFormat format) const override {
+        if (is_compressed(format)) {
+            return false;
+        }
+        UINT support = 0;
+        if (is_depth(format)) {
+            return SUCCEEDED(m_device->CheckFormatSupport(DXGI_FORMAT_D32_FLOAT, &support)) &&
+                   (support & D3D11_FORMAT_SUPPORT_DEPTH_STENCIL) != 0;
+        }
+        constexpr UINT k_needed = D3D11_FORMAT_SUPPORT_TEXTURE2D |
+                                  D3D11_FORMAT_SUPPORT_RENDER_TARGET |
+                                  D3D11_FORMAT_SUPPORT_SHADER_SAMPLE;
+        return SUCCEEDED(m_device->CheckFormatSupport(to_directx(format), &support)) &&
+               (support & k_needed) == k_needed;
     }
 
     std::optional<double> take_gpu_frame_seconds() override {
@@ -371,17 +418,28 @@ public:
         if (!m_was_attached) {
             return invalid("A pipeline needs a surface to have been attached");
         }
+        if (const auto problem = pipeline_problem(desc)) {
+            return invalid(*problem);
+        }
+        if (desc.color_target.has_value() && !supports_render_target(*desc.color_target)) {
+            return invalid("This device can't draw into the pipeline's color format");
+        }
         const ShaderResource* const vertex =
             m_shaders.get(handle_cast<ShaderResource>(desc.vertex_shader));
         const ShaderResource* const fragment =
             m_shaders.get(handle_cast<ShaderResource>(desc.fragment_shader));
-        if (vertex == nullptr || fragment == nullptr || !vertex->vertex || !fragment->pixel) {
+        if (vertex == nullptr || !vertex->vertex ||
+            (desc.fragment_shader.is_valid() && (fragment == nullptr || !fragment->pixel))) {
             return invalid("A pipeline needs valid shaders, one per stage");
         }
 
         PipelineResource resource;
         resource.vertex = vertex->vertex;
-        resource.pixel = fragment->pixel;
+        if (fragment != nullptr) {
+            resource.pixel = fragment->pixel;
+        }
+        resource.color_target = desc.color_target;
+        resource.depth_target = desc.depth_target;
         resource.vertex_stride = desc.vertex_stride;
         resource.topology = desc.topology == PrimitiveTopology::Lines
                                 ? D3D11_PRIMITIVE_TOPOLOGY_LINELIST
@@ -396,7 +454,11 @@ public:
 
         D3D11_RASTERIZER_DESC rasterizer{};
         rasterizer.FillMode = D3D11_FILL_SOLID;
-        rasterizer.CullMode = desc.cull_back_faces ? D3D11_CULL_BACK : D3D11_CULL_NONE;
+        rasterizer.CullMode = desc.cull == CullMode::Back    ? D3D11_CULL_BACK
+                              : desc.cull == CullMode::Front ? D3D11_CULL_FRONT
+                                                             : D3D11_CULL_NONE;
+        rasterizer.DepthBias = static_cast<INT>(desc.depth_bias + (desc.depth_bias < 0 ? -0.5f : 0.5f));
+        rasterizer.SlopeScaledDepthBias = desc.slope_depth_bias;
         // DirectX clip space already has +Y up, so counter-clockwise means the same as in ADR 0005.
         rasterizer.FrontCounterClockwise = TRUE;
         rasterizer.DepthClipEnable = TRUE;
@@ -659,9 +721,20 @@ private:
         sampler.MaxAnisotropy = 1;
         sampler.ComparisonFunc = D3D11_COMPARISON_NEVER;
         sampler.MaxLOD = D3D11_FLOAT32_MAX;
-        HRESULT result = m_device->CreateSamplerState(&sampler, &m_sampler);
+        HRESULT result = m_device->CreateSamplerState(&sampler, &m_samplers[0]);
+        if (SUCCEEDED(result)) {
+            sampler.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+            sampler.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+            sampler.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+            result = m_device->CreateSamplerState(&sampler, &m_samplers[1]);
+        }
+        if (SUCCEEDED(result)) {
+            sampler.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+            sampler.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
+            result = m_device->CreateSamplerState(&sampler, &m_samplers[k_shadow_slot]);
+        }
         if (FAILED(result)) {
-            return directx_error("Creating the sampler", result);
+            return directx_error("Creating the samplers", result);
         }
 
         // Dynamic buffers are rewritten with the discard mode, and the driver hands out fresh
@@ -748,19 +821,27 @@ private:
                 break;
             }
             case D3D_SIT_TEXTURE:
-                if (binding.BindPoint != k_texture_register || binding.BindCount != 1) {
-                    return invalid(std::format("Texture '{}' is at register t{}; only one texture "
-                                               "at t{} is supported",
-                                               name, binding.BindPoint, k_texture_register));
+                if (binding.BindPoint >= k_texture_register + k_texture_slots ||
+                    binding.BindCount != 1) {
+                    return invalid(std::format("Texture '{}' is at register t{}; textures go at "
+                                               "t0 to t{}, see ADR 0027",
+                                               name, binding.BindPoint, k_texture_slots - 1));
                 }
                 break;
-            case D3D_SIT_SAMPLER:
-                if (binding.BindPoint != k_sampler_register || binding.BindCount != 1) {
-                    return invalid(std::format("Sampler '{}' is at register s{}; only one sampler "
-                                               "at s{} is supported",
-                                               name, binding.BindPoint, k_sampler_register));
+            case D3D_SIT_SAMPLER: {
+                const bool comparison = (binding.uFlags & D3D_SIF_COMPARISON_SAMPLER) != 0;
+                const bool placed = binding.BindPoint < k_sampler_register + k_texture_slots &&
+                                    binding.BindCount == 1 &&
+                                    (binding.BindPoint == k_shadow_slot) == comparison;
+                if (!placed) {
+                    return invalid(std::format("Sampler '{}' is at register s{}; samplers go at "
+                                               "s0 to s{}, and shadow samplers at s{} alone, see "
+                                               "ADR 0027",
+                                               name, binding.BindPoint, k_texture_slots - 1,
+                                               k_shadow_slot));
                 }
                 break;
+            }
             default:
                 return invalid(std::format("Shader resource '{}' is of a kind the graphics "
                                            "interface doesn't offer",
@@ -850,6 +931,9 @@ private:
         if (const auto problem = texture_problem(desc, pixels.size())) {
             return invalid(*problem);
         }
+        if (desc.render_target) {
+            return create_render_target(desc);
+        }
         if (!supports_texture_format(desc.format)) {
             return invalid("This device doesn't support the texture's format");
         }
@@ -908,6 +992,50 @@ private:
         }
         if (mipmaps) {
             m_context->GenerateMips(texture.view.Get());
+        }
+        texture.format = desc.format;
+        texture.size = {desc.width, desc.height};
+        return texture;
+    }
+
+    core::Result<TextureResource> create_render_target(const TextureDesc& desc) {
+        if (!supports_render_target(desc.format)) {
+            return invalid("This device can't draw into textures of this format");
+        }
+        const bool depth = is_depth(desc.format);
+        D3D11_TEXTURE2D_DESC texture_desc{};
+        texture_desc.Width = desc.width;
+        texture_desc.Height = desc.height;
+        texture_desc.MipLevels = 1;
+        texture_desc.ArraySize = 1;
+        texture_desc.Format = to_directx(desc.format);
+        texture_desc.SampleDesc.Count = 1;
+        texture_desc.Usage = D3D11_USAGE_DEFAULT;
+        texture_desc.BindFlags =
+            D3D11_BIND_SHADER_RESOURCE | (depth ? D3D11_BIND_DEPTH_STENCIL : D3D11_BIND_RENDER_TARGET);
+
+        TextureResource texture{.format = desc.format, .size = {desc.width, desc.height}};
+        HRESULT result = m_device->CreateTexture2D(&texture_desc, nullptr, &texture.texture);
+        if (FAILED(result)) {
+            return directx_error("Creating a render target", result);
+        }
+        D3D11_SHADER_RESOURCE_VIEW_DESC view{};
+        view.Format = depth ? DXGI_FORMAT_R32_FLOAT : texture_desc.Format;
+        view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        view.Texture2D.MipLevels = 1;
+        result = m_device->CreateShaderResourceView(texture.texture.Get(), &view, &texture.view);
+        if (SUCCEEDED(result) && depth) {
+            D3D11_DEPTH_STENCIL_VIEW_DESC target{};
+            target.Format = DXGI_FORMAT_D32_FLOAT;
+            target.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+            result = m_device->CreateDepthStencilView(texture.texture.Get(), &target,
+                                                      &texture.depth);
+        } else if (SUCCEEDED(result)) {
+            result = m_device->CreateRenderTargetView(texture.texture.Get(), nullptr,
+                                                      &texture.target);
+        }
+        if (FAILED(result)) {
+            return directx_error("Creating a render target's views", result);
         }
         return texture;
     }
@@ -1140,17 +1268,59 @@ private:
 
     void begin_render_pass(const ClearColor& color) override {
         DREAM_VERIFY(m_in_frame && !m_in_pass, "Render pass started in the wrong place");
-        m_in_pass = true;
-
+        unbind_textures();
         ID3D11RenderTargetView* const target = m_render_target.Get();
         m_context->OMSetRenderTargets(1, &target, m_depth_view.Get());
         const float clear[4] = {color.r, color.g, color.b, color.a};
         m_context->ClearRenderTargetView(target, clear);
         m_context->ClearDepthStencilView(m_depth_view.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+        start_pass(m_extent, {}, {});
+    }
+
+    void begin_render_pass(const RenderTargets& targets) override {
+        DREAM_VERIFY(m_in_frame && !m_in_pass, "Render pass started in the wrong place");
+        const TextureResource* const color =
+            m_textures.get(handle_cast<TextureResource>(targets.color));
+        const TextureResource* const depth =
+            m_textures.get(handle_cast<TextureResource>(targets.depth));
+        DREAM_VERIFY(color != nullptr || depth != nullptr, "A render pass needs a target");
+        DREAM_VERIFY(color == nullptr || color->target, "The color target must be a color render target");
+        DREAM_VERIFY(depth == nullptr || depth->depth, "The depth target must be a depth render target");
+        DREAM_VERIFY(color == nullptr || depth == nullptr || color->size == depth->size,
+                     "A pass's targets must be the same size");
+
+        // A texture can't be read and drawn into at once, so the last pass's are put down first.
+        unbind_textures();
+        ID3D11RenderTargetView* const target = color != nullptr ? color->target.Get() : nullptr;
+        ID3D11DepthStencilView* const depth_view = depth != nullptr ? depth->depth.Get() : nullptr;
+        m_context->OMSetRenderTargets(target != nullptr ? 1 : 0, target != nullptr ? &target : nullptr,
+                                      depth_view);
+        if (target != nullptr && targets.clear_color.has_value()) {
+            const ClearColor& value = *targets.clear_color;
+            const float clear[4] = {value.r, value.g, value.b, value.a};
+            m_context->ClearRenderTargetView(target, clear);
+        }
+        if (depth_view != nullptr && targets.clear_depth.has_value()) {
+            m_context->ClearDepthStencilView(depth_view, D3D11_CLEAR_DEPTH, *targets.clear_depth, 0);
+        }
+        start_pass(color != nullptr ? color->size : depth->size,
+                   color != nullptr ? std::optional(color->format) : std::nullopt,
+                   depth != nullptr ? std::optional(depth->format) : std::nullopt);
+        m_pass_views = {color != nullptr ? color->view.Get() : nullptr,
+                        depth != nullptr ? depth->view.Get() : nullptr};
+    }
+
+    void start_pass(platform::SurfaceSize size, std::optional<TextureFormat> color,
+                    std::optional<TextureFormat> depth) {
+        m_in_pass = true;
+        m_pass_size = size;
+        m_pass_color = color;
+        m_pass_depth = depth;
+        m_pass_views = {nullptr, nullptr};
 
         D3D11_VIEWPORT viewport{};
-        viewport.Width = static_cast<float>(m_extent.width);
-        viewport.Height = static_cast<float>(m_extent.height);
+        viewport.Width = static_cast<float>(size.width);
+        viewport.Height = static_cast<float>(size.height);
         viewport.MinDepth = 0.0f;
         viewport.MaxDepth = 1.0f;
         m_context->RSSetViewports(1, &viewport);
@@ -1161,21 +1331,37 @@ private:
         static_assert(k_uniform_register == 0 && k_push_constant_register == 1);
         m_context->VSSetConstantBuffers(0, static_cast<UINT>(constants.size()), constants.data());
         m_context->PSSetConstantBuffers(0, static_cast<UINT>(constants.size()), constants.data());
-        ID3D11SamplerState* const sampler = m_sampler.Get();
-        m_context->VSSetSamplers(k_sampler_register, 1, &sampler);
-        m_context->PSSetSamplers(k_sampler_register, 1, &sampler);
-        bind_texture(TextureHandle{});
+        std::array<ID3D11SamplerState*, k_texture_slots> samplers{};
+        for (std::uint32_t slot = 0; slot < k_texture_slots; ++slot) {
+            samplers[slot] = m_samplers[slot].Get();
+        }
+        m_context->VSSetSamplers(k_sampler_register, k_texture_slots, samplers.data());
+        m_context->PSSetSamplers(k_sampler_register, k_texture_slots, samplers.data());
+        for (std::uint32_t slot = 0; slot < k_texture_slots; ++slot) {
+            bind_texture(slot, TextureHandle{});
+        }
+    }
+
+    void unbind_textures() {
+        const std::array<ID3D11ShaderResourceView*, k_texture_slots> none{};
+        m_context->VSSetShaderResources(k_texture_register, k_texture_slots, none.data());
+        m_context->PSSetShaderResources(k_texture_register, k_texture_slots, none.data());
     }
 
     void end_render_pass() override {
         DREAM_VERIFY(m_in_pass, "No render pass to end");
         m_in_pass = false;
+        // So the next pass can read what this one drew.
+        m_context->OMSetRenderTargets(0, nullptr, nullptr);
     }
 
     void bind_pipeline(PipelineHandle handle) override {
         const PipelineResource* const resource =
             m_pipelines.get(handle_cast<PipelineResource>(handle));
         DREAM_VERIFY(resource != nullptr, "Binding a pipeline that doesn't exist");
+        DREAM_VERIFY(resource->color_target == m_pass_color &&
+                         resource->depth_target == m_pass_depth,
+                     "The pipeline was made for other render targets than this pass has");
 
         m_context->IASetInputLayout(resource->input_layout.Get());
         m_context->IASetPrimitiveTopology(resource->topology);
@@ -1217,16 +1403,23 @@ private:
         write_dynamic(m_uniform_buffer.Get(), data);
     }
 
-    void bind_texture(TextureHandle handle) override {
-        ID3D11ShaderResourceView* view = m_white_texture.view.Get();
+    void bind_texture(std::uint32_t slot, TextureHandle handle) override {
+        DREAM_VERIFY(slot < k_texture_slots, "There is no such texture slot");
+        ID3D11ShaderResourceView* view =
+            slot == k_shadow_slot ? m_far_depth_texture.view.Get() : m_white_texture.view.Get();
         if (handle.is_valid()) {
             const TextureResource* const resource =
                 m_textures.get(handle_cast<TextureResource>(handle));
             DREAM_VERIFY(resource != nullptr, "Binding a texture that doesn't exist");
+            DREAM_VERIFY((slot == k_shadow_slot) == is_depth(resource->format),
+                         "The shadow slot takes depth textures, and only it");
+            DREAM_VERIFY(resource->view.Get() != m_pass_views[0] &&
+                             resource->view.Get() != m_pass_views[1],
+                         "A pass can't read the textures it draws into");
             view = resource->view.Get();
         }
-        m_context->VSSetShaderResources(k_texture_register, 1, &view);
-        m_context->PSSetShaderResources(k_texture_register, 1, &view);
+        m_context->VSSetShaderResources(k_texture_register + slot, 1, &view);
+        m_context->PSSetShaderResources(k_texture_register + slot, 1, &view);
     }
 
     void draw_indexed(std::uint32_t index_count) override {
@@ -1279,8 +1472,8 @@ private:
 
     void set_scissor(std::optional<ScissorRect> rect) override {
         DREAM_VERIFY(m_in_pass, "Setting a scissor outside a render pass");
-        const auto width = static_cast<std::int64_t>(m_extent.width);
-        const auto height = static_cast<std::int64_t>(m_extent.height);
+        const auto width = static_cast<std::int64_t>(m_pass_size.width);
+        const auto height = static_cast<std::int64_t>(m_pass_size.height);
         std::int64_t left = 0;
         std::int64_t top = 0;
         std::int64_t right = width;
@@ -1304,11 +1497,12 @@ private:
     ComPtr<ID3D11DeviceContext> m_context;
     ComPtr<ID3D11InfoQueue> m_info_queue;
     ComPtr<IDXGIFactory2> m_factory;
-    ComPtr<ID3D11SamplerState> m_sampler;
+    std::array<ComPtr<ID3D11SamplerState>, k_texture_slots> m_samplers;
     ComPtr<ID3D11Buffer> m_uniform_buffer;
     ComPtr<ID3D11Buffer> m_push_constant_buffer;
     ComPtr<ID3D11Buffer> m_frame_buffer;
     TextureResource m_white_texture;
+    TextureResource m_far_depth_texture;
 
     ComPtr<IDXGISwapChain1> m_swapchain;
     std::optional<CapturedFrame> m_captured;
@@ -1323,6 +1517,10 @@ private:
 
     bool m_in_frame = false;
     bool m_in_pass = false;
+    platform::SurfaceSize m_pass_size;
+    std::optional<TextureFormat> m_pass_color;
+    std::optional<TextureFormat> m_pass_depth;
+    std::array<ID3D11ShaderResourceView*, 2> m_pass_views{};
     std::optional<core::Error> m_frame_error;
     std::size_t m_frame_bytes_used = 0;
     bool m_frame_buffer_fresh = true;

@@ -63,6 +63,11 @@ Their shaders are compiled from the same Slang files, through SPIR-V and SPIRV-C
 has `_opengl_check` and `_opengles_check` programs on Windows. See
 [ADR 0026](docs/adr/0026-opengl.md).
 
+Every backend can draw into textures and read them in later passes: float color targets for HDR,
+depth targets for shadow maps, three texture slots with a shadow comparison sampler, and depth-only
+pipelines. `samples/render_targets` uses them all, and its picture matches one reference on every
+backend. See [ADR 0027](docs/adr/0027-render-targets.md).
+
 ## Screenshot tests
 
 A `[screenshot]` table in a game's `dream.toml` captures one frame, saves it next to the program,

@@ -1,0 +1,22 @@
+[app]
+organization = "DreamEngine"
+name = "DreamRenderTargets"
+title = "Dream Render Targets"
+width = 1280
+height = 720
+
+[input.actions]
+toggle_spin = ["key:space", "mouse:left", "touch"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["vulkan", "opengles", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["vulkan", "null"]

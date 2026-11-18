@@ -60,6 +60,7 @@ both sides:
 |---|---|---|---|
 | Uniform block (`set_uniforms`) | binding 0, set 0 | `b0` | `[[vk::binding(0, 0)]] ConstantBuffer<T> x : register(b0);` |
 | Texture (`bind_texture`) | binding 1, set 0 | `t0` and `s0` | `[[vk::binding(1, 0)]] Sampler2D x;` |
+| More textures | bindings 2 and 3, set 0 | `t1`, `s1` and `t2`, `s2` | see [ADR 0027](0027-render-targets.md) |
 | Push constants | push constant block | `b1` | `[[vk::push_constant]] ConstantBuffer<T> x : register(b1);` |
 
 Slang applies `[[vk::...]]` only to SPIR-V and `register(...)` only to DirectX. The texture needs

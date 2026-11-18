@@ -152,6 +152,12 @@ std::string_view texture_format_name(rhi::TextureFormat format) noexcept {
     case rhi::TextureFormat::Astc4x4Srgb:
     case rhi::TextureFormat::Astc4x4Unorm:
         return "ASTC 4x4";
+    case rhi::TextureFormat::Rgba16Float:
+        return "RGBA16 float";
+    case rhi::TextureFormat::Rg11B10Float:
+        return "R11G11B10 float";
+    case rhi::TextureFormat::Depth32Float:
+        return "Depth32 float";
     }
     return "unknown";
 }

@@ -468,3 +468,237 @@ TEST_CASE("DirectX device takes BC7 textures with their levels, but not ASTC") {
                                      std::span(blocks).first(16))
                     .has_value());
 }
+
+namespace {
+
+constexpr std::string_view k_target_shaders = R"hlsl(
+struct Input { float3 position : POSITION; float2 uv : TEXCOORD0; };
+struct Output { float4 position : SV_Position; float2 uv : TEXCOORD0; };
+
+Output target_vertex(Input input) {
+    Output output;
+    output.position = float4(input.position, 1.0);
+    output.uv = input.uv;
+    return output;
+}
+
+float4 green_fragment(Output input) : SV_Target {
+    return float4(0.0, 1.0, 0.0, 1.0);
+}
+
+// Shows slot 1's texture, and darkens what slot 2's depth puts in shadow at depth 0.5.
+Texture2D scene : register(t1);
+SamplerState clamped : register(s1);
+Texture2D<float> shadow : register(t2);
+SamplerComparisonState shadow_compare : register(s2);
+
+float4 show_fragment(Output input) : SV_Target {
+    const float lit = shadow.SampleCmpLevelZero(shadow_compare, input.uv, 0.5);
+    return float4(scene.Sample(clamped, input.uv).rgb * (0.25 + 0.75 * lit), 1.0);
+}
+)hlsl";
+
+// The whole surface, with texture coordinates from the top left.
+constexpr std::array<Vertex, 3> k_textured_screen{{
+    {{-1.0f, -1.0f, 0.5f}, {0.0f, 1.0f}},
+    {{3.0f, -1.0f, 0.5f}, {2.0f, 1.0f}},
+    {{-1.0f, 3.0f, 0.5f}, {0.0f, -1.0f}},
+}};
+// The left half of the surface, nearer than 0.5.
+constexpr std::array<Vertex, 6> k_left_half{{
+    {{-1.0f, -1.0f, 0.25f}, {0.0f, 0.0f}},
+    {{0.0f, -1.0f, 0.25f}, {0.0f, 0.0f}},
+    {{0.0f, 1.0f, 0.25f}, {0.0f, 0.0f}},
+    {{-1.0f, -1.0f, 0.25f}, {0.0f, 0.0f}},
+    {{0.0f, 1.0f, 0.25f}, {0.0f, 0.0f}},
+    {{-1.0f, 1.0f, 0.25f}, {0.0f, 0.0f}},
+}};
+
+ShaderHandle make_target_shader(Device& device, ShaderStage stage, const char* entry) {
+    const char* const profile = stage == ShaderStage::Vertex ? "vs_5_0" : "ps_5_0";
+    const auto shader = device.create_shader(stage, compile(k_target_shaders, entry, profile));
+    REQUIRE_MESSAGE(shader.has_value(), shader.error().message);
+    return shader.value();
+}
+
+std::array<std::byte, 4> captured_pixel(const CapturedFrame& frame, double x, double y) {
+    const auto column = static_cast<std::size_t>(x * frame.width);
+    const auto row = static_cast<std::size_t>(y * frame.height);
+    const std::size_t at = (row * frame.width + column) * 4;
+    return {frame.pixels[at], frame.pixels[at + 1], frame.pixels[at + 2], frame.pixels[at + 3]};
+}
+
+} // namespace
+
+TEST_CASE("DirectX device makes render targets of the formats it says it supports") {
+    const auto device = make_device();
+    CHECK(device->supports_render_target(TextureFormat::Rgba8Srgb));
+    CHECK(device->supports_render_target(TextureFormat::Rgba16Float));
+    CHECK(device->supports_render_target(TextureFormat::Rg11B10Float));
+    CHECK(device->supports_render_target(TextureFormat::Depth32Float));
+    CHECK_FALSE(device->supports_render_target(TextureFormat::Bc7Srgb));
+    for (const TextureFormat format : {TextureFormat::Rgba8Srgb, TextureFormat::Rgba16Float,
+                                       TextureFormat::Rg11B10Float, TextureFormat::Depth32Float}) {
+        const auto target = device->create_texture(
+            TextureDesc{.width = 64, .height = 32, .format = format, .render_target = true}, {});
+        REQUIRE_MESSAGE(target.has_value(), target.error().message);
+        device->destroy_texture(target.value());
+    }
+    constexpr std::array<std::byte, 4> k_pixel{};
+    CHECK_FALSE(device
+                    ->create_texture(TextureDesc{.width = 1, .height = 1, .render_target = true},
+                                     k_pixel)
+                    .has_value());
+    CHECK_FALSE(device
+                    ->create_texture(TextureDesc{.width = 1, .height = 1,
+                                                 .format = TextureFormat::Depth32Float},
+                                     k_pixel)
+                    .has_value());
+}
+
+TEST_CASE("DirectX device refuses pipelines with the wrong targets or stages") {
+    const auto device = make_device();
+    const HiddenWindow window;
+    if (!window.exists()) {
+        return;
+    }
+    REQUIRE(device->attach_surface(window.native(), k_size).has_value());
+    const ShaderHandle vertex = make_target_shader(*device, ShaderStage::Vertex, "target_vertex");
+    const ShaderHandle green = make_target_shader(*device, ShaderStage::Fragment, "green_fragment");
+    CHECK_FALSE(device
+                    ->create_pipeline(PipelineDesc{.vertex_shader = vertex,
+                                                   .vertex_stride = sizeof(Vertex),
+                                                   .attributes = k_attributes,
+                                                   .color_target = TextureFormat::Rgba8Unorm})
+                    .has_value());
+    CHECK_FALSE(device
+                    ->create_pipeline(PipelineDesc{.vertex_shader = vertex,
+                                                   .fragment_shader = green,
+                                                   .vertex_stride = sizeof(Vertex),
+                                                   .attributes = k_attributes,
+                                                   .color_target = TextureFormat::Depth32Float})
+                    .has_value());
+    device->destroy_shader(vertex);
+    device->destroy_shader(green);
+}
+
+TEST_CASE("DirectX device draws into textures, top row first, and reads them in later passes") {
+    const auto device = make_device();
+    const HiddenWindow window;
+    if (!window.exists()) {
+        return;
+    }
+    REQUIRE(device->attach_surface(window.native(), k_size).has_value());
+    const ShaderHandle target_vertex =
+        make_target_shader(*device, ShaderStage::Vertex, "target_vertex");
+    const ShaderHandle green = make_target_shader(*device, ShaderStage::Fragment, "green_fragment");
+    const ShaderHandle show = make_target_shader(*device, ShaderStage::Fragment, "show_fragment");
+
+    constexpr std::uint32_t k_target_size = 64;
+    const TextureHandle color =
+        device
+            ->create_texture(TextureDesc{.width = k_target_size, .height = k_target_size,
+                                         .format = TextureFormat::Rgba8Unorm,
+                                         .render_target = true},
+                             {})
+            .value();
+    const TextureHandle depth =
+        device
+            ->create_texture(TextureDesc{.width = k_target_size, .height = k_target_size,
+                                         .format = TextureFormat::Depth32Float,
+                                         .render_target = true},
+                             {})
+            .value();
+
+    const auto fill = device->create_pipeline(PipelineDesc{
+        .vertex_shader = target_vertex,
+        .fragment_shader = green,
+        .vertex_stride = sizeof(Vertex),
+        .attributes = k_attributes,
+        .depth_test = false,
+        .cull = CullMode::Back,
+        .color_target = TextureFormat::Rgba8Unorm,
+    });
+    REQUIRE_MESSAGE(fill.has_value(), fill.error().message);
+    const auto shadow_caster = device->create_pipeline(PipelineDesc{
+        .vertex_shader = target_vertex,
+        .vertex_stride = sizeof(Vertex),
+        .attributes = k_attributes,
+        .cull = CullMode::None,
+        .depth_bias = 1.0f,
+        .slope_depth_bias = 1.0f,
+        .depth_target = TextureFormat::Depth32Float,
+    });
+    REQUIRE_MESSAGE(shadow_caster.has_value(), shadow_caster.error().message);
+    const auto shown = device->create_pipeline(PipelineDesc{
+        .vertex_shader = target_vertex,
+        .fragment_shader = show,
+        .vertex_stride = sizeof(Vertex),
+        .attributes = k_attributes,
+        .depth_test = false,
+        .cull = CullMode::None,
+    });
+    REQUIRE_MESSAGE(shown.has_value(), shown.error().message);
+
+    REQUIRE(device->capture_next_frame());
+    CommandList* const commands = device->begin_frame().value();
+    REQUIRE(commands != nullptr);
+    // Red, then green over the top half by a scissor from the top left. The full-screen triangle
+    // is counter-clockwise, so culling back faces keeps it.
+    commands->begin_render_pass(
+        RenderTargets{.color = color, .clear_color = ClearColor{1.0f, 0.0f, 0.0f, 1.0f}});
+    commands->bind_pipeline(fill.value());
+    commands->set_scissor(ScissorRect{.width = k_target_size, .height = k_target_size / 2});
+    CHECK(commands->draw_vertices(std::as_bytes(std::span(k_textured_screen)), 3));
+    commands->end_render_pass();
+
+    commands->begin_render_pass(RenderTargets{.depth = depth});
+    commands->bind_pipeline(shadow_caster.value());
+    CHECK(commands->draw_vertices(std::as_bytes(std::span(k_left_half)), 6));
+    commands->end_render_pass();
+
+    commands->begin_render_pass(ClearColor{});
+    commands->bind_pipeline(shown.value());
+    commands->bind_texture(1, color);
+    commands->bind_texture(k_shadow_slot, depth);
+    CHECK(commands->draw_vertices(std::as_bytes(std::span(k_textured_screen)), 3));
+    commands->end_render_pass();
+    REQUIRE(device->end_frame().has_value());
+
+    const std::optional<CapturedFrame> frame = device->take_captured_frame();
+    REQUIRE(frame.has_value());
+    CHECK(captured_pixel(*frame, 0.75, 0.25)[1] == std::byte{255});
+    CHECK(captured_pixel(*frame, 0.75, 0.25)[0] == std::byte{0});
+    CHECK(captured_pixel(*frame, 0.75, 0.75)[0] == std::byte{255});
+    CHECK(captured_pixel(*frame, 0.75, 0.75)[1] == std::byte{0});
+    // In shadow, a quarter as bright, which sRGB encoding stores as about 137.
+    const int shadowed_green = std::to_integer<int>(captured_pixel(*frame, 0.25, 0.25)[1]);
+    CHECK(shadowed_green > 120);
+    CHECK(shadowed_green < 150);
+    const int shadowed_red = std::to_integer<int>(captured_pixel(*frame, 0.25, 0.75)[0]);
+    CHECK(shadowed_red > 120);
+    CHECK(shadowed_red < 150);
+
+    // With nothing in the shadow slot, everything is lit.
+    REQUIRE(device->capture_next_frame());
+    CommandList* const again = device->begin_frame().value();
+    REQUIRE(again != nullptr);
+    again->begin_render_pass(ClearColor{});
+    again->bind_pipeline(shown.value());
+    again->bind_texture(1, color);
+    CHECK(again->draw_vertices(std::as_bytes(std::span(k_textured_screen)), 3));
+    again->end_render_pass();
+    REQUIRE(device->end_frame().has_value());
+    const std::optional<CapturedFrame> lit = device->take_captured_frame();
+    REQUIRE(lit.has_value());
+    CHECK(captured_pixel(*lit, 0.25, 0.25)[1] == std::byte{255});
+
+    device->destroy_pipeline(fill.value());
+    device->destroy_pipeline(shadow_caster.value());
+    device->destroy_pipeline(shown.value());
+    device->destroy_texture(color);
+    device->destroy_texture(depth);
+    device->destroy_shader(target_vertex);
+    device->destroy_shader(green);
+    device->destroy_shader(show);
+}

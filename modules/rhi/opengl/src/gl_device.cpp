@@ -66,11 +66,12 @@ constexpr int k_minor_version = k_es ? 1 : 3;
 // The first line of every shader this device takes, as DreamCrossCompileShader.cmake writes it.
 constexpr std::string_view k_shader_version = k_es ? "#version 310 es" : "#version 430";
 
-// Where every shader finds its inputs (ADR 0013, 0026): the uniform block of set_uniforms at block
-// binding 0, the texture at binding 1, which is a texture unit in OpenGL, and the push constants,
-// which OpenGL has no special kind of buffer for, at block binding 2.
+// Where every shader finds its inputs (ADR 0013, 0026, 0027): the uniform block of set_uniforms at
+// block binding 0, the textures of slots 0 to 2 at bindings 1 to 3, which are texture units in
+// OpenGL, and the push constants, which OpenGL has no special kind of buffer for, at block
+// binding 2.
 constexpr GLuint k_uniform_binding = 0;
-constexpr GLuint k_texture_unit = 1;
+constexpr GLuint k_texture_unit = 1; // Slot 0's; slot n's is k_texture_unit + n (ADR 0027).
 constexpr GLuint k_push_constant_binding = 2;
 
 // Each set_uniforms and push_constants call takes a fresh slot in this buffer, which is renewed
@@ -99,6 +100,10 @@ constexpr GLenum k_debug_output_synchronous = 0x8242; // GL_DEBUG_OUTPUT_SYNCHRO
 constexpr GLenum k_debug_severity_high = 0x9146;
 constexpr GLenum k_debug_severity_medium = 0x9147;
 constexpr GLenum k_debug_type_performance = 0x8250;
+// The uniform DreamCrossCompileShader.cmake adds to every vertex shader, by which the device turns
+// the picture upside down when it draws into a texture: OpenGL stores a texture's rows from the
+// bottom, and the other APIs from the top.
+constexpr const char* k_clip_flip_uniform = "dream_clip_flip";
 
 // What the context's loader gives, cast to each function's own type.
 using Proc = void (*)();
@@ -188,6 +193,7 @@ core::Error failure(std::string message) {
     F(GetUniformiv, glGetUniformiv)                                                                \
     F(LinkProgram, glLinkProgram)                                                                  \
     F(PixelStorei, glPixelStorei)                                                                  \
+    F(PolygonOffset, glPolygonOffset)                                                              \
     F(ReadPixels, glReadPixels)                                                                    \
     F(RenderbufferStorage, glRenderbufferStorage)                                                  \
     F(SamplerParameteri, glSamplerParameteri)                                                      \
@@ -195,6 +201,7 @@ core::Error failure(std::string message) {
     F(ShaderSource, glShaderSource)                                                                \
     F(TexStorage2D, glTexStorage2D)                                                                \
     F(TexSubImage2D, glTexSubImage2D)                                                              \
+    F(Uniform1f, glUniform1f)                                                                      \
     F(UseProgram, glUseProgram)                                                                    \
     F(VertexAttribBinding, glVertexAttribBinding)                                                  \
     F(VertexAttribFormat, glVertexAttribFormat)                                                    \
@@ -670,6 +677,16 @@ struct ShaderResource {
 
 struct TextureResource {
     GLuint id = 0;
+    TextureFormat format = TextureFormat::Rgba8Srgb;
+    platform::SurfaceSize size;
+    bool render_target = false;
+};
+
+// A framebuffer object for one pair of render targets, made the first time a pass uses them.
+struct TargetFramebuffer {
+    GLuint color = 0;
+    GLuint depth = 0;
+    GLuint framebuffer = 0;
 };
 
 // The program holds compiled copies of its shaders, so a pipeline keeps working after its shaders
@@ -682,7 +699,12 @@ struct PipelineResource {
     BlendMode blend = BlendMode::Opaque;
     bool depth_test = true;
     bool depth_write = true;
-    bool cull_back_faces = true;
+    CullMode cull = CullMode::Back;
+    float depth_bias = 0.0f;
+    float slope_depth_bias = 0.0f;
+    std::optional<TextureFormat> color_target;
+    std::optional<TextureFormat> depth_target;
+    GLint clip_flip = -1;
 };
 
 struct TimingQuery {
@@ -726,6 +748,12 @@ GLenum internal_format(TextureFormat format) {
         return k_astc_4x4_srgb;
     case TextureFormat::Astc4x4Unorm:
         return k_astc_4x4_unorm;
+    case TextureFormat::Rgba16Float:
+        return GL_RGBA16F;
+    case TextureFormat::Rg11B10Float:
+        return GL_R11F_G11F_B10F;
+    case TextureFormat::Depth32Float:
+        return GL_DEPTH_COMPONENT32F;
     }
     return GL_RGBA8;
 }
@@ -749,13 +777,20 @@ public:
         m_pipelines.for_each(
             [&](auto, PipelineResource& pipeline) { m_gl.DeleteProgram(pipeline.program); });
         delete_texture(m_white_texture);
+        delete_texture(m_far_depth_texture);
+        for (const TargetFramebuffer& target : m_target_framebuffers) {
+            m_gl.DeleteFramebuffers(1, &target.framebuffer);
+        }
+        if (m_empty_fragment_shader != 0) {
+            m_gl.DeleteShader(m_empty_fragment_shader);
+        }
         delete_offscreen_target();
         if (m_copy_program != 0) {
             m_gl.DeleteProgram(m_copy_program);
         }
         m_gl.DeleteBuffers(1, &m_uniform_ring);
         m_gl.DeleteBuffers(1, &m_frame_buffer);
-        m_gl.DeleteSamplers(1, &m_sampler);
+        m_gl.DeleteSamplers(static_cast<GLsizei>(m_samplers.size()), m_samplers.data());
         m_gl.DeleteVertexArrays(1, &m_vertex_array);
         for (TimingQuery& query : m_timing_queries) {
             if (query.id != 0) {
@@ -791,6 +826,20 @@ public:
             return white.error();
         }
         m_white_texture = white.value();
+
+        // The shadow slot's default: a depth at the far plane, so every comparison passes.
+        core::Result<TextureResource> far_depth = upload_texture(
+            TextureDesc{.width = 1, .height = 1, .format = TextureFormat::Depth32Float,
+                        .render_target = true},
+            {});
+        if (!far_depth.has_value()) {
+            return far_depth.error();
+        }
+        m_far_depth_texture = far_depth.value();
+        constexpr float k_far = 1.0f;
+        bind_on_unit(0, m_far_depth_texture.id);
+        m_gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &k_far);
+        bind_on_unit(0, m_bound_textures[0]);
         return {};
     }
 
@@ -851,8 +900,27 @@ public:
         case TextureFormat::Astc4x4Srgb:
         case TextureFormat::Astc4x4Unorm:
             return m_has_astc;
+        case TextureFormat::Rgba16Float:
+        case TextureFormat::Rg11B10Float:
+        case TextureFormat::Depth32Float:
+            return false;
         }
         return false;
+    }
+
+    // Float color targets are core in OpenGL and in OpenGL ES 3.2, and an extension in ES 3.1.
+    bool supports_render_target(TextureFormat format) const override {
+        switch (format) {
+        case TextureFormat::Rgba8Srgb:
+        case TextureFormat::Rgba8Unorm:
+        case TextureFormat::Depth32Float:
+            return true;
+        case TextureFormat::Rgba16Float:
+        case TextureFormat::Rg11B10Float:
+            return m_has_float_targets;
+        default:
+            return false;
+        }
     }
 
     std::optional<double> take_gpu_frame_seconds() override {
@@ -930,13 +998,30 @@ public:
         if (!m_was_attached) {
             return invalid("A pipeline needs a surface to have been attached");
         }
+        if (const auto problem = pipeline_problem(desc)) {
+            return invalid(*problem);
+        }
+        if (desc.color_target.has_value() && !supports_render_target(*desc.color_target)) {
+            return invalid("This device can't draw into the pipeline's color format");
+        }
         const ShaderResource* const vertex =
             m_shaders.get(handle_cast<ShaderResource>(desc.vertex_shader));
         const ShaderResource* const fragment =
             m_shaders.get(handle_cast<ShaderResource>(desc.fragment_shader));
-        if (vertex == nullptr || fragment == nullptr || vertex->stage != ShaderStage::Vertex ||
-            fragment->stage != ShaderStage::Fragment) {
+        if (vertex == nullptr || vertex->stage != ShaderStage::Vertex ||
+            (desc.fragment_shader.is_valid() &&
+             (fragment == nullptr || fragment->stage != ShaderStage::Fragment))) {
             return invalid("A pipeline needs valid shaders, one per stage");
+        }
+        // OpenGL ES links only programs with both stages, so a depth-only pipeline gets an empty
+        // fragment shader.
+        GLuint fragment_id = fragment != nullptr ? fragment->id : 0;
+        if (fragment_id == 0) {
+            if (auto empty = empty_fragment_shader(); !empty.has_value()) {
+                return empty.error();
+            } else {
+                fragment_id = empty.value();
+            }
         }
         for (const VertexAttribute& attribute : desc.attributes) {
             if (attribute.location >= k_max_attributes) {
@@ -949,10 +1034,10 @@ public:
         PipelineResource resource;
         resource.program = m_gl.CreateProgram();
         m_gl.AttachShader(resource.program, vertex->id);
-        m_gl.AttachShader(resource.program, fragment->id);
+        m_gl.AttachShader(resource.program, fragment_id);
         m_gl.LinkProgram(resource.program);
         m_gl.DetachShader(resource.program, vertex->id);
-        m_gl.DetachShader(resource.program, fragment->id);
+        m_gl.DetachShader(resource.program, fragment_id);
         GLint linked = GL_FALSE;
         m_gl.GetProgramiv(resource.program, GL_LINK_STATUS, &linked);
         if (linked != GL_TRUE) {
@@ -967,13 +1052,28 @@ public:
             return checked.error();
         }
 
+        resource.clip_flip = m_gl.GetUniformLocation(resource.program, k_clip_flip_uniform);
+        const bool draws_into_textures =
+            desc.color_target.has_value() || desc.depth_target.has_value();
+        if (draws_into_textures && resource.clip_flip < 0) {
+            m_gl.DeleteProgram(resource.program);
+            return invalid(std::format("A pipeline that draws into textures needs a vertex shader "
+                                       "that multiplies gl_Position.y by the uniform '{}', as "
+                                       "the engine's build compiles them (ADR 0027)",
+                                       k_clip_flip_uniform));
+        }
+
         resource.mode = desc.topology == PrimitiveTopology::Lines ? GL_LINES : GL_TRIANGLES;
         resource.vertex_stride = static_cast<GLsizei>(desc.vertex_stride);
         resource.attributes.assign(desc.attributes.begin(), desc.attributes.end());
         resource.blend = desc.blend;
         resource.depth_test = desc.depth_test;
         resource.depth_write = desc.depth_test && desc.depth_write;
-        resource.cull_back_faces = desc.cull_back_faces;
+        resource.cull = desc.cull;
+        resource.depth_bias = desc.depth_bias;
+        resource.slope_depth_bias = desc.slope_depth_bias;
+        resource.color_target = desc.color_target;
+        resource.depth_target = desc.depth_target;
         return handle_cast<PipelineTag>(m_pipelines.create(std::move(resource)));
     }
 
@@ -1146,6 +1246,7 @@ private:
                     has("GL_ARB_texture_compression_bptc");
         m_has_astc = (k_es && m_version >= 32) || has("GL_KHR_texture_compression_astc_ldr");
         m_has_timer_queries = !k_es || has("GL_EXT_disjoint_timer_query");
+        m_has_float_targets = !k_es || m_version >= 32 || has("GL_EXT_color_buffer_float");
         m_has_debug = m_gl.DebugMessageCallback != nullptr &&
                       (!k_es || m_version >= 32 || has("GL_KHR_debug"));
     }
@@ -1166,12 +1267,23 @@ private:
         m_gl.GenVertexArrays(1, &m_vertex_array);
         m_gl.BindVertexArray(m_vertex_array);
 
-        m_gl.GenSamplers(1, &m_sampler);
-        m_gl.SamplerParameteri(m_sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        m_gl.SamplerParameteri(m_sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        m_gl.SamplerParameteri(m_sampler, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        m_gl.SamplerParameteri(m_sampler, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        m_gl.BindSampler(k_texture_unit, m_sampler);
+        // One sampler per slot, as ADR 0027 lists them.
+        m_gl.GenSamplers(static_cast<GLsizei>(m_samplers.size()), m_samplers.data());
+        for (std::uint32_t slot = 0; slot < k_texture_slots; ++slot) {
+            const GLuint sampler = m_samplers[slot];
+            const GLint wrap = slot == 0 ? GL_REPEAT : GL_CLAMP_TO_EDGE;
+            m_gl.SamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER,
+                                   slot == 0 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+            m_gl.SamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            m_gl.SamplerParameteri(sampler, GL_TEXTURE_WRAP_S, wrap);
+            m_gl.SamplerParameteri(sampler, GL_TEXTURE_WRAP_T, wrap);
+            if (slot == k_shadow_slot) {
+                m_gl.SamplerParameteri(sampler, GL_TEXTURE_COMPARE_MODE,
+                                       GL_COMPARE_REF_TO_TEXTURE);
+                m_gl.SamplerParameteri(sampler, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+            }
+            m_gl.BindSampler(k_texture_unit + slot, sampler);
+        }
         m_gl.ActiveTexture(GL_TEXTURE0 + k_texture_unit);
 
         GLint alignment = 256;
@@ -1269,15 +1381,23 @@ private:
             m_gl.GetActiveUniform(program, static_cast<GLuint>(uniform),
                                   static_cast<GLsizei>(name.size()), nullptr, &count, &type,
                                   name.data());
-            if (type != GL_SAMPLER_2D) {
-                continue; // Members of uniform blocks, checked above.
+            if (type != GL_SAMPLER_2D && type != GL_SAMPLER_2D_SHADOW) {
+                continue; // Members of uniform blocks, checked above, and the clip flip.
             }
             GLint unit = -1;
             m_gl.GetUniformiv(program, m_gl.GetUniformLocation(program, name.data()), &unit);
-            if (count != 1 || static_cast<GLuint>(unit) != k_texture_unit) {
-                return invalid(std::format("Texture '{}' is at binding {}; only one texture at "
-                                           "binding {} is supported",
-                                           name.data(), unit, k_texture_unit));
+            const GLuint shadow_unit = k_texture_unit + k_shadow_slot;
+            const bool shadow = type == GL_SAMPLER_2D_SHADOW;
+            const bool placed =
+                count == 1 && unit >= static_cast<GLint>(k_texture_unit) &&
+                static_cast<GLuint>(unit) < k_texture_unit + k_texture_slots &&
+                (static_cast<GLuint>(unit) == shadow_unit) == shadow;
+            if (!placed) {
+                return invalid(std::format("Texture '{}' is at binding {}; textures go at bindings "
+                                           "{} to {}, and shadow samplers at {} alone, see ADR "
+                                           "0027",
+                                           name.data(), unit, k_texture_unit,
+                                           k_texture_unit + k_texture_slots - 1, shadow_unit));
             }
         }
 
@@ -1311,8 +1431,11 @@ private:
         if (const auto problem = texture_problem(desc, pixels.size())) {
             return invalid(*problem);
         }
-        if (!supports_texture_format(desc.format)) {
-            return invalid("This device doesn't support the texture's format");
+        if (desc.render_target ? !supports_render_target(desc.format)
+                               : !supports_texture_format(desc.format)) {
+            return invalid(desc.render_target
+                               ? "This device can't draw into textures of this format"
+                               : "This device doesn't support the texture's format");
         }
 
         const bool mipmaps = generates_mipmaps(desc);
@@ -1320,9 +1443,11 @@ private:
             mipmaps ? full_mip_chain(desc.width, desc.height) : desc.mip_levels;
         const GLenum format = internal_format(desc.format);
 
-        TextureResource texture;
+        TextureResource texture{.format = desc.format,
+                                .size = {desc.width, desc.height},
+                                .render_target = desc.render_target};
         m_gl.GenTextures(1, &texture.id);
-        m_gl.BindTexture(GL_TEXTURE_2D, texture.id);
+        bind_on_unit(0, texture.id);
         m_gl.TexStorage2D(GL_TEXTURE_2D, static_cast<GLsizei>(levels), format,
                           static_cast<GLsizei>(desc.width), static_cast<GLsizei>(desc.height));
 
@@ -1330,7 +1455,8 @@ private:
         // the top of the image, and OpenGL's texture coordinates start at the first row, so the
         // shaders' coordinates mean the same as on the other backends.
         std::size_t offset = 0;
-        for (std::uint32_t level = 0; level < desc.mip_levels; ++level) {
+        for (std::uint32_t level = 0; level < (desc.render_target ? 0u : desc.mip_levels);
+             ++level) {
             const std::uint32_t width = mip_size(desc.width, level);
             const std::uint32_t height = mip_size(desc.height, level);
             const std::size_t bytes = texture_level_bytes(desc.format, width, height);
@@ -1349,7 +1475,7 @@ private:
         if (mipmaps) {
             m_gl.GenerateMipmap(GL_TEXTURE_2D);
         }
-        m_gl.BindTexture(GL_TEXTURE_2D, m_bound_texture);
+        bind_on_unit(0, m_bound_textures[0]);
 
         if (const GLenum error = m_gl.GetError(); error != GL_NO_ERROR) {
             m_gl.DeleteTextures(1, &texture.id);
@@ -1385,7 +1511,7 @@ private:
         m_gl.GenTextures(1, &m_offscreen_color);
         m_gl.BindTexture(GL_TEXTURE_2D, m_offscreen_color);
         m_gl.TexStorage2D(GL_TEXTURE_2D, 1, GL_SRGB8_ALPHA8, width, height);
-        m_gl.BindTexture(GL_TEXTURE_2D, m_bound_texture);
+        m_gl.BindTexture(GL_TEXTURE_2D, m_bound_textures[0]);
         m_gl.GenRenderbuffers(1, &m_offscreen_depth);
         m_gl.BindRenderbuffer(GL_RENDERBUFFER, m_offscreen_depth);
         m_gl.RenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
@@ -1522,12 +1648,86 @@ void main() {
         if (texture.id == 0) {
             return;
         }
-        if (m_bound_texture == texture.id) {
-            m_gl.BindTexture(GL_TEXTURE_2D, 0);
-            m_bound_texture = 0;
+        for (std::uint32_t slot = 0; slot < k_texture_slots; ++slot) {
+            if (m_bound_textures[slot] == texture.id) {
+                bind_on_unit(slot, 0);
+                m_bound_textures[slot] = 0;
+            }
         }
+        std::erase_if(m_target_framebuffers, [&](const TargetFramebuffer& target) {
+            if (target.color != texture.id && target.depth != texture.id) {
+                return false;
+            }
+            m_gl.DeleteFramebuffers(1, &target.framebuffer);
+            return true;
+        });
         m_gl.DeleteTextures(1, &texture.id);
         texture.id = 0;
+    }
+
+    // Binds a texture on a slot's unit, leaving slot 0's unit active, as the rest of the device
+    // expects.
+    void bind_on_unit(std::uint32_t slot, GLuint id) {
+        if (slot != 0) {
+            m_gl.ActiveTexture(GL_TEXTURE0 + k_texture_unit + slot);
+        }
+        m_gl.BindTexture(GL_TEXTURE_2D, id);
+        if (slot != 0) {
+            m_gl.ActiveTexture(GL_TEXTURE0 + k_texture_unit);
+        }
+    }
+
+    core::Result<GLuint> empty_fragment_shader() {
+        if (m_empty_fragment_shader != 0) {
+            return m_empty_fragment_shader;
+        }
+        const std::string source = std::format("{}\nvoid main() {{}}\n", k_shader_version);
+        const GLchar* const text = source.c_str();
+        const GLuint shader = m_gl.CreateShader(GL_FRAGMENT_SHADER);
+        m_gl.ShaderSource(shader, 1, &text, nullptr);
+        m_gl.CompileShader(shader);
+        GLint compiled = GL_FALSE;
+        m_gl.GetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+        if (compiled != GL_TRUE) {
+            const std::string log = info_log(shader, false);
+            m_gl.DeleteShader(shader);
+            return failure(std::format("Compiling the empty fragment shader failed: {}", log));
+        }
+        m_empty_fragment_shader = shader;
+        return shader;
+    }
+
+    // The framebuffer object for a pair of targets, made the first time they are drawn into.
+    core::Result<GLuint> target_framebuffer(const TextureResource* color,
+                                            const TextureResource* depth) {
+        const GLuint color_id = color != nullptr ? color->id : 0;
+        const GLuint depth_id = depth != nullptr ? depth->id : 0;
+        for (const TargetFramebuffer& target : m_target_framebuffers) {
+            if (target.color == color_id && target.depth == depth_id) {
+                return target.framebuffer;
+            }
+        }
+        TargetFramebuffer target{.color = color_id, .depth = depth_id};
+        m_gl.GenFramebuffers(1, &target.framebuffer);
+        m_gl.BindFramebuffer(GL_FRAMEBUFFER, target.framebuffer);
+        if (color_id != 0) {
+            m_gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                                      color_id, 0);
+        }
+        if (depth_id != 0) {
+            m_gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
+                                      depth_id, 0);
+        }
+        const GLenum status = m_gl.CheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (status != GL_FRAMEBUFFER_COMPLETE) {
+            m_gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+            m_gl.DeleteFramebuffers(1, &target.framebuffer);
+            return failure(std::format("The render targets can't be drawn into together ({} "
+                                       "status 0x{:04X})",
+                                       k_api, static_cast<unsigned>(status)));
+        }
+        m_target_framebuffers.push_back(target);
+        return target.framebuffer;
     }
 
     // GPU timing, for take_gpu_frame_seconds: a ring of time-elapsed queries, one around each
@@ -1681,39 +1881,105 @@ void main() {
 
     void begin_render_pass(const ClearColor& color) override {
         DREAM_VERIFY(m_in_frame && !m_in_pass, "Render pass started in the wrong place");
-        m_in_pass = true;
-
         m_gl.BindFramebuffer(GL_FRAMEBUFFER, m_window_encodes_srgb ? 0 : m_offscreen_framebuffer);
-        m_gl.Viewport(0, 0, static_cast<GLsizei>(m_extent.width),
-                      static_cast<GLsizei>(m_extent.height));
+        start_pass(m_extent, false, {}, {});
+        m_gl.ClearColor(color.r, color.g, color.b, color.a);
+        m_gl.ClearDepthf(1.0f);
+        m_gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    }
+
+    void begin_render_pass(const RenderTargets& targets) override {
+        DREAM_VERIFY(m_in_frame && !m_in_pass, "Render pass started in the wrong place");
+        const TextureResource* const color =
+            m_textures.get(handle_cast<TextureResource>(targets.color));
+        const TextureResource* const depth =
+            m_textures.get(handle_cast<TextureResource>(targets.depth));
+        DREAM_VERIFY(color != nullptr || depth != nullptr, "A render pass needs a target");
+        DREAM_VERIFY(color == nullptr || (color->render_target && !is_depth(color->format)),
+                     "The color target must be a color render target");
+        DREAM_VERIFY(depth == nullptr || (depth->render_target && is_depth(depth->format)),
+                     "The depth target must be a depth render target");
+        const platform::SurfaceSize size = color != nullptr ? color->size : depth->size;
+        DREAM_VERIFY(color == nullptr || depth == nullptr || color->size == depth->size,
+                     "A pass's targets must be the same size");
+
+        const core::Result<GLuint> framebuffer = target_framebuffer(color, depth);
+        if (!framebuffer.has_value()) {
+            if (!m_frame_error.has_value()) {
+                m_frame_error = framebuffer.error();
+            }
+            // Drawing goes nowhere rather than into the window.
+            m_gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+        } else {
+            m_gl.BindFramebuffer(GL_FRAMEBUFFER, framebuffer.value());
+        }
+        start_pass(size, true, color != nullptr ? std::optional(color->format) : std::nullopt,
+                   depth != nullptr ? std::optional(depth->format) : std::nullopt);
+        m_pass_textures = {color != nullptr ? color->id : 0, depth != nullptr ? depth->id : 0};
+
+        GLbitfield clear = 0;
+        if (color != nullptr && targets.clear_color.has_value()) {
+            const ClearColor& value = *targets.clear_color;
+            m_gl.ClearColor(value.r, value.g, value.b, value.a);
+            clear |= GL_COLOR_BUFFER_BIT;
+        }
+        if (depth != nullptr && targets.clear_depth.has_value()) {
+            m_gl.ClearDepthf(*targets.clear_depth);
+            clear |= GL_DEPTH_BUFFER_BIT;
+        }
+        if (clear != 0) {
+            m_gl.Clear(clear);
+        }
+    }
+
+    // What every pass starts with. A pass into textures draws upside down, with the winding of
+    // its triangles reversed to match, so their rows are stored from the top, as on the other APIs.
+    void start_pass(platform::SurfaceSize size, bool into_textures,
+                    std::optional<TextureFormat> color, std::optional<TextureFormat> depth) {
+        m_in_pass = true;
+        m_pass_size = size;
+        m_pass_into_textures = into_textures;
+        m_pass_color = color;
+        m_pass_depth = depth;
+        m_pass_textures = {0, 0};
+        m_gl.FrontFace(into_textures ? GL_CW : GL_CCW);
+        m_gl.Viewport(0, 0, static_cast<GLsizei>(size.width), static_cast<GLsizei>(size.height));
         set_scissor(std::nullopt);
         // Clearing obeys the write masks, which the last pipeline may have turned off.
         m_gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         m_gl.DepthMask(GL_TRUE);
         m_depth_write = true;
-        m_gl.ClearColor(color.r, color.g, color.b, color.a);
-        m_gl.ClearDepthf(1.0f);
-        m_gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // Zeroed constants until the game sets some, so every block is bound to something.
         write_constants(k_uniform_binding, {}, k_max_uniform_size);
         write_constants(k_push_constant_binding, {}, k_max_push_constant_size);
-        bind_texture(TextureHandle{});
+        for (std::uint32_t slot = 0; slot < k_texture_slots; ++slot) {
+            bind_texture(slot, TextureHandle{});
+        }
     }
 
     void end_render_pass() override {
         DREAM_VERIFY(m_in_pass, "No render pass to end");
         m_in_pass = false;
+        if (m_pass_into_textures) {
+            m_gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+        }
     }
 
     void bind_pipeline(PipelineHandle handle) override {
         const PipelineResource* const resource =
             m_pipelines.get(handle_cast<PipelineResource>(handle));
         DREAM_VERIFY(resource != nullptr, "Binding a pipeline that doesn't exist");
+        DREAM_VERIFY(resource->color_target == m_pass_color &&
+                         resource->depth_target == m_pass_depth,
+                     "The pipeline was made for other render targets than this pass has");
 
         m_gl.UseProgram(resource->program);
         m_bound_program = resource->program;
         m_mode = resource->mode;
+        if (resource->clip_flip >= 0) {
+            m_gl.Uniform1f(resource->clip_flip, m_pass_into_textures ? -1.0f : 1.0f);
+        }
 
         std::uint32_t enabled = 0;
         for (const VertexAttribute& attribute : resource->attributes) {
@@ -1733,10 +1999,17 @@ void main() {
         }
         m_enabled_attributes = enabled;
 
-        if (resource->cull_back_faces) {
-            m_gl.Enable(GL_CULL_FACE);
-        } else {
+        if (resource->cull == CullMode::None) {
             m_gl.Disable(GL_CULL_FACE);
+        } else {
+            m_gl.Enable(GL_CULL_FACE);
+            m_gl.CullFace(resource->cull == CullMode::Back ? GL_BACK : GL_FRONT);
+        }
+        if (resource->depth_bias != 0.0f || resource->slope_depth_bias != 0.0f) {
+            m_gl.Enable(GL_POLYGON_OFFSET_FILL);
+            m_gl.PolygonOffset(resource->slope_depth_bias, resource->depth_bias);
+        } else {
+            m_gl.Disable(GL_POLYGON_OFFSET_FILL);
         }
         if (resource->depth_test) {
             m_gl.Enable(GL_DEPTH_TEST);
@@ -1787,16 +2060,21 @@ void main() {
         write_constants(k_uniform_binding, data, k_max_uniform_size);
     }
 
-    void bind_texture(TextureHandle handle) override {
-        GLuint id = m_white_texture.id;
+    void bind_texture(std::uint32_t slot, TextureHandle handle) override {
+        DREAM_VERIFY(slot < k_texture_slots, "There is no such texture slot");
+        GLuint id = slot == k_shadow_slot ? m_far_depth_texture.id : m_white_texture.id;
         if (handle.is_valid()) {
             const TextureResource* const resource =
                 m_textures.get(handle_cast<TextureResource>(handle));
             DREAM_VERIFY(resource != nullptr, "Binding a texture that doesn't exist");
+            DREAM_VERIFY((slot == k_shadow_slot) == is_depth(resource->format),
+                         "The shadow slot takes depth textures, and only it");
+            DREAM_VERIFY(resource->id != m_pass_textures[0] && resource->id != m_pass_textures[1],
+                         "A pass can't read the textures it draws into");
             id = resource->id;
         }
-        m_gl.BindTexture(GL_TEXTURE_2D, id);
-        m_bound_texture = id;
+        bind_on_unit(slot, id);
+        m_bound_textures[slot] = id;
     }
 
     void draw_indexed(std::uint32_t index_count) override {
@@ -1851,11 +2129,12 @@ void main() {
         return true;
     }
 
-    // The interface's rectangles start at the top, and OpenGL's at the bottom.
+    // The interface's rectangles start at the top, and OpenGL's at the bottom, except in passes
+    // into textures, which are drawn upside down.
     void set_scissor(std::optional<ScissorRect> rect) override {
         DREAM_VERIFY(m_in_pass, "Setting a scissor outside a render pass");
-        const auto width = static_cast<std::int64_t>(m_extent.width);
-        const auto height = static_cast<std::int64_t>(m_extent.height);
+        const auto width = static_cast<std::int64_t>(m_pass_size.width);
+        const auto height = static_cast<std::int64_t>(m_pass_size.height);
         std::int64_t left = 0;
         std::int64_t top = 0;
         std::int64_t right = width;
@@ -1866,7 +2145,8 @@ void main() {
             right = std::clamp<std::int64_t>(std::int64_t{rect->x} + rect->width, left, width);
             bottom = std::clamp<std::int64_t>(std::int64_t{rect->y} + rect->height, top, height);
         }
-        m_gl.Scissor(static_cast<GLint>(left), static_cast<GLint>(height - bottom),
+        const std::int64_t y = m_pass_into_textures ? top : height - bottom;
+        m_gl.Scissor(static_cast<GLint>(left), static_cast<GLint>(y),
                      static_cast<GLsizei>(right - left), static_cast<GLsizei>(bottom - top));
     }
 
@@ -1878,9 +2158,10 @@ void main() {
     bool m_has_astc = false;
     bool m_has_timer_queries = false;
     bool m_has_debug = false;
+    bool m_has_float_targets = false;
 
     GLuint m_vertex_array = 0;
-    GLuint m_sampler = 0;
+    std::array<GLuint, k_texture_slots> m_samplers{};
     GLuint m_uniform_ring = 0;
     std::size_t m_uniform_alignment = 256;
     std::size_t m_uniform_offset = 0;
@@ -1895,6 +2176,9 @@ void main() {
     platform::SurfaceSize m_offscreen_size;
     GLuint m_copy_program = 0;
     TextureResource m_white_texture;
+    TextureResource m_far_depth_texture;
+    GLuint m_empty_fragment_shader = 0;
+    std::vector<TargetFramebuffer> m_target_framebuffers;
 
     std::optional<CapturedFrame> m_captured;
     bool m_capture_requested = false;
@@ -1911,7 +2195,12 @@ void main() {
     GLsizei m_bound_stride = 0;
     bool m_vertex_buffer_dirty = true;
     GLuint m_bound_program = 0;
-    GLuint m_bound_texture = 0;
+    std::array<GLuint, k_texture_slots> m_bound_textures{};
+    platform::SurfaceSize m_pass_size;
+    bool m_pass_into_textures = false;
+    std::optional<TextureFormat> m_pass_color;
+    std::optional<TextureFormat> m_pass_depth;
+    std::array<GLuint, 2> m_pass_textures{};
     GLenum m_mode = GL_TRIANGLES;
     GLenum m_index_type = GL_UNSIGNED_SHORT;
     std::size_t m_index_offset = 0;

@@ -66,4 +66,20 @@ if(unbound_count EQUAL 1)
     string(REPLACE "layout(std140) uniform" "layout(binding = 2, std140) uniform" block "${block}")
     set(glsl "${before}${block}${after}")
 endif()
+# OpenGL stores a texture's rows from the bottom, and the other APIs from the top, so the device
+# turns the picture upside down when it draws into a texture, through this uniform (ADR 0027): 1
+# for the window and -1 for textures.
+if(STAGE STREQUAL "vertex")
+    set(clip_fixup "gl_Position.z = 2.0 * gl_Position.z - gl_Position.w;")
+    string(FIND "${glsl}" "${clip_fixup}" fixup_at)
+    string(FIND "${glsl}" "void main()" main_at)
+    if(fixup_at EQUAL -1 OR main_at EQUAL -1)
+        message(FATAL_ERROR "spirv-cross wrote ${SOURCE} (${STAGE}) in an unexpected form.")
+    endif()
+    string(REPLACE "${clip_fixup}" "${clip_fixup}\n    gl_Position.y *= dream_clip_flip;" glsl
+        "${glsl}")
+    string(SUBSTRING "${glsl}" 0 ${main_at} before)
+    string(SUBSTRING "${glsl}" ${main_at} -1 after)
+    set(glsl "${before}uniform float dream_clip_flip;\n\n${after}")
+endif()
 file(WRITE "${OUTPUT}" "${glsl}")

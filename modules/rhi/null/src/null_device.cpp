@@ -3,7 +3,10 @@
 #include "dream/core/module_registry.h"
 #include "dream/rhi/rhi.h"
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -14,6 +17,16 @@ namespace {
 using namespace rhi;
 
 struct Resource {};
+
+struct TextureInfo {
+    TextureDesc desc;
+};
+
+// The targets a pipeline was made for, which the pass it is used in must have.
+struct PipelineInfo {
+    std::optional<TextureFormat> color;
+    std::optional<TextureFormat> depth;
+};
 
 core::Error invalid(std::string_view message) {
     return core::Error{core::ErrorCode::InvalidArgument, std::string(message)};
@@ -56,13 +69,17 @@ public:
         if (const auto problem = texture_problem(desc, pixels.size())) {
             return invalid(*problem);
         }
-        return handle_cast<TextureTag>(m_textures.create());
+        return handle_cast<TextureTag>(m_textures.create(TextureInfo{desc}));
     }
 
     // Nothing is drawn, so every format is taken, which lets code that picks a compressed format
     // run without a GPU.
-    bool supports_texture_format(TextureFormat /*format*/) const override {
-        return true;
+    bool supports_texture_format(TextureFormat format) const override {
+        return !is_render_target_only(format);
+    }
+
+    bool supports_render_target(TextureFormat format) const override {
+        return !is_compressed(format);
     }
 
     core::Result<ShaderHandle> create_shader(ShaderStage /*stage*/,
@@ -77,11 +94,16 @@ public:
         if (!m_was_attached) {
             return invalid("A pipeline needs a surface to have been attached");
         }
+        if (const auto problem = pipeline_problem(desc)) {
+            return invalid(*problem);
+        }
         if (!m_shaders.contains(handle_cast<Resource>(desc.vertex_shader)) ||
-            !m_shaders.contains(handle_cast<Resource>(desc.fragment_shader))) {
+            (desc.fragment_shader.is_valid() &&
+             !m_shaders.contains(handle_cast<Resource>(desc.fragment_shader)))) {
             return invalid("A pipeline needs valid shaders");
         }
-        return handle_cast<PipelineTag>(m_pipelines.create());
+        return handle_cast<PipelineTag>(
+            m_pipelines.create(PipelineInfo{desc.color_target, desc.depth_target}));
     }
 
     void destroy_buffer(BufferHandle buffer) override {
@@ -89,7 +111,7 @@ public:
     }
 
     void destroy_texture(TextureHandle texture) override {
-        m_textures.destroy(handle_cast<Resource>(texture));
+        m_textures.destroy(handle_cast<TextureInfo>(texture));
     }
 
     void destroy_shader(ShaderHandle shader) override {
@@ -97,7 +119,7 @@ public:
     }
 
     void destroy_pipeline(PipelineHandle pipeline) override {
-        m_pipelines.destroy(handle_cast<Resource>(pipeline));
+        m_pipelines.destroy(handle_cast<PipelineInfo>(pipeline));
     }
 
     core::Result<CommandList*> begin_frame() override {
@@ -121,6 +143,32 @@ private:
     void begin_render_pass(const ClearColor& /*color*/) override {
         DREAM_VERIFY(m_in_frame && !m_in_pass, "Render pass started in the wrong place");
         m_in_pass = true;
+        m_pass = PipelineInfo{};
+        m_pass_textures = {};
+    }
+
+    void begin_render_pass(const RenderTargets& targets) override {
+        DREAM_VERIFY(m_in_frame && !m_in_pass, "Render pass started in the wrong place");
+        const TextureInfo* const color = m_textures.get(handle_cast<TextureInfo>(targets.color));
+        const TextureInfo* const depth = m_textures.get(handle_cast<TextureInfo>(targets.depth));
+        DREAM_VERIFY(color != nullptr || depth != nullptr, "A render pass needs a target");
+        DREAM_VERIFY(color == nullptr || (color->desc.render_target && !is_depth(color->desc.format)),
+                     "The color target must be a color render target");
+        DREAM_VERIFY(depth == nullptr || (depth->desc.render_target && is_depth(depth->desc.format)),
+                     "The depth target must be a depth render target");
+        DREAM_VERIFY(color == nullptr || depth == nullptr ||
+                         (color->desc.width == depth->desc.width &&
+                          color->desc.height == depth->desc.height),
+                     "A pass's targets must be the same size");
+        m_in_pass = true;
+        m_pass = PipelineInfo{};
+        if (color != nullptr) {
+            m_pass.color = color->desc.format;
+        }
+        if (depth != nullptr) {
+            m_pass.depth = depth->desc.format;
+        }
+        m_pass_textures = {targets.color, targets.depth};
     }
 
     void end_render_pass() override {
@@ -129,8 +177,10 @@ private:
     }
 
     void bind_pipeline(PipelineHandle pipeline) override {
-        DREAM_VERIFY(m_pipelines.contains(handle_cast<Resource>(pipeline)),
-                     "Binding a pipeline that doesn't exist");
+        const PipelineInfo* const info = m_pipelines.get(handle_cast<PipelineInfo>(pipeline));
+        DREAM_VERIFY(info != nullptr, "Binding a pipeline that doesn't exist");
+        DREAM_VERIFY(info->color == m_pass.color && info->depth == m_pass.depth,
+                     "The pipeline was made for other render targets than this pass has");
         m_pipeline_bound = true;
     }
 
@@ -152,9 +202,17 @@ private:
         DREAM_VERIFY(data.size() <= k_max_uniform_size, "Too many uniforms");
     }
 
-    void bind_texture(TextureHandle texture) override {
-        DREAM_VERIFY(!texture.is_valid() || m_textures.contains(handle_cast<Resource>(texture)),
-                     "Binding a texture that doesn't exist");
+    void bind_texture(std::uint32_t slot, TextureHandle texture) override {
+        DREAM_VERIFY(slot < k_texture_slots, "There is no such texture slot");
+        if (!texture.is_valid()) {
+            return;
+        }
+        const TextureInfo* const info = m_textures.get(handle_cast<TextureInfo>(texture));
+        DREAM_VERIFY(info != nullptr, "Binding a texture that doesn't exist");
+        DREAM_VERIFY(texture != m_pass_textures[0] && texture != m_pass_textures[1],
+                     "A pass can't read the textures it draws into");
+        DREAM_VERIFY((slot == k_shadow_slot) == is_depth(info->desc.format),
+                     "The shadow slot takes depth textures, and only it");
     }
 
     void draw_indexed(std::uint32_t /*index_count*/) override {
@@ -191,10 +249,12 @@ private:
         DREAM_VERIFY(m_in_pass, "Setting a scissor outside a render pass");
     }
 
-    core::HandlePool<Resource> m_textures;
+    core::HandlePool<TextureInfo> m_textures;
     core::HandlePool<Resource> m_buffers;
     core::HandlePool<Resource> m_shaders;
-    core::HandlePool<Resource> m_pipelines;
+    core::HandlePool<PipelineInfo> m_pipelines;
+    PipelineInfo m_pass;
+    std::array<TextureHandle, 2> m_pass_textures{};
     platform::SurfaceSize m_size;
     bool m_has_surface = false;
     bool m_was_attached = false;

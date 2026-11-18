@@ -128,8 +128,13 @@ std::unique_ptr<Device> make_device() {
     const std::vector<std::string> preference{std::string(k_backend)};
     auto created = registry.create<Device>(preference, config);
     if (!created.has_value()) {
-        MESSAGE("The device can't start here, so this test is skipped: "
-                << created.error().message);
+        // Only a missing driver or context skips the tests. Any other failure is the device's own.
+        const std::string& message = created.error().message;
+        const bool no_driver = message.find("driver") != std::string::npos ||
+                               message.find("pixel format") != std::string::npos ||
+                               message.find("window") != std::string::npos;
+        REQUIRE_MESSAGE(no_driver, message);
+        MESSAGE("The device can't start here, so this test is skipped: " << message);
         return nullptr;
     }
     return std::move(created.value().instance);
@@ -198,7 +203,7 @@ core::Result<PipelineHandle> try_pipeline(Device& device, const Shaders& shaders
         .vertex_stride = sizeof(Vertex),
         .attributes = attributes,
         .depth_test = false,
-        .cull_back_faces = false,
+        .cull = CullMode::None,
     });
 }
 
@@ -534,4 +539,273 @@ TEST_CASE("OpenGL device takes the compressed formats it says it supports") {
     // BC7 is core in OpenGL 4.2.
     CHECK(device->supports_texture_format(TextureFormat::Bc7Srgb));
 #endif
+}
+
+namespace {
+
+// For passes into textures, laid out as the engine's build writes vertex shaders: depth from 0 to
+// 1, converted to OpenGL's, and the picture turned upside down by dream_clip_flip (ADR 0027).
+constexpr std::string_view k_target_vertex_shader = DREAM_TEST_VERSION R"glsl(
+uniform float dream_clip_flip;
+layout(location = 0) in vec3 position;
+layout(location = 1) in vec2 uv;
+layout(location = 0) out vec2 v_uv;
+void main() {
+    gl_Position = vec4(position, 1.0);
+    v_uv = uv;
+    gl_Position.z = 2.0 * gl_Position.z - gl_Position.w;
+    gl_Position.y *= dream_clip_flip;
+}
+)glsl";
+
+constexpr std::string_view k_green_shader = DREAM_TEST_VERSION R"glsl(
+precision mediump float;
+layout(location = 0) in vec2 v_uv;
+layout(location = 0) out vec4 color;
+void main() {
+    color = vec4(0.0, 1.0, 0.0, 1.0);
+}
+)glsl";
+
+// Shows slot 1's texture, and darkens what slot 2's depth puts in shadow at depth 0.5.
+constexpr std::string_view k_show_shader = DREAM_TEST_VERSION R"glsl(
+precision mediump float;
+layout(binding = 2) uniform sampler2D scene;
+layout(binding = 3) uniform highp sampler2DShadow shadow;
+layout(location = 0) in vec2 v_uv;
+layout(location = 0) out vec4 color;
+void main() {
+    float lit = texture(shadow, vec3(v_uv, 0.5));
+    color = vec4(texture(scene, v_uv).rgb * (0.25 + 0.75 * lit), 1.0);
+}
+)glsl";
+
+// The whole surface, with texture coordinates from the top left as the engine has them.
+constexpr std::array<Vertex, 3> k_textured_screen{{
+    {{-1.0f, -1.0f, 0.5f}, {0.0f, 1.0f}},
+    {{3.0f, -1.0f, 0.5f}, {2.0f, 1.0f}},
+    {{-1.0f, 3.0f, 0.5f}, {0.0f, -1.0f}},
+}};
+// The left half of the surface, nearer than 0.5.
+constexpr std::array<Vertex, 6> k_left_half{{
+    {{-1.0f, -1.0f, 0.25f}, {0.0f, 0.0f}},
+    {{0.0f, -1.0f, 0.25f}, {0.0f, 0.0f}},
+    {{0.0f, 1.0f, 0.25f}, {0.0f, 0.0f}},
+    {{-1.0f, -1.0f, 0.25f}, {0.0f, 0.0f}},
+    {{0.0f, 1.0f, 0.25f}, {0.0f, 0.0f}},
+    {{-1.0f, 1.0f, 0.25f}, {0.0f, 0.0f}},
+}};
+
+ShaderHandle make_shader(Device& device, ShaderStage stage, std::string_view source) {
+    const auto shader = device.create_shader(stage, text(source));
+    REQUIRE_MESSAGE(shader.has_value(), shader.error().message);
+    return shader.value();
+}
+
+} // namespace
+
+TEST_CASE("OpenGL device makes render targets of the formats it says it supports") {
+    const auto device = make_device();
+    if (device == nullptr) {
+        return;
+    }
+    CHECK(device->supports_render_target(TextureFormat::Rgba8Srgb));
+    CHECK(device->supports_render_target(TextureFormat::Depth32Float));
+    CHECK_FALSE(device->supports_render_target(TextureFormat::Bc7Srgb));
+#if !DREAM_GL_ES
+    CHECK(device->supports_render_target(TextureFormat::Rgba16Float));
+    CHECK(device->supports_render_target(TextureFormat::Rg11B10Float));
+#endif
+    for (const TextureFormat format : {TextureFormat::Rgba8Srgb, TextureFormat::Rgba16Float,
+                                       TextureFormat::Rg11B10Float, TextureFormat::Depth32Float}) {
+        const auto target = device->create_texture(
+            TextureDesc{.width = 64, .height = 32, .format = format, .render_target = true}, {});
+        CHECK(target.has_value() == device->supports_render_target(format));
+        if (target.has_value()) {
+            device->destroy_texture(target.value());
+        }
+    }
+
+    // Render targets start empty, and the float and depth formats are only for render targets.
+    constexpr std::array<std::byte, 4> k_pixel{};
+    CHECK_FALSE(device
+                    ->create_texture(TextureDesc{.width = 1, .height = 1, .render_target = true},
+                                     k_pixel)
+                    .has_value());
+    CHECK_FALSE(device
+                    ->create_texture(TextureDesc{.width = 1, .height = 1,
+                                                 .format = TextureFormat::Depth32Float},
+                                     k_pixel)
+                    .has_value());
+}
+
+TEST_CASE("OpenGL device refuses pipelines with the wrong targets or stages") {
+    Drawing drawing;
+    if (!drawing.ready()) {
+        return;
+    }
+    Device& device = *drawing.device;
+    const ShaderHandle vertex = make_shader(device, ShaderStage::Vertex, k_target_vertex_shader);
+    const ShaderHandle green = make_shader(device, ShaderStage::Fragment, k_green_shader);
+    const ShaderHandle plain_vertex = make_shader(device, ShaderStage::Vertex, k_vertex_shader);
+
+    // No fragment shader, but a color target.
+    CHECK_FALSE(device
+                    .create_pipeline(PipelineDesc{.vertex_shader = vertex,
+                                                  .vertex_stride = sizeof(Vertex),
+                                                  .attributes = k_attributes,
+                                                  .color_target = TextureFormat::Rgba8Unorm})
+                    .has_value());
+    // A depth format as the color target.
+    CHECK_FALSE(device
+                    .create_pipeline(PipelineDesc{.vertex_shader = vertex,
+                                                  .fragment_shader = green,
+                                                  .vertex_stride = sizeof(Vertex),
+                                                  .attributes = k_attributes,
+                                                  .color_target = TextureFormat::Depth32Float})
+                    .has_value());
+    // A shader without dream_clip_flip, which would draw into textures upside down.
+    const auto unflipped = device.create_pipeline(PipelineDesc{
+        .vertex_shader = plain_vertex,
+        .fragment_shader = green,
+        .vertex_stride = sizeof(Vertex),
+        .attributes = k_attributes,
+        .color_target = TextureFormat::Rgba8Unorm,
+    });
+    REQUIRE_FALSE(unflipped.has_value());
+    CHECK(unflipped.error().message.find("dream_clip_flip") != std::string::npos);
+
+    device.destroy_shader(vertex);
+    device.destroy_shader(green);
+    device.destroy_shader(plain_vertex);
+}
+
+TEST_CASE("OpenGL device draws into textures, top row first, and reads them in later passes") {
+    Drawing drawing;
+    if (!drawing.ready()) {
+        return;
+    }
+    Device& device = *drawing.device;
+    const ShaderHandle target_vertex =
+        make_shader(device, ShaderStage::Vertex, k_target_vertex_shader);
+    const ShaderHandle green = make_shader(device, ShaderStage::Fragment, k_green_shader);
+    const ShaderHandle show = make_shader(device, ShaderStage::Fragment, k_show_shader);
+
+    constexpr std::uint32_t k_target_size = 64;
+    const TextureHandle color =
+        device
+            .create_texture(TextureDesc{.width = k_target_size, .height = k_target_size,
+                                        .format = TextureFormat::Rgba8Unorm,
+                                        .render_target = true},
+                            {})
+            .value();
+    const TextureHandle depth =
+        device
+            .create_texture(TextureDesc{.width = k_target_size, .height = k_target_size,
+                                        .format = TextureFormat::Depth32Float,
+                                        .render_target = true},
+                            {})
+            .value();
+
+    const auto fill = device.create_pipeline(PipelineDesc{
+        .vertex_shader = target_vertex,
+        .fragment_shader = green,
+        .vertex_stride = sizeof(Vertex),
+        .attributes = k_attributes,
+        .depth_test = false,
+        .cull = CullMode::Back,
+        .color_target = TextureFormat::Rgba8Unorm,
+    });
+    REQUIRE_MESSAGE(fill.has_value(), fill.error().message);
+    // Depth only, with no fragment shader, culling nothing, as a shadow map would be drawn.
+    const auto shadow_caster = device.create_pipeline(PipelineDesc{
+        .vertex_shader = target_vertex,
+        .vertex_stride = sizeof(Vertex),
+        .attributes = k_attributes,
+        .cull = CullMode::None,
+        .depth_bias = 1.0f,
+        .slope_depth_bias = 1.0f,
+        .depth_target = TextureFormat::Depth32Float,
+    });
+    REQUIRE_MESSAGE(shadow_caster.has_value(), shadow_caster.error().message);
+    const auto shown = device.create_pipeline(PipelineDesc{
+        .vertex_shader = make_shader(device, ShaderStage::Vertex, k_vertex_shader),
+        .fragment_shader = show,
+        .vertex_stride = sizeof(Vertex),
+        .attributes = k_attributes,
+        .depth_test = false,
+        .cull = CullMode::None,
+    });
+    REQUIRE_MESSAGE(shown.has_value(), shown.error().message);
+
+    REQUIRE(device.capture_next_frame());
+    CommandList* const commands = device.begin_frame().value();
+    REQUIRE(commands != nullptr);
+
+    // Red, then green over the top half by a scissor from the top left. The full-screen triangle
+    // is counter-clockwise, so culling back faces keeps it, which shows the winding is right.
+    commands->begin_render_pass(RenderTargets{.color = color, .clear_color = ClearColor{1, 0, 0, 1}});
+    commands->bind_pipeline(fill.value());
+    commands->set_scissor(ScissorRect{.width = k_target_size, .height = k_target_size / 2});
+    CHECK(commands->draw_vertices(std::as_bytes(std::span(k_full_screen)), 3));
+    commands->end_render_pass();
+
+    // The left half nearer than 0.5, and the rest at the far plane.
+    commands->begin_render_pass(RenderTargets{.depth = depth});
+    commands->bind_pipeline(shadow_caster.value());
+    CHECK(commands->draw_vertices(std::as_bytes(std::span(k_left_half)), 6));
+    commands->end_render_pass();
+
+    commands->begin_render_pass(ClearColor{});
+    commands->bind_pipeline(shown.value());
+    const std::array<float, 4> no_offset{};
+    commands->push_constants(std::as_bytes(std::span(no_offset)));
+    commands->bind_texture(1, color);
+    commands->bind_texture(k_shadow_slot, depth);
+    CHECK(commands->draw_vertices(std::as_bytes(std::span(k_textured_screen)), 3));
+    commands->end_render_pass();
+    REQUIRE(device.end_frame().has_value());
+
+    const std::optional<CapturedFrame> frame = device.take_captured_frame();
+    REQUIRE(frame.has_value());
+    const auto at = [&](double x, double y) {
+        return pixel_at(*frame, static_cast<std::uint32_t>(x * k_size.width),
+                        static_cast<std::uint32_t>(y * k_size.height));
+    };
+    // Top right: green and lit. Bottom right: red and lit.
+    CHECK(at(0.75, 0.25)[1] == std::byte{255});
+    CHECK(at(0.75, 0.25)[0] == std::byte{0});
+    CHECK(at(0.75, 0.75)[0] == std::byte{255});
+    CHECK(at(0.75, 0.75)[1] == std::byte{0});
+    // Left: in shadow, a quarter as bright, which sRGB encoding stores as about 137.
+    const int shadowed_green = std::to_integer<int>(at(0.25, 0.25)[1]);
+    CHECK(shadowed_green > 120);
+    CHECK(shadowed_green < 150);
+    const int shadowed_red = std::to_integer<int>(at(0.25, 0.75)[0]);
+    CHECK(shadowed_red > 120);
+    CHECK(shadowed_red < 150);
+
+    // With nothing in the shadow slot, everything is lit.
+    REQUIRE(device.capture_next_frame());
+    CommandList* const again = device.begin_frame().value();
+    REQUIRE(again != nullptr);
+    again->begin_render_pass(ClearColor{});
+    again->bind_pipeline(shown.value());
+    again->push_constants(std::as_bytes(std::span(no_offset)));
+    again->bind_texture(1, color);
+    CHECK(again->draw_vertices(std::as_bytes(std::span(k_textured_screen)), 3));
+    again->end_render_pass();
+    REQUIRE(device.end_frame().has_value());
+    const std::optional<CapturedFrame> lit = device.take_captured_frame();
+    REQUIRE(lit.has_value());
+    CHECK(pixel_at(*lit, k_size.width / 4, k_size.height / 4)[1] == std::byte{255});
+
+    device.destroy_pipeline(fill.value());
+    device.destroy_pipeline(shadow_caster.value());
+    device.destroy_pipeline(shown.value());
+    device.destroy_texture(color);
+    device.destroy_texture(depth);
+    device.destroy_shader(target_vertex);
+    device.destroy_shader(green);
+    device.destroy_shader(show);
 }

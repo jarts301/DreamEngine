@@ -48,6 +48,11 @@ enum class BufferUsage : std::uint8_t { Vertex, Index };
 // compressed formats store each block of 4x4 pixels in 16 bytes, with blocks at the right and
 // bottom edges covering pixels past them: BC7 is the PC's, and ASTC 4x4 the phone's. Only the Rgba8
 // formats work everywhere; see Device::supports_texture_format.
+//
+// The last three are for render targets only (TextureDesc::render_target): Rgba16Float is eight
+// bytes per pixel of half floats, Rg11B10Float four bytes of red, green and blue as small floats
+// with no alpha, both for colors brighter than 1, and Depth32Float a depth buffer that shaders can
+// read. See Device::supports_render_target.
 enum class TextureFormat : std::uint8_t {
     Rgba8Srgb,
     Rgba8Unorm,
@@ -55,10 +60,24 @@ enum class TextureFormat : std::uint8_t {
     Bc7Unorm,
     Astc4x4Srgb,
     Astc4x4Unorm,
+    Rgba16Float,
+    Rg11B10Float,
+    Depth32Float,
 };
 
 [[nodiscard]] constexpr bool is_compressed(TextureFormat format) noexcept {
-    return format != TextureFormat::Rgba8Srgb && format != TextureFormat::Rgba8Unorm;
+    return format == TextureFormat::Bc7Srgb || format == TextureFormat::Bc7Unorm ||
+           format == TextureFormat::Astc4x4Srgb || format == TextureFormat::Astc4x4Unorm;
+}
+
+[[nodiscard]] constexpr bool is_depth(TextureFormat format) noexcept {
+    return format == TextureFormat::Depth32Float;
+}
+
+// The formats a texture can have only as a render target, never filled with pixels.
+[[nodiscard]] constexpr bool is_render_target_only(TextureFormat format) noexcept {
+    return format == TextureFormat::Rgba16Float || format == TextureFormat::Rg11B10Float ||
+           format == TextureFormat::Depth32Float;
 }
 
 [[nodiscard]] constexpr bool is_srgb(TextureFormat format) noexcept {
@@ -77,6 +96,11 @@ struct TextureDesc {
 
     // The device makes the rest of the chain itself. Only for the Rgba8 formats, with one level.
     bool generate_mipmaps = true;
+
+    // A texture to draw into with CommandList::begin_render_pass, then read in shaders. It has one
+    // level and no pixels to start with: its contents are undefined until a pass clears or draws
+    // into it. A depth format makes it a depth target, and any other a color target.
+    bool render_target = false;
 };
 
 // The size of one level of a texture, in pixels.
@@ -98,10 +122,11 @@ struct TextureDesc {
 // Bytes in one level of a texture, rows packed with nothing between them.
 [[nodiscard]] constexpr std::size_t texture_level_bytes(TextureFormat format, std::uint32_t width,
                                                         std::uint32_t height) noexcept {
-    if (!is_compressed(format)) {
-        return std::size_t{width} * height * 4;
+    if (is_compressed(format)) {
+        return std::size_t{(width + 3) / 4} * ((height + 3) / 4) * 16;
     }
-    return std::size_t{(width + 3) / 4} * ((height + 3) / 4) * 16;
+    const std::size_t pixel_bytes = format == TextureFormat::Rgba16Float ? 8 : 4;
+    return std::size_t{width} * height * pixel_bytes;
 }
 
 // The bytes the pixels of a texture with `desc` take, every level after the one before.
@@ -121,6 +146,21 @@ texture_problem(const TextureDesc& desc, std::size_t pixel_bytes) noexcept {
     if (desc.width == 0 || desc.height == 0) {
         return "A texture can't be empty";
     }
+    if (desc.render_target) {
+        if (is_compressed(desc.format)) {
+            return "A render target can't be compressed";
+        }
+        if (desc.mip_levels != 1) {
+            return "A render target has one mip level";
+        }
+        if (pixel_bytes != 0) {
+            return "A render target starts with no pixels";
+        }
+        return std::nullopt;
+    }
+    if (is_render_target_only(desc.format)) {
+        return "This format is only for render targets";
+    }
     if (desc.mip_levels == 0 || desc.mip_levels > full_mip_chain(desc.width, desc.height)) {
         return "A texture's mip levels must be from 1 down to 1x1 at most";
     }
@@ -135,7 +175,8 @@ texture_problem(const TextureDesc& desc, std::size_t pixel_bytes) noexcept {
 
 // Whether the device makes a texture's mipmaps itself.
 [[nodiscard]] constexpr bool generates_mipmaps(const TextureDesc& desc) noexcept {
-    return desc.generate_mipmaps && desc.mip_levels == 1 && !is_compressed(desc.format) &&
+    return desc.generate_mipmaps && !desc.render_target && desc.mip_levels == 1 &&
+           !is_compressed(desc.format) && !is_render_target_only(desc.format) &&
            (desc.width > 1 || desc.height > 1);
 }
 
@@ -146,6 +187,23 @@ enum class VertexFormat : std::uint8_t { Float2, Float3, Float4, UByte4Norm };
 
 // Lines draws each pair of vertices as a line one pixel wide.
 enum class PrimitiveTopology : std::uint8_t { Triangles, Lines };
+
+// Which faces aren't drawn. Front faces are counter-clockwise, as seen in the engine's +Y-up clip
+// space. Shadow maps often cull the front faces, so the back ones cast the shadow.
+enum class CullMode : std::uint8_t { None, Back, Front };
+
+// How many textures a draw can read, each at a slot with its own sampler (ADR 0027):
+//
+// | Slot | Sampler | Vulkan | DirectX | OpenGL |
+// |---|---|---|---|---|
+// | 0 | linear, mipmaps, repeating | set 0, binding 1 | t0, s0 | texture unit 1 |
+// | 1 | linear, clamped to the edge | set 0, binding 2 | t1, s1 | texture unit 2 |
+// | 2 | depth comparison, less or equal, linear, clamped | set 0, binding 3 | t2, s2 | texture unit 3 |
+//
+// Slot 2 takes a Depth32Float texture, read with a shader's shadow sampler: Sampler2DShadow in
+// Slang.
+inline constexpr std::uint32_t k_texture_slots = 3;
+inline constexpr std::uint32_t k_shadow_slot = 2;
 
 // How drawn colors combine with what is already there. Alpha uses the color's alpha as its
 // opacity; PremultipliedAlpha expects colors already multiplied by their alpha.
@@ -167,8 +225,17 @@ struct VertexAttribute {
     std::uint32_t offset = 0;
 };
 
+struct ClearColor {
+    float r = 0.0f;
+    float g = 0.0f;
+    float b = 0.0f;
+    float a = 1.0f;
+};
+
 struct PipelineDesc {
     ShaderHandle vertex_shader;
+    // May be left invalid for a pipeline that only writes depth, with a depth_target and no
+    // color_target.
     ShaderHandle fragment_shader;
     std::uint32_t vertex_stride = 0;
     std::span<const VertexAttribute> attributes;
@@ -179,15 +246,52 @@ struct PipelineDesc {
     // Whether drawing updates the depth buffer. Ignored without depth_test.
     bool depth_write = true;
 
-    // Front faces are counter-clockwise, as seen in the engine's +Y-up clip space.
-    bool cull_back_faces = true;
+    CullMode cull = CullMode::Back;
+
+    // Pushes depth away from the viewer as it is written, against shadow maps shadowing their own
+    // surfaces: a constant, in the smallest steps the depth format has, and an amount that grows
+    // with the slope of the triangle.
+    float depth_bias = 0.0f;
+    float slope_depth_bias = 0.0f;
+
+    // The formats of the render targets the pipeline draws into, in the passes it is used in. Both
+    // nothing means the window's. A pipeline can only be used in passes with these targets.
+    std::optional<TextureFormat> color_target;
+    std::optional<TextureFormat> depth_target;
 };
 
-struct ClearColor {
-    float r = 0.0f;
-    float g = 0.0f;
-    float b = 0.0f;
-    float a = 1.0f;
+// What is wrong with a pipeline's targets and stages, if anything, as every backend checks it.
+[[nodiscard]] constexpr std::optional<std::string_view>
+pipeline_problem(const PipelineDesc& desc) noexcept {
+    if (!desc.vertex_shader.is_valid()) {
+        return "A pipeline needs a vertex shader";
+    }
+    if (desc.color_target.has_value() &&
+        (is_compressed(*desc.color_target) || is_depth(*desc.color_target))) {
+        return "A pipeline's color target must be a color format that can be drawn into";
+    }
+    if (desc.depth_target.has_value() && !is_depth(*desc.depth_target)) {
+        return "A pipeline's depth target must be a depth format";
+    }
+    if (!desc.fragment_shader.is_valid() &&
+        (desc.color_target.has_value() || !desc.depth_target.has_value())) {
+        return "Only a pipeline that draws into a depth target alone can leave out its fragment "
+               "shader";
+    }
+    return std::nullopt;
+}
+
+// The textures a render pass draws into, instead of the window. At least one, both the same size,
+// and render targets of the formats their names say. A target is read as a texture only in later
+// passes, never in its own.
+struct RenderTargets {
+    TextureHandle color;
+    TextureHandle depth;
+
+    // What the targets start the pass with: cleared to these values, or nothing to keep what they
+    // had.
+    std::optional<ClearColor> clear_color = ClearColor{};
+    std::optional<float> clear_depth = 1.0f;
 };
 
 // Records the drawing for one frame. Valid only between Device::begin_frame and end_frame.
@@ -195,6 +299,10 @@ class CommandList {
 public:
     // Starts drawing to the window, clearing it to `color` and clearing depth.
     virtual void begin_render_pass(const ClearColor& color) = 0;
+
+    // Starts drawing into textures. Viewport and scissor cover them, and their pixels are
+    // addressed from the top left, as the window's are.
+    virtual void begin_render_pass(const RenderTargets& targets) = 0;
     virtual void end_render_pass() = 0;
 
     virtual void bind_pipeline(PipelineHandle pipeline) = 0;
@@ -210,10 +318,16 @@ public:
     // k_max_uniform_size bytes.
     virtual void set_uniforms(std::span<const std::byte> data) = 0;
 
-    // Sets the texture that shaders read at binding 1 of set 0, or registers t0 and s0, for this
-    // and later draws. Each frame starts with a plain white texture, which an invalid handle also
-    // selects.
-    virtual void bind_texture(TextureHandle texture) = 0;
+    // Sets the texture that shaders read at `slot`, below k_texture_slots, for this and later draws
+    // in the pass. Each pass starts with defaults, which an invalid handle also selects: plain
+    // white for slots 0 and 1, and a depth at the far plane for the shadow slot, so every
+    // comparison passes.
+    virtual void bind_texture(std::uint32_t slot, TextureHandle texture) = 0;
+
+    // Slot 0, which most shaders read: binding 1 of set 0, or registers t0 and s0.
+    void bind_texture(TextureHandle texture) {
+        bind_texture(0, texture);
+    }
 
     virtual void draw_indexed(std::uint32_t index_count) = 0;
 
@@ -290,7 +404,13 @@ public:
 
     // Whether create_texture takes textures of `format`. The Rgba8 formats always work.
     [[nodiscard]] virtual bool supports_texture_format(TextureFormat format) const {
-        return !is_compressed(format);
+        return !is_compressed(format) && !is_render_target_only(format);
+    }
+
+    // Whether create_texture takes render targets of `format`, which shaders can also sample with
+    // linear filtering, or for Depth32Float, compare. False for the compressed formats.
+    [[nodiscard]] virtual bool supports_render_target(TextureFormat format) const {
+        return format == TextureFormat::Rgba8Srgb || format == TextureFormat::Rgba8Unorm;
     }
 
     [[nodiscard]] virtual core::Result<ShaderHandle>

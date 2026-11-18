@@ -136,6 +136,9 @@ public:
 
 private:
     void begin_render_pass(const rhi::ClearColor&) override {}
+    void begin_render_pass(const rhi::RenderTargets&) override {
+        m_state.calls.emplace_back("render_targets");
+    }
     void end_render_pass() override {}
     void bind_pipeline(rhi::PipelineHandle) override {}
     void bind_vertex_buffer(rhi::BufferHandle) override {}
@@ -147,8 +150,10 @@ private:
         m_state.calls.emplace_back("uniforms");
     }
 
-    void bind_texture(rhi::TextureHandle texture) override {
-        m_state.calls.push_back(std::format("bind_texture {}", texture.is_valid() ? texture.index : 0));
+    void bind_texture(std::uint32_t slot, rhi::TextureHandle texture) override {
+        const std::uint32_t index = texture.is_valid() ? texture.index : 0;
+        m_state.calls.push_back(slot == 0 ? std::format("bind_texture {}", index)
+                                          : std::format("bind_texture {} at {}", index, slot));
     }
 
     void draw_indexed(std::uint32_t count) override {

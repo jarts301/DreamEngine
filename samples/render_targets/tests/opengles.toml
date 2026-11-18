@@ -1,0 +1,36 @@
+[app]
+title = "Dream Render Targets OpenGL ES Check"
+width = 960
+height = 540
+
+[demo]
+spin = false
+quit_after_frames = 120
+
+[rhi.opengles]
+debug = true
+
+[input.actions]
+toggle_spin = ["key:space"]
+quit = ["key:escape"]
+
+# Compares frame 30 with the reference image, within a tolerance. See docs/adr/0021.
+[screenshot]
+frame = 30
+save = "render_targets_opengles_screenshot.png"
+reference = "assets:/screenshots/render_targets.png"
+tolerance = 24
+max_differing = 0.01
+quit = true
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["opengles"]
+
+[modules.android]
+platform = ["sdl3"]
+rhi = ["opengles"]
+
+[modules.linux]
+platform = ["sdl3"]
+rhi = ["opengles"]

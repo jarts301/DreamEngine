@@ -414,7 +414,7 @@ static core::Result<RendererPipelines> create_pipelines(VirtualFileSystem& files
         .attributes = k_line_attributes,
         .topology = rhi::PrimitiveTopology::Lines,
         .depth_test = false,
-        .cull_back_faces = false,
+        .cull = rhi::CullMode::None,
     });
     if (!line_pipeline.has_value()) {
         return line_pipeline.error();
@@ -443,7 +443,7 @@ static core::Result<RendererPipelines> create_pipelines(VirtualFileSystem& files
         .attributes = k_ui_attributes,
         .blend = rhi::BlendMode::Alpha,
         .depth_test = false,
-        .cull_back_faces = false,
+        .cull = rhi::CullMode::None,
     };
     const auto ui_pipeline = device->create_pipeline(ui_desc);
     if (!ui_pipeline.has_value()) {
