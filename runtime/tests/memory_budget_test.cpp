@@ -7,6 +7,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include <new>
@@ -260,17 +261,29 @@ TEST_CASE("A failed allocation makes the pressure critical until the reserve is 
     constexpr std::string_view k_settings =
         "enabled = true\nlow_system_mb = 0\ncritical_system_mb = 0\nreserve_mb = 1\n"
         "check_rate = 1000\n";
-    REQUIRE(run_game(game, k_settings, 4).has_value());
+    constexpr int k_frames = 8;
+    REQUIRE(run_game(game, k_settings, k_frames).has_value());
 
     CHECK(game.pressure_at_start == MemoryPressure::Normal);
-    REQUIRE(game.pressures.size() == 4);
+    REQUIRE(game.pressures.size() == k_frames);
     CHECK(game.pressures[0] == MemoryPressure::Normal);
     // The frame after the failure is critical, and refuses new assets.
     CHECK(game.pressures[1] == MemoryPressure::Critical);
     CHECK(game.refusing[1]);
-    // The next check takes the reserve back, as memory is plentiful, and all is normal again.
-    CHECK(game.pressures[2] == MemoryPressure::Normal);
-    CHECK_FALSE(game.refusing[2]);
+    // The next due check takes the reserve back, as memory is plentiful, and all is normal again.
+    // Which frame that is depends on timing: a frame that runs late, as when Windows oversleeps,
+    // is followed by one that doesn't sleep, and may come before the check is due.
+    const auto normal_again = std::find(game.pressures.begin() + 2, game.pressures.end(),
+                                        MemoryPressure::Normal);
+    REQUIRE(normal_again != game.pressures.end());
+    const auto first_normal = static_cast<std::size_t>(normal_again - game.pressures.begin());
+    for (std::size_t frame = 1; frame < game.pressures.size(); ++frame) {
+        CAPTURE(frame);
+        const bool critical = frame < first_normal;
+        CHECK(game.pressures[frame] ==
+              (critical ? MemoryPressure::Critical : MemoryPressure::Normal));
+        CHECK(game.refusing[frame] == critical);
+    }
     CHECK(game.low_memory_calls == 1);
 
     REQUIRE(game.changes.size() == 2);
