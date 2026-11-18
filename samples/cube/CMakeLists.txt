@@ -18,6 +18,10 @@ if(DREAM_BUILD_TESTS)
             CONFIG tests/directx.toml SHADERS shaders/cube.slang ASSETS tests/reference)
         dream_add_game(dream_cube_directx12_check SOURCES src/cube_game.cpp
             CONFIG tests/directx12.toml SHADERS shaders/cube.slang ASSETS tests/reference)
+        dream_add_game(dream_cube_opengl_check SOURCES src/cube_game.cpp
+            CONFIG tests/opengl.toml SHADERS shaders/cube.slang ASSETS tests/reference)
+        dream_add_game(dream_cube_opengles_check SOURCES src/cube_game.cpp
+            CONFIG tests/opengles.toml SHADERS shaders/cube.slang ASSETS tests/reference)
     endif()
 
     # The whole path with no display or GPU: compiled shaders load, and every frame is recorded.

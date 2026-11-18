@@ -18,6 +18,10 @@ if(DREAM_BUILD_TESTS)
             CONFIG tests/directx.toml ASSETS assets ../assets tests/reference RENDERER)
         dream_add_game(dream_render_demo_directx12_check SOURCES src/render_demo.cpp
             CONFIG tests/directx12.toml ASSETS assets ../assets tests/reference RENDERER)
+        dream_add_game(dream_render_demo_opengl_check SOURCES src/render_demo.cpp
+            CONFIG tests/opengl.toml ASSETS assets ../assets tests/reference RENDERER)
+        dream_add_game(dream_render_demo_opengles_check SOURCES src/render_demo.cpp
+            CONFIG tests/opengles.toml ASSETS assets ../assets tests/reference RENDERER)
     endif()
 
     # The whole path with no display or GPU: models load, and every part is drawn.

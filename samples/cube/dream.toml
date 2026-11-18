@@ -13,11 +13,11 @@ quit = ["key:escape"]
 # or fall back to drawing nothing.
 [modules.windows]
 platform = ["sdl3"]
-rhi = ["vulkan", "directx12", "directx", "null"]
+rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
 
 [modules.android]
 platform = ["sdl3"]
-rhi = ["vulkan", "null"]
+rhi = ["vulkan", "opengles", "null"]
 
 [modules.linux]
 platform = ["sdl3"]

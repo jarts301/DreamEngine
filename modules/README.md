@@ -42,7 +42,9 @@ dream_add_module(rhi directx SOURCES src/directx_device.cpp LIBRARIES d3d11 d3dc
 ```
 
 Backends that load the same format, such as `directx` and `directx12`, declare it alike, and the
-shaders are compiled once. See [ADR 0013](../docs/adr/0013-directx-and-shader-formats.md) for the
+shaders are compiled once. The targets `glsl` and `essl`, with the GLSL version as the profile, go
+through SPIR-V and SPIRV-Cross instead of straight from Slang
+([ADR 0026](../docs/adr/0026-opengl.md)). See [ADR 0013](../docs/adr/0013-directx-and-shader-formats.md) for the
 shader bindings every backend shares.
 
 Third-party code must be under a permissive license: MIT, Apache 2.0, BSD, zlib or public domain

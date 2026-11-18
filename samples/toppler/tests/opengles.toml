@@ -1,0 +1,35 @@
+# The same on Direct3D, which only Windows has.
+[app]
+organization = "DreamEngine"
+name = "TopplerCheck"       # Its own storage, apart from a player's saved progress.
+title = "Toppler OpenGL ES Check"
+width = 960
+height = 540
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[rhi.opengles]
+debug = true
+
+[input.actions]
+throw = ["mouse:left"]
+menu = ["key:escape"]
+
+# Compares frame 150 with the reference image, within a tolerance. See docs/adr/0021.
+[screenshot]
+frame = 150
+save = "toppler_opengles_screenshot.png"
+# The interface is drawn by markup here, which spaces text a little differently from RmlUi.
+reference = "assets:/screenshots/toppler_markup.png"
+tolerance = 24
+max_differing = 0.01
+quit = false
+
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["opengles"]
+physics3d = ["impulse"]
+audio = ["portaudio"]
+ui = ["markup"]

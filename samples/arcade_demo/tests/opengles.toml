@@ -1,0 +1,35 @@
+# The scripted run on the real GPU and sound hardware, with the Direct3D debug layer.
+[app]
+title = "Dream Arcade OpenGL ES Check"
+width = 960
+height = 540
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[rhi.opengles]
+debug = true
+
+[input.actions]
+throw = ["key:space"]
+menu = ["key:escape"]
+debug = ["key:f1"]
+
+# Compares frame 30 with the reference image, within a tolerance. See docs/adr/0021.
+[screenshot]
+frame = 30
+save = "arcade_opengles_screenshot.png"
+reference = "assets:/screenshots/arcade.png"
+tolerance = 24
+max_differing = 0.01
+quit = false
+
+# Only built on Windows, so only its table is listed.
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["opengles"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]
+debug_ui = ["imgui"]

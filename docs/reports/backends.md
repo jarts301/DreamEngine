@@ -8,7 +8,7 @@ backends work where, and how that was checked.
 
 | Interface | Windows | Android | Why not |
 |---|---|---|---|
-| `rhi` | `vulkan`, `directx12`, `directx`, `null` | `vulkan`, `null` | Direct3D exists only on Windows. `directx12` came after Phase 10 ([ADR 0023](../adr/0023-direct3d-12.md)). |
+| `rhi` | `vulkan`, `directx12`, `directx`, `opengl`, `opengles`, `null` | `vulkan`, `opengles`, `null` | Direct3D and desktop OpenGL exist only on Windows. `directx12`, `opengl` and `opengles` came after Phase 10 ([ADR 0023](../adr/0023-direct3d-12.md), [ADR 0026](../adr/0026-opengl.md)). |
 | `physics3d` | `jolt`, `impulse`, `null` | `jolt`, `impulse`, `null` | |
 | `physics2d` | `box2d`, `chipmunk`, `null` | `box2d`, `chipmunk`, `null` | |
 | `audio` | `miniaudio`, `portaudio`, `null` | `miniaudio`, `null` | PortAudio 19.7 has no Android output. |

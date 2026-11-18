@@ -1,7 +1,7 @@
 name: CI
 
+# Pushes don't start it for now; run it by hand from the Actions tab when wanted.
 on:
-  push:
   workflow_dispatch:
 
 env:

@@ -22,6 +22,10 @@
     },
     "miniaudio",
     {
+      "name": "opengl-registry",
+      "platform": "windows"
+    },
+    {
       "name": "portaudio",
       "platform": "!android"
     },
@@ -29,6 +33,10 @@
     "sdl3",
     {
       "name": "shader-slang",
+      "host": true
+    },
+    {
+      "name": "spirv-cross",
       "host": true
     },
     "stb",

@@ -163,6 +163,13 @@ function(_dream_cook_textures target output_dir)
     endif()
 endfunction()
 
+# SPIRV-Cross, which vcpkg installs for the build machine like slangc.
+macro(_dream_find_spirv_cross)
+    file(GLOB spirv_cross_dirs "${VCPKG_INSTALLED_DIR}/*/tools/spirv-cross")
+    find_program(DREAM_SPIRV_CROSS spirv-cross HINTS ${spirv_cross_dirs}
+        NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
+endmacro()
+
 # Compiles Slang shaders on the build machine, so a game ships only the compiled result. `formats`
 # is the list from dream_module_shader_formats, and every shader is compiled once per format.
 function(_dream_compile_shaders target output_dir formats)
@@ -191,17 +198,34 @@ function(_dream_compile_shaders target output_dir formats)
             foreach(stage IN ITEMS vertex fragment)
                 string(SUBSTRING ${stage} 0 4 short_stage)
                 set(output "${output_dir}/${stem}.${short_stage}${suffix}")
-                add_custom_command(
-                    OUTPUT "${output}"
-                    COMMAND ${CMAKE_COMMAND} -E make_directory "${output_dir}"
-                    COMMAND "${DREAM_SLANGC}" "${source}"
-                        -target ${slang_target} -profile ${profile}
-                        ${common_options}
-                        -entry ${stage}_main -stage ${stage}
-                        -o "${output}"
-                    DEPENDS "${source}"
-                    COMMENT "Compiling ${stem} ${stage} shader to ${suffix}"
-                    VERBATIM)
+                if(slang_target STREQUAL "glsl" OR slang_target STREQUAL "essl")
+                    # Through SPIR-V and SPIRV-Cross, for the OpenGL backends (ADR 0026). The
+                    # profile is the GLSL version.
+                    _dream_find_spirv_cross()
+                    set(script "${DreamEngine_SOURCE_DIR}/cmake/DreamCrossCompileShader.cmake")
+                    add_custom_command(
+                        OUTPUT "${output}"
+                        COMMAND ${CMAKE_COMMAND} -E make_directory "${output_dir}"
+                        COMMAND ${CMAKE_COMMAND} -DSLANGC=${DREAM_SLANGC}
+                            -DSPIRV_CROSS=${DREAM_SPIRV_CROSS} -DSOURCE=${source}
+                            -DSTAGE=${stage} -DOUTPUT=${output} -DLANGUAGE=${slang_target}
+                            -DVERSION=${profile} -P "${script}"
+                        DEPENDS "${source}" "${script}"
+                        COMMENT "Compiling ${stem} ${stage} shader to ${suffix}"
+                        VERBATIM)
+                else()
+                    add_custom_command(
+                        OUTPUT "${output}"
+                        COMMAND ${CMAKE_COMMAND} -E make_directory "${output_dir}"
+                        COMMAND "${DREAM_SLANGC}" "${source}"
+                            -target ${slang_target} -profile ${profile}
+                            ${common_options}
+                            -entry ${stage}_main -stage ${stage}
+                            -o "${output}"
+                        DEPENDS "${source}"
+                        COMMENT "Compiling ${stem} ${stage} shader to ${suffix}"
+                        VERBATIM)
+                endif()
                 list(APPEND outputs "${output}")
             endforeach()
         endforeach()

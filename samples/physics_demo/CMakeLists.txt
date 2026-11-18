@@ -28,6 +28,10 @@ if(DREAM_BUILD_TESTS)
             CONFIG tests/directx.toml ASSETS assets ../assets RENDERER)
         dream_add_game(dream_physics_demo_directx12_check SOURCES src/physics_demo.cpp
             CONFIG tests/directx12.toml ASSETS assets ../assets RENDERER)
+        dream_add_game(dream_physics_demo_opengl_check SOURCES src/physics_demo.cpp
+            CONFIG tests/opengl.toml ASSETS assets ../assets RENDERER)
+        dream_add_game(dream_physics_demo_opengles_check SOURCES src/physics_demo.cpp
+            CONFIG tests/opengles.toml ASSETS assets ../assets RENDERER)
     endif()
 
     # The check run with the other physics backends. Only its configuration differs, and the

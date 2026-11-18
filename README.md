@@ -57,6 +57,12 @@ the same compiled shaders and need nothing installed. Debug builds turn their de
 Windows' "Graphics Tools" feature is present, and the messages appear in the engine log. See
 [ADR 0023](docs/adr/0023-direct3d-12.md).
 
+The OpenGL backends are the widest fallback: `opengl` is OpenGL 4.3 on Windows, and `opengles` is
+OpenGL ES 3.1 on Android, and on Windows where the GPU driver offers ES contexts, as NVIDIA's does.
+Their shaders are compiled from the same Slang files, through SPIR-V and SPIRV-Cross. Each sample
+has `_opengl_check` and `_opengles_check` programs on Windows. See
+[ADR 0026](docs/adr/0026-opengl.md).
+
 ## Screenshot tests
 
 A `[screenshot]` table in a game's `dream.toml` captures one frame, saves it next to the program,
@@ -151,7 +157,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 
 | Interface | Backends | Windows | Android | Notes |
 |---|---|---|---|---|
-| `rhi` | `vulkan`, `directx12`, `directx`, `null` | all | `vulkan`, `null` | `directx` is Direct3D 11. A game's shaders are compiled for whichever its list names. |
+| `rhi` | `vulkan`, `directx12`, `directx`, `opengl`, `opengles`, `null` | all | `vulkan`, `opengles`, `null` | `directx` is Direct3D 11. A game's shaders are compiled for whichever its list names. |
 | `physics3d` | `jolt`, `impulse`, `null` | all | all | `impulse` is the engine's own library. |
 | `physics2d` | `box2d`, `chipmunk`, `null` | all | all | `chipmunk` has no continuous collision. |
 | `audio` | `miniaudio`, `portaudio`, `null` | all | `miniaudio`, `null` | PortAudio has no Android output. |
