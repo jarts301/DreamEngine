@@ -17,7 +17,7 @@ quit = ["key:escape"]
 
 [modules.windows]
 platform = ["sdl3"]
-rhi = ["vulkan", "directx", "null"]
+rhi = ["vulkan", "directx12", "directx", "null"]
 physics3d = ["jolt", "impulse"]
 physics2d = ["box2d", "chipmunk"]
 

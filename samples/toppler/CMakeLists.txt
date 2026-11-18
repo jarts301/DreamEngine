@@ -23,6 +23,8 @@ if(DREAM_BUILD_TESTS)
     if(WIN32)
         dream_add_game(dream_toppler_directx_check SOURCES src/toppler.cpp
             CONFIG tests/directx.toml ASSETS assets ../assets tests/reference RENDERER)
+        dream_add_game(dream_toppler_directx12_check SOURCES src/toppler.cpp
+            CONFIG tests/directx12.toml ASSETS assets ../assets tests/reference RENDERER)
 
         # The check run with the other physics, audio and interface backends.
         dream_add_game(dream_toppler_alternatives_check SOURCES src/toppler.cpp
@@ -50,6 +52,12 @@ if(DREAM_BUILD_TESTS)
             ASSETS assets ../assets tests/reference RENDERER)
         add_test(NAME dream_toppler_warp_check COMMAND dream_toppler_warp_check)
         set_tests_properties(dream_toppler_warp_check PROPERTIES
+            PASS_REGULAR_EXPRESSION "Screenshot matches")
+        dream_add_game(dream_toppler_directx12_warp_check SOURCES src/toppler.cpp
+            CONFIG tests/warp_directx12.toml ASSETS assets ../assets tests/reference RENDERER)
+        add_test(NAME dream_toppler_directx12_warp_check
+            COMMAND dream_toppler_directx12_warp_check)
+        set_tests_properties(dream_toppler_directx12_warp_check PROPERTIES
             PASS_REGULAR_EXPRESSION "Screenshot matches")
     endif()
 endif()

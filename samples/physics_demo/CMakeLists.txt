@@ -26,6 +26,8 @@ if(DREAM_BUILD_TESTS)
     if(WIN32)
         dream_add_game(dream_physics_demo_directx_check SOURCES src/physics_demo.cpp
             CONFIG tests/directx.toml ASSETS assets ../assets RENDERER)
+        dream_add_game(dream_physics_demo_directx12_check SOURCES src/physics_demo.cpp
+            CONFIG tests/directx12.toml ASSETS assets ../assets RENDERER)
     endif()
 
     # The check run with the other physics backends. Only its configuration differs, and the

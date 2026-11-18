@@ -41,11 +41,14 @@ dream_add_module(rhi directx SOURCES src/directx_device.cpp LIBRARIES d3d11 d3dc
     SHADER_SUFFIX .dxbc SHADER_TARGET dxbc SHADER_PROFILE sm_5_0)
 ```
 
-See [ADR 0013](../docs/adr/0013-directx-and-shader-formats.md) for the shader bindings every
-backend shares.
+Backends that load the same format, such as `directx` and `directx12`, declare it alike, and the
+shaders are compiled once. See [ADR 0013](../docs/adr/0013-directx-and-shader-formats.md) for the
+shader bindings every backend shares.
 
-When no MIT or Apache 2.0 library does the job, a backend can build on one of the engine's own in
-[libraries](../libraries/README.md), linked as `dream::library_<name>`, and stay a thin adapter.
+Third-party code must be under a permissive license: MIT, Apache 2.0, BSD, zlib or public domain
+([ADR 0022](../docs/adr/0022-licenses-and-frozen-libraries.md)). A backend can also build on one
+of the engine's own [libraries](../libraries/README.md), linked as `dream::library_<name>`, and
+stay a thin adapter; those are frozen, so new backends build on third-party code.
 
 Interfaces with more than one backend can share tests. Every physics backend passes the tests in
 `physics3d/tests` or `physics2d/tests`, and every profiler backend those in `profiler/tests`, which

@@ -1,6 +1,6 @@
 # 0014. A second backend for physics, audio and interfaces, and in-house libraries
 
-- Status: Accepted
+- Status: Accepted; its license rule widened by [0022](0022-licenses-and-frozen-libraries.md)
 - Date: 2026-11-10
 
 ## Context

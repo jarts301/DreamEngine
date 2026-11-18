@@ -35,7 +35,7 @@ debug = ["key:f1"]
 
 [modules.windows]
 platform = ["sdl3"]
-rhi = ["vulkan", "directx", "null"]
+rhi = ["vulkan", "directx12", "directx", "null"]
 physics3d = ["impulse", "jolt"]
 audio = ["portaudio", "miniaudio", "null"]
 ui = ["markup", "rmlui"]

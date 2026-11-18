@@ -44,16 +44,18 @@ After building, run the cube on Windows. Space or a click toggles the spin, and 
 build/windows-debug/samples/cube/dream_cube/dream_cube.exe
 ```
 
-It draws with Vulkan, or with DirectX on a PC without a Vulkan driver, as its `dream.toml` lists.
-To see the same fixed view on each API, run `dream_cube_vulkan_check` and `dream_cube_directx_check`
-from their own folders next to it.
+It draws with Vulkan, or on a PC without a Vulkan driver with Direct3D 12, then Direct3D 11, as its
+`dream.toml` lists. To see the same fixed view on each API, run `dream_cube_vulkan_check`,
+`dream_cube_directx12_check` and `dream_cube_directx_check` from their own folders next to it.
 
 To check the Vulkan backend with the Khronos validation layers, configure with
 `-DVCPKG_MANIFEST_FEATURES=vulkan-validation` and set `VK_LAYER_PATH` to the folder containing
 `VkLayer_khronos_validation.json` under `vcpkg_installed/`. Debug builds then turn validation on.
 
-The DirectX backend is Direct3D 11 and needs nothing installed. Debug builds turn its debug layer on
-when Windows' "Graphics Tools" feature is present, and the messages appear in the engine log.
+There are two DirectX backends, `directx` on Direct3D 11 and `directx12` on Direct3D 12. They load
+the same compiled shaders and need nothing installed. Debug builds turn their debug layers on when
+Windows' "Graphics Tools" feature is present, and the messages appear in the engine log. See
+[ADR 0023](docs/adr/0023-direct3d-12.md).
 
 ## Screenshot tests
 
@@ -66,9 +68,9 @@ frame = 60                                    # Counting from 0.
 reference = "assets:/screenshots/title.png"   # Optional. Without it, the frame is only saved.
 ```
 
-The cube, the render demo, the arcade and Toppler have `_warp_check` programs that do this on
-Windows' software rasterizer, which CTest runs, and their Vulkan and DirectX checks do it on the
-GPU. To update a reference, run the check and copy the capture it saves into the sample's
+The cube, the render demo, the arcade and Toppler have `_warp_check` and `_directx12_warp_check`
+programs that do this on Windows' software rasterizer with Direct3D 11 and 12, which CTest runs, and
+their Vulkan and DirectX checks do it on the GPU. To update a reference, run the check and copy the capture it saves into the sample's
 `tests/reference/screenshots/`. See [ADR 0021](docs/adr/0021-screenshot-tests.md).
 
 ## Play Toppler
@@ -126,7 +128,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 
 | Interface | Backends | Windows | Android | Notes |
 |---|---|---|---|---|
-| `rhi` | `vulkan`, `directx`, `null` | all | `vulkan`, `null` | A game's shaders are compiled for whichever its list names. |
+| `rhi` | `vulkan`, `directx12`, `directx`, `null` | all | `vulkan`, `null` | `directx` is Direct3D 11. A game's shaders are compiled for whichever its list names. |
 | `physics3d` | `jolt`, `impulse`, `null` | all | all | `impulse` is the engine's own library. |
 | `physics2d` | `box2d`, `chipmunk`, `null` | all | all | `chipmunk` has no continuous collision. |
 | `audio` | `miniaudio`, `portaudio`, `null` | all | `miniaudio`, `null` | PortAudio has no Android output. |
@@ -137,7 +139,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 
 ```toml
 [modules.windows]
-rhi = ["directx", "vulkan", "null"]
+rhi = ["directx12", "vulkan", "null"]
 physics3d = ["impulse"]
 ui = ["markup"]
 ```

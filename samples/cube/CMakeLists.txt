@@ -16,6 +16,8 @@ if(DREAM_BUILD_TESTS)
     if(WIN32)
         dream_add_game(dream_cube_directx_check SOURCES src/cube_game.cpp
             CONFIG tests/directx.toml SHADERS shaders/cube.slang ASSETS tests/reference)
+        dream_add_game(dream_cube_directx12_check SOURCES src/cube_game.cpp
+            CONFIG tests/directx12.toml SHADERS shaders/cube.slang ASSETS tests/reference)
     endif()
 
     # The whole path with no display or GPU: compiled shaders load, and every frame is recorded.
@@ -36,6 +38,11 @@ if(DREAM_BUILD_TESTS)
             SHADERS shaders/cube.slang ASSETS tests/reference)
         add_test(NAME dream_cube_warp_check COMMAND dream_cube_warp_check)
         set_tests_properties(dream_cube_warp_check PROPERTIES
+            PASS_REGULAR_EXPRESSION "Screenshot matches")
+        dream_add_game(dream_cube_directx12_warp_check SOURCES src/cube_game.cpp
+            CONFIG tests/warp_directx12.toml SHADERS shaders/cube.slang ASSETS tests/reference)
+        add_test(NAME dream_cube_directx12_warp_check COMMAND dream_cube_directx12_warp_check)
+        set_tests_properties(dream_cube_directx12_warp_check PROPERTIES
             PASS_REGULAR_EXPRESSION "Screenshot matches")
     endif()
 endif()

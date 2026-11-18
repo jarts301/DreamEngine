@@ -1,6 +1,6 @@
 # 0013. DirectX backend and per-backend shader formats
 
-- Status: Accepted
+- Status: Accepted; a Direct3D 12 backend was added beside it by [0023](0023-direct3d-12.md)
 - Date: 2026-11-10
 
 ## Context

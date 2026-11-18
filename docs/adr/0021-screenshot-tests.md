@@ -35,8 +35,8 @@ capture it saves, and copy it there.
 | Program | Graphics | Runs |
 |---|---|---|
 | `<sample>_vulkan_check` | Vulkan, on the GPU | By hand |
-| `<sample>_directx_check` | Direct3D, on the GPU | By hand, Windows |
-| `<sample>_warp_check` | Direct3D on WARP, Windows' software rasterizer | CTest, Windows, so CI too |
+| `<sample>_directx_check`, `<sample>_directx12_check` | Direct3D 11 or 12, on the GPU | By hand, Windows |
+| `<sample>_warp_check`, `<sample>_directx12_warp_check` | Direct3D 11 or 12 on WARP, Windows' software rasterizer | CTest, Windows, so CI too |
 
 The cube, the render demo, the arcade and Toppler each have one reference. The GPU checks still
 play their scripted runs to the end after comparing. Toppler's DirectX check draws its interface

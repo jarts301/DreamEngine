@@ -1,9 +1,13 @@
 # Libraries
 
-In-house libraries that backends build on, for jobs that no MIT or Apache 2.0 library does. Each is
-plain C++: it uses only the standard library and third-party libraries, never the engine, so it
-could serve any program. Backends in `modules/` adapt them to the engine's interfaces. See
-[ADR 0014](../docs/adr/0014-more-backends-and-libraries.md).
+In-house libraries that backends build on, written when the engine allowed only MIT or Apache 2.0
+code. Each is plain C++: it uses only the standard library and third-party libraries, never the
+engine, so it could serve any program. Backends in `modules/` adapt them to the engine's
+interfaces. See [ADR 0014](../docs/adr/0014-more-backends-and-libraries.md).
+
+**These libraries are frozen** ([ADR 0022](../docs/adr/0022-licenses-and-frozen-libraries.md)):
+they get bug fixes and the changes needed to keep building and passing, but no new features. New
+features go to the first backend of each interface: Jolt, RmlUi and miniaudio.
 
 | Library | What it does | Used by |
 |---|---|---|

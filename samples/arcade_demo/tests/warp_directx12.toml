@@ -1,0 +1,41 @@
+# The Direct3D 12 check on WARP, Windows' software rasterizer, so build servers without a GPU
+# compare the picture too. CTest runs it.
+[app]
+title = "Screenshot Check"
+width = 960
+height = 540
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[input.actions]
+throw = ["key:space"]
+menu = ["key:escape"]
+debug = ["key:f1"]
+
+
+[rhi.directx12]
+software = true
+debug = false
+
+[audio.miniaudio]
+device = false
+
+# Compares frame 30 with the reference image, within a tolerance. See docs/adr/0021.
+[screenshot]
+frame = 30
+save = "arcade_warp12_screenshot.png"
+reference = "assets:/screenshots/arcade.png"
+tolerance = 24
+max_differing = 0.01
+quit = true
+
+# Only built on Windows, so only its table is listed.
+[modules.windows]
+platform = ["sdl3"]
+rhi = ["directx12"]
+physics3d = ["jolt"]
+audio = ["miniaudio"]
+ui = ["rmlui"]
+debug_ui = ["imgui"]
