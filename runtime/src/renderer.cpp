@@ -2,6 +2,7 @@
 
 #include "dream/core/assert.h"
 #include "dream/core/log.h"
+#include "dream/core/process_stats.h"
 #include "dream/core/profile.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/texture.h"
@@ -31,6 +32,8 @@ struct FrameUniforms {
     Vec4 camera_position;
     Vec4 direction_to_light;
     Vec4 light_color_and_ambient;
+    Mat4 light_view_projection;
+    Vec4 shadow_settings;
 };
 
 struct DrawConstants {
@@ -73,8 +76,7 @@ struct UiConstants {
 };
 
 static_assert(sizeof(FrameUniforms) <= rhi::k_max_uniform_size);
-// Renderer::draw_scene returns these bytes, sized in renderer.h.
-static_assert(sizeof(FrameUniforms) == 112);
+
 static_assert(sizeof(DrawConstants) <= rhi::k_max_push_constant_size);
 
 Vec4 multiply(Vec4 a, Vec4 b) {
@@ -114,8 +116,13 @@ core::Result<void> read_mesh(ComponentContext& context) {
     if (!model.has_value()) {
         return model.error();
     }
+    const core::Result<bool> casts_shadows = context.data.flag("casts_shadows", true);
+    if (!casts_shadows.has_value()) {
+        return casts_shadows.error();
+    }
     context.world.registry().emplace<MeshRenderer>(context.entity, std::move(model).value(),
-                                                   extend(tint.value(), 1.0f));
+                                                   extend(tint.value(), 1.0f),
+                                                   casts_shadows.value());
     return {};
 }
 
@@ -156,8 +163,13 @@ core::Result<void> read_directional_light(ComponentContext& context) {
     if (!ambient.has_value()) {
         return ambient.error();
     }
-    context.world.registry().emplace<DirectionalLight>(
-        context.entity, direction.value(), color.value(), intensity.value(), ambient.value());
+    const core::Result<bool> casts_shadows = context.data.flag("casts_shadows", true);
+    if (!casts_shadows.has_value()) {
+        return casts_shadows.error();
+    }
+    context.world.registry().emplace<DirectionalLight>(context.entity, direction.value(),
+                                                       color.value(), intensity.value(),
+                                                       ambient.value(), casts_shadows.value());
     return {};
 }
 
@@ -361,7 +373,10 @@ std::optional<CameraView> camera_view(const World& world, platform::SurfaceSize 
     const float aspect = static_cast<float>(size.width) / static_cast<float>(size.height);
     const float fov = fitted_vertical_fov(core::radians(camera.vertical_fov_degrees), aspect);
     const Mat4 projection = core::perspective(fov, aspect, camera.z_near, camera.z_far);
-    return CameraView{.view_projection = projection * view, .eye = eye};
+    return CameraView{.view_projection = projection * view,
+                      .eye = eye,
+                      .z_near = camera.z_near,
+                      .z_far = camera.z_far};
 }
 
 std::optional<CameraRay> camera_ray(const World& world, platform::SurfaceSize size,
@@ -437,6 +452,55 @@ core::Result<RendererSettings> RendererSettings::from_config(const core::Config&
                                          exposure));
     }
     settings.exposure = static_cast<float>(exposure);
+
+    // Shadows, per device unless the game says otherwise.
+#if defined(__ANDROID__)
+    constexpr std::uint32_t k_default_shadow_resolution = 1024;
+    constexpr bool k_phone = true;
+#else
+    constexpr std::uint32_t k_default_shadow_resolution = 2048;
+    constexpr bool k_phone = false;
+#endif
+    const bool depth_targets = device.supports_render_target(k_hdr_depth_format);
+    const std::string_view shadows = config.get_string("renderer.shadows.mode").value_or("auto");
+    const std::int64_t resolution = config.get_int("renderer.shadows.resolution").value_or(0);
+    if (resolution != 0 && (resolution < 256 || resolution > 8192)) {
+        return setting_error(std::format("Setting 'renderer.shadows.resolution' must be 0 or from "
+                                         "256 to 8192, not {}",
+                                         resolution));
+    }
+    const auto chosen_resolution = resolution != 0 ? static_cast<std::uint32_t>(resolution)
+                                                   : k_default_shadow_resolution;
+    if (shadows == "auto") {
+        // A phone with less than 4 GB has one of the weakest GPUs, where shadows cost too much.
+        bool capable = depth_targets;
+        if constexpr (k_phone) {
+            if (capable) {
+                const std::optional<core::SystemMemory> memory = core::system_memory();
+                constexpr std::uint64_t k_enough = std::uint64_t{4} * 1000 * 1000 * 1000;
+                capable = memory.has_value() && memory->total_physical_bytes >= k_enough;
+            }
+        }
+        settings.shadow_resolution = capable ? chosen_resolution : 0;
+    } else if (shadows == "on") {
+        if (depth_targets) {
+            settings.shadow_resolution = chosen_resolution;
+        } else {
+            DREAM_LOG_WARNING("The graphics device can't draw depth targets, so there are no "
+                              "shadows");
+        }
+    } else if (shadows != "off") {
+        return setting_error(std::format("Setting 'renderer.shadows.mode' must be \"auto\", "
+                                         "\"on\" or \"off\", not \"{}\"",
+                                         shadows));
+    }
+    const double distance = config.get_float("renderer.shadows.distance").value_or(40.0);
+    if (!(distance >= 1.0 && distance <= 10000.0)) {
+        return setting_error(std::format("Setting 'renderer.shadows.distance' must be from 1 to "
+                                         "10000, not {}",
+                                         distance));
+    }
+    settings.shadow_distance = static_cast<float>(distance);
     return settings;
 }
 
@@ -542,6 +606,32 @@ static core::Result<RendererPipelines> create_pipelines(VirtualFileSystem& files
     }
     GpuPipeline ui_premultiplied(*device, premultiplied_pipeline.value());
 
+    std::optional<GpuShader> shadow_vertex;
+    std::optional<GpuPipeline> shadow;
+    if (settings.shadow_resolution > 0) {
+        core::Result<GpuShader> loaded =
+            load_shader(files, *device, "shadow.vert", rhi::ShaderStage::Vertex);
+        if (!loaded.has_value()) {
+            return loaded.error();
+        }
+        // Depth only. Both faces, since a model's faces needn't make a closed shape, with a bias
+        // that grows with the slope, against surfaces shadowing themselves.
+        const auto shadow_pipeline = device->create_pipeline(rhi::PipelineDesc{
+            .vertex_shader = loaded.value().get(),
+            .vertex_stride = sizeof(ModelVertex),
+            .attributes = std::span(k_attributes).first(1),
+            .cull = rhi::CullMode::None,
+            .depth_bias = 1.0f,
+            .slope_depth_bias = 1.5f,
+            .depth_target = k_hdr_depth_format,
+        });
+        if (!shadow_pipeline.has_value()) {
+            return shadow_pipeline.error();
+        }
+        shadow_vertex.emplace(std::move(loaded).value());
+        shadow.emplace(*device, shadow_pipeline.value());
+    }
+
     std::optional<GpuShader> tone_map_vertex;
     std::optional<GpuShader> tone_map_fragment;
     std::optional<GpuPipeline> tone_map;
@@ -586,6 +676,8 @@ static core::Result<RendererPipelines> create_pipelines(VirtualFileSystem& files
         .ui_fragment_shader = std::move(ui_fragment).value(),
         .ui_pipeline = std::move(ui),
         .ui_premultiplied_pipeline = std::move(ui_premultiplied),
+        .shadow_vertex_shader = std::move(shadow_vertex),
+        .shadow_pipeline = std::move(shadow),
         .tone_map_vertex_shader = std::move(tone_map_vertex),
         .tone_map_fragment_shader = std::move(tone_map_fragment),
         .tone_map_pipeline = std::move(tone_map),
@@ -611,6 +703,25 @@ core::Result<void> Renderer::initialize(App& app) {
                        m_settings.tone_mapping == ToneMapping::PbrNeutral ? "PBR Neutral" : "no");
     } else {
         DREAM_LOG_INFO("The scene is drawn straight to the window, without HDR");
+    }
+    if (m_settings.shadow_resolution > 0) {
+        const core::Result<rhi::TextureHandle> shadow_map = device->create_texture(
+            rhi::TextureDesc{.width = m_settings.shadow_resolution,
+                             .height = m_settings.shadow_resolution,
+                             .format = k_hdr_depth_format,
+                             .render_target = true},
+            {});
+        if (!shadow_map.has_value()) {
+            DREAM_LOG_WARNING("Could not make the shadow map, so there are no shadows: {}",
+                              shadow_map.error().message);
+            m_settings.shadow_resolution = 0;
+        } else {
+            m_shadow_map.emplace(*device, shadow_map.value());
+            DREAM_LOG_INFO("Shadows: a {0}x{0} map, reaching {1} from the camera",
+                           m_settings.shadow_resolution, m_settings.shadow_distance);
+        }
+    } else {
+        DREAM_LOG_INFO("Shadows are off");
     }
 
     app.assets().register_loader<RendererPipelines>(
@@ -717,33 +828,67 @@ void Renderer::fit_hdr_targets(platform::SurfaceSize size) {
     m_hdr_size = size;
 }
 
-// Returns the frame's uniforms, which the debug lines read too, or nothing without a camera.
-std::optional<std::array<std::byte, sizeof(FrameUniforms)>>
-Renderer::draw_scene(const World& world, rhi::CommandList& commands, platform::SurfaceSize size) {
-    const Registry& registry = world.registry();
-    const std::optional<CameraView> camera = camera_view(world, size);
-    if (!camera.has_value() || m_pipelines == nullptr) {
-        return std::nullopt;
-    }
-    FrameUniforms uniforms{
-        .view_projection = camera->view_projection,
-        .camera_position = extend(camera->eye, 1.0f),
-        .direction_to_light = Vec4{0.0f, 1.0f, 0.0f, 0.0f},
-        .light_color_and_ambient = Vec4{0.0f, 0.0f, 0.0f, 0.2f},
-    };
-    const auto lights = registry.view<const DirectionalLight>();
-    if (const Entity light_entity = lights.front(); light_entity != k_no_entity) {
-        const DirectionalLight& light = lights.get<const DirectionalLight>(light_entity);
-        uniforms.direction_to_light = extend(core::normalized(-light.direction), 0.0f);
-        uniforms.light_color_and_ambient = extend(light.color * light.intensity, light.ambient);
-    }
+namespace {
 
-    commands.bind_pipeline(m_pipelines->pipeline.get());
-    commands.set_uniforms(std::as_bytes(std::span(&uniforms, 1)));
+// The sun's view for the shadow map: an orthographic box around the part of the camera's view
+// within `distance`, reaching back toward the sun by as far again, so casters behind the camera
+// still shadow what it sees. The box's size depends only on that part of the view, not on which
+// way the camera turns, and it moves in whole texels of the map, so shadow edges hold still.
+Mat4 fit_shadow_view(const CameraView& camera, Vec3 light_direction, float distance,
+                     std::uint32_t resolution) {
+    const std::optional<Mat4> clip_to_world = core::inverse(camera.view_projection);
+    if (!clip_to_world.has_value()) {
+        return Mat4{};
+    }
+    // The depth, in clip space, at `distance` in front of the camera, as perspective() maps it.
+    const float near = camera.z_near;
+    const float far = camera.z_far;
+    const float reach = std::clamp(distance, near * 2.0f, far);
+    const float far_depth = far * (reach - near) / (reach * (far - near));
 
+    std::array<Vec3, 8> corners{};
+    std::size_t corner = 0;
+    for (const float depth : {0.0f, far_depth}) {
+        for (const float y : {-1.0f, 1.0f}) {
+            for (const float x : {-1.0f, 1.0f}) {
+                const Vec4 point = *clip_to_world * Vec4{x, y, depth, 1.0f};
+                corners[corner++] = Vec3{point.x, point.y, point.z} * (1.0f / point.w);
+            }
+        }
+    }
+    Vec3 center{};
+    for (const Vec3& point : corners) {
+        center = center + point * (1.0f / 8.0f);
+    }
+    float radius = 0.0f;
+    for (const Vec3& point : corners) {
+        radius = std::max(radius, core::length(point - center));
+    }
+    // Rounded up, so small changes in the view don't change the box's size.
+    radius = std::ceil(radius * 16.0f) / 16.0f;
+
+    const Vec3 direction = core::normalized(light_direction);
+    const Vec3 up = std::abs(direction.y) > 0.99f ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{0.0f, 1.0f, 0.0f};
+    const float back = radius + distance;
+    const Mat4 view = core::look_at(center - direction * back, center, up);
+    Mat4 projection = core::orthographic(-radius, radius, -radius, radius, 0.0f, back + radius);
+
+    // Moves the box so the world's origin falls on a texel, by less than one texel.
+    const Vec4 origin = projection * view * Vec4{0.0f, 0.0f, 0.0f, 1.0f};
+    const float half = static_cast<float>(resolution) * 0.5f;
+    const float x = origin.x * half;
+    const float y = origin.y * half;
+    projection.columns[3].x += (std::round(x) - x) / half;
+    projection.columns[3].y += (std::round(y) - y) / half;
+    return projection * view;
+}
+
+} // namespace
+
+void Renderer::draw_meshes(const World& world, rhi::CommandList& commands, bool shadow_casters) {
     for (const auto [entity, transform, mesh] :
-         registry.view<const WorldTransform, const MeshRenderer>().each()) {
-        if (mesh.model == nullptr) {
+         world.registry().view<const WorldTransform, const MeshRenderer>().each()) {
+        if (mesh.model == nullptr || (shadow_casters && !mesh.casts_shadows)) {
             continue;
         }
         const ModelAsset& model = *mesh.model;
@@ -763,15 +908,18 @@ Renderer::draw_scene(const World& world, rhi::CommandList& commands, platform::S
                 .normal_z = normals.columns[2],
                 .base_color = multiply(material.base_color, mesh.tint),
             };
-            commands.bind_texture(material.texture);
+            if (!shadow_casters) {
+                commands.bind_texture(material.texture);
+            }
             commands.push_constants(std::as_bytes(std::span(&constants, 1)));
             commands.draw_indexed_range(part.first_index, part.index_count);
-            ++m_last_draw_count;
+            if (shadow_casters) {
+                ++m_last_shadow_caster_count;
+            } else {
+                ++m_last_draw_count;
+            }
         }
     }
-    std::array<std::byte, sizeof(FrameUniforms)> bytes{};
-    std::memcpy(bytes.data(), &uniforms, sizeof(uniforms));
-    return bytes;
 }
 
 void Renderer::render(const World& world, rhi::CommandList& commands, platform::SurfaceSize size,
@@ -780,19 +928,76 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
     m_last_draw_count = 0;
     m_last_line_count = 0;
     m_last_ui_command_count = 0;
+    m_last_shadow_caster_count = 0;
+
+    // The frame's uniforms, which every pass reads, or nothing without a camera.
+    std::optional<FrameUniforms> uniforms;
+    bool shadows = false;
+    if (const std::optional<CameraView> camera = camera_view(world, size);
+        camera.has_value() && m_pipelines != nullptr) {
+        FrameUniforms frame{
+            .view_projection = camera->view_projection,
+            .camera_position = extend(camera->eye, 1.0f),
+            .direction_to_light = Vec4{0.0f, 1.0f, 0.0f, 0.0f},
+            .light_color_and_ambient = Vec4{0.0f, 0.0f, 0.0f, 0.2f},
+            .light_view_projection = Mat4{},
+            .shadow_settings = Vec4{},
+        };
+        const auto lights = world.registry().view<const DirectionalLight>();
+        if (const Entity light_entity = lights.front(); light_entity != k_no_entity) {
+            const DirectionalLight& light = lights.get<const DirectionalLight>(light_entity);
+            frame.direction_to_light = extend(core::normalized(-light.direction), 0.0f);
+            frame.light_color_and_ambient = extend(light.color * light.intensity, light.ambient);
+            shadows = light.casts_shadows && m_shadow_map.has_value() &&
+                      m_pipelines->shadow_pipeline.has_value();
+            if (shadows) {
+                const std::uint32_t resolution = m_settings.shadow_resolution;
+                frame.light_view_projection = fit_shadow_view(
+                    *camera, light.direction, m_settings.shadow_distance, resolution);
+                // The world's size of one texel sets how far a surface moves along its normal.
+                const float texel = 1.0f / static_cast<float>(resolution);
+                const Vec4 x_axis = frame.light_view_projection.columns[0];
+                const float world_texel =
+                    2.0f / (static_cast<float>(resolution) *
+                            std::max(core::length(Vec3{x_axis.x, x_axis.y, x_axis.z}), 1e-6f));
+                frame.shadow_settings = Vec4{1.0f, texel, 0.0005f, world_texel * 1.5f};
+            }
+        }
+        uniforms = frame;
+    }
+    const auto uniform_bytes = [&] { return std::as_bytes(std::span(&*uniforms, 1)); };
+
+    if (shadows) {
+        DREAM_PROFILE_ZONE("Shadow map");
+        commands.begin_render_pass(rhi::RenderTargets{.depth = m_shadow_map->get()});
+        commands.bind_pipeline(m_pipelines->shadow_pipeline->get());
+        commands.set_uniforms(uniform_bytes());
+        draw_meshes(world, commands, true);
+        commands.end_render_pass();
+    }
 
     const bool hdr = m_settings.hdr_format.has_value() && m_pipelines != nullptr &&
                      m_pipelines->tone_map_pipeline.has_value();
     if (hdr) {
         fit_hdr_targets(size);
     }
-    std::optional<std::array<std::byte, sizeof(FrameUniforms)>> uniforms;
+    const auto draw_lit_scene = [&] {
+        if (!uniforms.has_value()) {
+            return;
+        }
+        commands.bind_pipeline(m_pipelines->pipeline.get());
+        commands.set_uniforms(uniform_bytes());
+        if (shadows) {
+            commands.bind_texture(rhi::k_shadow_slot, m_shadow_map->get());
+        }
+        draw_meshes(world, commands, false);
+    };
     if (hdr && m_hdr_color.has_value()) {
         // The scene in HDR, then tone-mapped onto the window, with the lines and interface over it.
         commands.begin_render_pass(rhi::RenderTargets{.color = m_hdr_color->get(),
                                                       .depth = m_hdr_depth->get(),
                                                       .clear_color = clear_color});
-        uniforms = draw_scene(world, commands, size);
+        draw_lit_scene();
         commands.end_render_pass();
 
         commands.begin_render_pass(rhi::ClearColor{0.0f, 0.0f, 0.0f, 1.0f});
@@ -809,11 +1014,11 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
         }
         // A pass starts without the scene's uniforms on some backends, and the lines read them.
         if (uniforms.has_value()) {
-            commands.set_uniforms(*uniforms);
+            commands.set_uniforms(uniform_bytes());
         }
     } else {
         commands.begin_render_pass(clear_color);
-        uniforms = draw_scene(world, commands, size);
+        draw_lit_scene();
     }
 
     if (uniforms.has_value()) {
@@ -823,6 +1028,7 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
     draw_ui(commands, size);
     commands.end_render_pass();
     DREAM_PROFILE_VALUE("Draw calls", m_last_draw_count);
+    DREAM_PROFILE_VALUE("Shadow casters", m_last_shadow_caster_count);
     DREAM_PROFILE_VALUE("Debug lines", m_last_line_count);
     DREAM_PROFILE_VALUE("UI draw commands", m_last_ui_command_count);
 }

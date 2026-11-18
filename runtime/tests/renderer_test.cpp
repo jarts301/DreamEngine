@@ -47,6 +47,7 @@ struct RenderFixture {
         state.assets["shaders/ui.vert.fake"] = fake_shader();
         state.assets["shaders/ui.frag.fake"] = fake_shader();
         state.assets["shaders/tonemap.vert.fake"] = fake_shader();
+        state.assets["shaders/shadow.vert.fake"] = fake_shader();
         state.assets["shaders/tonemap.frag.fake"] = fake_shader();
     }
 
@@ -450,12 +451,10 @@ TEST_CASE_FIXTURE(RenderFixture, "Renderer draws the scene in HDR, then tone-map
 
     CHECK(chosen == rhi::TextureFormat::Rg11B10Float);
 
-    // A color and a depth target the size of the surface.
+    // A color and a depth target the size of the surface, beside the shadow map.
     std::vector<rhi::TextureFormat> targets;
     for (const rhi::TextureDesc& desc : device_state.textures) {
-        if (desc.render_target) {
-            CHECK(desc.width == k_size.width);
-            CHECK(desc.height == k_size.height);
+        if (desc.render_target && desc.width == k_size.width && desc.height == k_size.height) {
             targets.push_back(desc.format);
         }
     }
@@ -478,4 +477,86 @@ TEST_CASE_FIXTURE(RenderFixture, "Renderer draws the scene in HDR, then tone-map
     REQUIRE(read != calls.end());
     CHECK(read - calls.begin() > model);
     CHECK(tone_map < static_cast<std::ptrdiff_t>(calls.size()));
+}
+
+TEST_CASE("Renderer settings give PCs shadows, unless the device can't draw depth") {
+    FakeDeviceState state;
+    const FakeDevice device(state);
+    const auto settings = [&](std::string_view text) {
+        return RendererSettings::from_config(core::Config::parse(text).value(), device);
+    };
+
+    CHECK(settings("").value().shadow_resolution == 0);
+    CHECK(settings("[renderer.shadows]\nmode = \"on\"").value().shadow_resolution == 0);
+
+    state.render_target_formats = {rhi::TextureFormat::Depth32Float};
+    CHECK(settings("").value().shadow_resolution == 2048);
+    CHECK(settings("[renderer.shadows]\nresolution = 1024").value().shadow_resolution == 1024);
+    CHECK(settings("[renderer.shadows]\nmode = \"off\"").value().shadow_resolution == 0);
+    CHECK(settings("[renderer.shadows]\ndistance = 25.0").value().shadow_distance ==
+          Approx(25.0f));
+
+    CHECK_FALSE(settings("[renderer.shadows]\nmode = \"maybe\"").has_value());
+    CHECK_FALSE(settings("[renderer.shadows]\nresolution = 100").has_value());
+    CHECK_FALSE(settings("[renderer.shadows]\ndistance = 0.5").has_value());
+}
+
+TEST_CASE_FIXTURE(RenderFixture, "Renderer draws shadow casters into the shadow map first") {
+    device_state.render_target_formats = {rhi::TextureFormat::Depth32Float};
+    World world;
+    std::uint32_t casters = 0;
+    std::uint32_t draws = 0;
+
+    const Calls calls = in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
+        add_camera(world);
+        world.registry().emplace<DirectionalLight>(world.create_entity());
+        add_model(app, world, 2, false);
+        const Entity hidden = add_model(app, world, 1, false);
+        world.registry().get<MeshRenderer>(hidden).casts_shadows = false;
+        world.update_transforms();
+        renderer.render(world, commands, k_size);
+        casters = renderer.last_shadow_caster_count();
+        draws = renderer.last_draw_count();
+        world.registry().clear();
+    });
+
+    // Both parts of the first model cast shadows, and every part is drawn.
+    CHECK(casters == 2);
+    CHECK(draws == 3);
+
+    // The shadow pass comes first, then the scene reads the shadow map in the shadow slot.
+    const auto first = [&](auto predicate) {
+        return std::ranges::find_if(calls, predicate) - calls.begin();
+    };
+    const auto shadow_pass = first([](const std::string& c) { return c == "render_targets"; });
+    const auto shadow_read = first([](const std::string& c) { return c.ends_with(" at 2"); });
+    REQUIRE(shadow_pass < static_cast<std::ptrdiff_t>(calls.size()));
+    REQUIRE(shadow_read < static_cast<std::ptrdiff_t>(calls.size()));
+    CHECK(shadow_pass < shadow_read);
+
+    const auto shadow_map = std::ranges::find_if(device_state.textures, [](const auto& desc) {
+        return desc.render_target && desc.format == rhi::TextureFormat::Depth32Float &&
+               desc.width == 2048;
+    });
+    CHECK(shadow_map != device_state.textures.end());
+}
+
+TEST_CASE_FIXTURE(RenderFixture, "Renderer draws no shadows for a light that casts none") {
+    device_state.render_target_formats = {rhi::TextureFormat::Depth32Float};
+    World world;
+    std::uint32_t casters = 1;
+
+    const Calls calls = in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
+        add_camera(world);
+        const Entity sun = world.create_entity();
+        world.registry().emplace<DirectionalLight>(sun).casts_shadows = false;
+        add_model(app, world, 1, false);
+        world.update_transforms();
+        renderer.render(world, commands, k_size);
+        casters = renderer.last_shadow_caster_count();
+        world.registry().clear();
+    });
+
+    CHECK(casters == 0);
+    CHECK(std::ranges::find(calls, "render_targets") == calls.end());
 }
