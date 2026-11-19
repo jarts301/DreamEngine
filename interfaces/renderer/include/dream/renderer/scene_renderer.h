@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dream/core/math/bounds.h"
 #include "dream/core/math/matrix.h"
 #include "dream/core/math/vector.h"
 #include "dream/core/result.h"
@@ -47,6 +48,9 @@ struct MeshDraw {
     // Invalid for none, which draws as white.
     rhi::TextureHandle texture;
     bool casts_shadows = true;
+    // Around the part, in model space, for skipping parts out of view. Empty when unknown, and then
+    // the part is always drawn.
+    core::Aabb bounds;
 };
 
 // The camera, as runtime::camera_view gives it.
@@ -94,6 +98,10 @@ struct FrameStats {
     std::uint32_t shadow_casters = 0;
     std::uint32_t lines = 0;
     std::uint32_t ui_commands = 0;
+    // Parts skipped because they were out of the camera's view.
+    std::uint32_t culled = 0;
+    // Parts skipped in shadow cascades they were outside of, once for each cascade.
+    std::uint32_t shadow_culled = 0;
 };
 
 // Reads one of the game's files, such as "assets:/shaders/forward.vert.spv".

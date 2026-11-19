@@ -138,7 +138,7 @@ static props, prototypes and game jams.
 Not yet possible without writing engine code first:
 - **Characters:** animated characters (no skinning or animation).
 - **Rendering:** rich materials (no normal or roughness maps, no PBR), more than one light, visual
-  effects (no particles), large worlds (no culling, LOD or streaming), 2D sprite games (no sprite
+  effects (no particles), large worlds (frustum culling only, no LOD or streaming), 2D sprite games (no sprite
   renderer).
 - **Input:** gamepads.
 - **Online:** any online play.
@@ -222,11 +222,12 @@ and the remaining platforms.
 ### Phase 12: features (in progress)
 
 - **Done:** render targets (ADR 0027), HDR and tone mapping (ADR 0028), cascaded shadows
-  (ADR 0029), the OpenGL backends (ADR 0026), and the renderer as a module (ADR 0030).
+  (ADR 0029), the OpenGL backends (ADR 0026), the renderer as a module (ADR 0030), and frustum
+  culling (ADR 0031).
 - **Next, in order:**
   1. PBR materials from glTF: metallic, roughness, normal and emissive maps.
   2. Point and spot lights, with `forward_plus` for many lights.
-  3. Frustum culling and instancing.
+  3. Instancing.
   4. Skeletal animation (`animation: ozz`).
   5. Particles (`particles`).
   6. Gamepads (`input_device: sdl3_gamepad`).

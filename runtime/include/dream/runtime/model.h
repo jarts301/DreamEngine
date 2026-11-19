@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dream/core/math/bounds.h"
 #include "dream/core/math/vector.h"
 #include "dream/core/result.h"
 #include "dream/renderer/scene_renderer.h"
@@ -69,6 +70,8 @@ struct ModelPart {
     std::uint32_t first_index = 0;
     std::uint32_t index_count = 0;
     std::uint32_t material = 0;
+    // Around the part's vertices, in model space. create_model_asset works it out.
+    core::Aabb bounds;
 };
 
 // A model in ordinary memory, before anything is sent to the GPU.

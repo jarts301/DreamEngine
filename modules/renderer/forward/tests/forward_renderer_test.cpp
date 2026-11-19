@@ -393,3 +393,62 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer draws interface layers with the
     REQUIRE(last_scissor != calls.rend());
     CHECK(*last_scissor == "scissor off");
 }
+
+namespace {
+
+// A part one unit across around its origin, moved to `position`.
+MeshDraw box_part(Vec3 position) {
+    MeshDraw part = mesh(0);
+    part.model = core::translation(position);
+    part.bounds.add(Vec3{-0.5f, -0.5f, -0.5f});
+    part.bounds.add(Vec3{0.5f, 0.5f, 0.5f});
+    return part;
+}
+
+} // namespace
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer skips parts out of the camera's view") {
+    start();
+    // In view, behind the camera, and far off to the side.
+    const std::array meshes{box_part(Vec3{0.0f, 0.0f, 0.0f}), box_part(Vec3{0.0f, 0.0f, 20.0f}),
+                            box_part(Vec3{60.0f, 0.0f, 0.0f}), mesh(3)};
+    FrameStats stats;
+    const Calls calls =
+        draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes}, &stats);
+
+    // The part without bounds is always drawn.
+    CHECK(stats.draws == 2);
+    CHECK(stats.culled == 2);
+    CHECK(std::ranges::count(calls, "draw 0+3") == 1);
+    CHECK(std::ranges::count(calls, "draw 3+3") == 1);
+    CHECK(contains(std::string(renderer->describe()), "parts out of view are skipped"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer draws everything with culling off") {
+    start("[renderer]\nculling = false");
+    const std::array meshes{box_part(Vec3{0.0f, 0.0f, 0.0f}), box_part(Vec3{0.0f, 0.0f, 20.0f})};
+    FrameStats stats;
+    draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes}, &stats);
+
+    CHECK(stats.draws == 2);
+    CHECK(stats.culled == 0);
+    CHECK(contains(std::string(renderer->describe()), "culling is off"));
+    CHECK(contains(described(state, "[renderer]\nculling = \"yes\""), "error:"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer skips casters outside each shadow cascade") {
+    state.render_target_formats = {rhi::TextureFormat::Depth32Float};
+    start("[renderer.shadows]\nmode = \"on\"\ncascades = 4\nresolution = 1024");
+    // One in front of the camera, and one far beyond where shadows reach.
+    const std::array meshes{box_part(Vec3{0.0f, 0.0f, 0.0f}), box_part(Vec3{500.0f, 0.0f, 0.0f})};
+    FrameStats stats;
+    draw(Frame{.size = k_size, .view = view_from({0, 3, 8}), .sun = Sunlight{}, .meshes = meshes},
+         &stats);
+
+    // The far one is in no cascade, and the near one in at least one: each is either drawn or
+    // skipped in every cascade.
+    CHECK(stats.shadow_casters >= 1);
+    CHECK(stats.shadow_culled >= 4);
+    CHECK(stats.shadow_casters + stats.shadow_culled == 2 * 4);
+    CHECK(stats.culled == 1);
+}

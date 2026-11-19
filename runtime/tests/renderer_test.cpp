@@ -76,7 +76,8 @@ ModelAsset make_model(rhi::Device& device, std::uint32_t parts, bool textured) {
     }
     data.materials.push_back(ModelMaterialData{{1, 1, 1, 1}, textured ? 0 : -1});
     for (std::uint32_t part = 0; part < parts; ++part) {
-        data.parts.push_back(ModelPart{part * 3, 3, 0});
+        data.parts.push_back(
+            ModelPart{.first_index = part * 3, .index_count = 3, .material = 0, .bounds = {}});
     }
     return create_model_asset(device, data).value();
 }
@@ -218,6 +219,12 @@ TEST_CASE_FIXTURE(RenderFixture, "Renderer gives each part of each model") {
     CHECK(tinted->base_color.x == Approx(0.5f));
     CHECK(tinted->model.columns[3].x == Approx(4.0f));
     CHECK(tinted->vertices.is_valid());
+    // Each part's box, which the renderer culls by, comes from the model's vertices. The test models
+    // have indices for their first part only, so the others have nothing to put in a box.
+    CHECK(std::ranges::count_if(frame.meshes, [](const renderer::MeshDraw& part) {
+              return !part.bounds.empty();
+          }) == 2);
+    CHECK(tinted->bounds.empty());
     CHECK(tinted->indices.is_valid());
 }
 

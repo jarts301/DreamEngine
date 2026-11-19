@@ -408,6 +408,7 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
                     .base_color = multiply(material.base_color, mesh.tint),
                     .texture = material.texture,
                     .casts_shadows = mesh.casts_shadows,
+                    .bounds = part.bounds,
                 });
             }
         }
@@ -428,6 +429,7 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
     m_debug_lines.clear();
     DREAM_PROFILE_VALUE("Draw calls", m_last_stats.draws);
     DREAM_PROFILE_VALUE("Shadow casters", m_last_stats.shadow_casters);
+    DREAM_PROFILE_VALUE("Culled parts", m_last_stats.culled);
     DREAM_PROFILE_VALUE("Debug lines", m_last_stats.lines);
     DREAM_PROFILE_VALUE("UI draw commands", m_last_stats.ui_commands);
 }

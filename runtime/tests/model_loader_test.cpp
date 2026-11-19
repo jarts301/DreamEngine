@@ -197,7 +197,7 @@ TEST_CASE("create_model_asset creates one texture per image and links materials 
     data.images.push_back(ImageData{2, 1, std::vector<std::byte>(8), {}});
     data.materials.push_back(ModelMaterialData{{1, 1, 1, 1}, 0});
     data.materials.push_back(ModelMaterialData{{1, 0, 0, 1}, -1});
-    data.parts.push_back(ModelPart{0, 3, 1});
+    data.parts.push_back(ModelPart{.first_index = 0, .index_count = 3, .material = 1, .bounds = {}});
 
     FakeDeviceState state;
     FakeDevice device(state);

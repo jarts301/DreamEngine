@@ -138,6 +138,11 @@ public:
         return m_last_stats.draws;
     }
 
+    // How many parts of models the last call to render skipped, because they were out of view.
+    [[nodiscard]] std::uint32_t last_culled_count() const noexcept {
+        return m_last_stats.culled;
+    }
+
     // How many debug lines the last call to render drew.
     [[nodiscard]] std::uint32_t last_line_count() const noexcept {
         return m_last_stats.lines;

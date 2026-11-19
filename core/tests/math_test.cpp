@@ -1,3 +1,4 @@
+#include "dream/core/math/bounds.h"
 #include "dream/core/math/matrix.h"
 #include "dream/core/math/quaternion.h"
 #include "dream/core/math/vector.h"
@@ -175,4 +176,57 @@ TEST_CASE("orthographic maps its box to clip space") {
 
     check_near(transform_point(projection, {-2.0f, -1.0f, -1.0f}), {-1.0f, -1.0f, 0.0f});
     check_near(transform_point(projection, {6.0f, 3.0f, -11.0f}), {1.0f, 1.0f, 1.0f});
+}
+
+TEST_CASE("Aabb grows to hold its points, and transformed boxes hold the moved corners") {
+    Aabb box;
+    CHECK(box.empty());
+    box.add(Vec3{1.0f, 2.0f, 3.0f});
+    box.add(Vec3{-1.0f, 0.0f, 5.0f});
+    CHECK_FALSE(box.empty());
+    check_near(box.min, Vec3{-1.0f, 0.0f, 3.0f});
+    check_near(box.max, Vec3{1.0f, 2.0f, 5.0f});
+
+    // A quarter turn around Y, then a move: x becomes -z, z becomes x.
+    const Mat4 matrix = translation(Vec3{10.0f, 0.0f, 0.0f}) *
+                        rotation(quat_from_axis_angle(Vec3{0.0f, 1.0f, 0.0f}, radians(90.0f)));
+    const Aabb moved = transformed(matrix, box);
+    check_near(moved.min, Vec3{13.0f, 0.0f, -1.0f});
+    check_near(moved.max, Vec3{15.0f, 2.0f, 1.0f});
+
+    CHECK(transformed(matrix, Aabb{}).empty());
+}
+
+TEST_CASE("Frustum keeps boxes in view and drops those outside each side") {
+    const Mat4 view_projection = perspective(radians(60.0f), 1.0f, 0.5f, 50.0f) *
+                                 look_at(Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f},
+                                         Vec3{0.0f, 1.0f, 0.0f});
+    const Frustum frustum = frustum_from(view_projection);
+    const auto box_at = [](Vec3 center) {
+        Aabb box;
+        box.add(center - Vec3{0.5f, 0.5f, 0.5f});
+        box.add(center + Vec3{0.5f, 0.5f, 0.5f});
+        return box;
+    };
+
+    CHECK(intersects(frustum, box_at(Vec3{0.0f, 0.0f, -10.0f})));
+    // Straddling the near plane and a side still counts.
+    CHECK(intersects(frustum, box_at(Vec3{0.0f, 0.0f, -0.5f})));
+    CHECK(intersects(frustum, box_at(Vec3{5.9f, 0.0f, -10.0f})));
+
+    CHECK_FALSE(intersects(frustum, box_at(Vec3{0.0f, 0.0f, 5.0f})));    // Behind.
+    CHECK_FALSE(intersects(frustum, box_at(Vec3{0.0f, 0.0f, -60.0f})));  // Past the far plane.
+    CHECK_FALSE(intersects(frustum, box_at(Vec3{20.0f, 0.0f, -10.0f})));  // Right.
+    CHECK_FALSE(intersects(frustum, box_at(Vec3{-20.0f, 0.0f, -10.0f}))); // Left.
+    CHECK_FALSE(intersects(frustum, box_at(Vec3{0.0f, 20.0f, -10.0f})));  // Above.
+    CHECK_FALSE(intersects(frustum, box_at(Vec3{0.0f, -20.0f, -10.0f}))); // Below.
+
+    // A box of unknown extent is never dropped.
+    CHECK(intersects(frustum, Aabb{}));
+
+    // Orthographic boxes, as shadow cascades use, work the same way.
+    const Frustum box_view = frustum_from(orthographic(-1.0f, 1.0f, -1.0f, 1.0f, 0.0f, 10.0f));
+    CHECK(intersects(box_view, box_at(Vec3{0.0f, 0.0f, -5.0f})));
+    CHECK_FALSE(intersects(box_view, box_at(Vec3{3.0f, 0.0f, -5.0f})));
+    CHECK_FALSE(intersects(box_view, box_at(Vec3{0.0f, 0.0f, 2.0f})));
 }

@@ -90,6 +90,10 @@ least 4 GB of memory, with soft edges. `[renderer.shadows]` sets `mode` (`auto`,
 `resolution`, `cascades` and `distance`, and lights and meshes take `casts_shadows = false`. See
 [ADR 0029](docs/adr/0029-directional-shadows.md).
 
+Parts of models out of the camera's view are skipped, and so are shadow casters outside each
+cascade, by boxes worked out when a model loads. `culling = false` under `[renderer]` turns it off.
+See [ADR 0031](docs/adr/0031-frustum-culling.md).
+
 ## Screenshot tests
 
 A `[screenshot]` table in a game's `dream.toml` captures one frame, saves it next to the program,

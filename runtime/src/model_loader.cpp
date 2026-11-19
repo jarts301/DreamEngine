@@ -12,6 +12,7 @@
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
 
+#include <algorithm>
 #include <cstring>
 #include <format>
 #include <limits>
@@ -313,8 +314,23 @@ core::Result<ModelAsset> create_model_asset(rhi::Device& device, const ModelData
         });
     }
 
+    // Each part's bounds, for the renderer to skip parts out of view.
+    std::vector<ModelPart> parts = data.parts;
+    for (ModelPart& part : parts) {
+        part.bounds = {};
+        const std::size_t end =
+            std::min<std::size_t>(std::size_t{part.first_index} + part.index_count,
+                                  data.indices.size());
+        for (std::size_t index = part.first_index; index < end; ++index) {
+            const std::uint32_t vertex = data.indices[index];
+            if (vertex < data.vertices.size()) {
+                part.bounds.add(data.vertices[vertex].position);
+            }
+        }
+    }
+
     return ModelAsset{std::move(vertex_buffer), std::move(index_buffer), std::move(textures),
-                      std::move(materials), data.parts};
+                      std::move(materials), std::move(parts)};
 }
 
 } // namespace dream::runtime

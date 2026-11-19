@@ -1,9 +1,11 @@
 // The 'forward' renderer (ADR 0030): one directional light with cascaded shadows (ADR 0029), drawn
 // in HDR and tone-mapped with Khronos PBR Neutral (ADR 0028), then debug lines and the interface
-// layers over the result.
+// layers over the result. Parts out of the camera's view, or out of a shadow cascade, are skipped
+// (ADR 0031).
 
 #include "dream/core/config.h"
 #include "dream/core/log.h"
+#include "dream/core/math/bounds.h"
 #include "dream/core/module_registry.h"
 #include "dream/core/process_stats.h"
 #include "dream/core/profile.h"
@@ -159,6 +161,7 @@ struct Settings {
     std::uint32_t shadow_resolution = 0;
     std::uint32_t shadow_cascades = 0;
     float shadow_distance = 40.0f;
+    bool culling = true;
 };
 
 core::Result<Settings> read_settings(const core::Config& config, const rhi::Device& device) {
@@ -270,6 +273,12 @@ core::Result<Settings> read_settings(const core::Config& config, const rhi::Devi
                                          distance));
     }
     settings.shadow_distance = static_cast<float>(distance);
+
+    if (const std::optional<bool> culling = config.get_bool("renderer.culling")) {
+        settings.culling = *culling;
+    } else if (config.contains("renderer.culling")) {
+        return setting_error("Setting 'renderer.culling' must be true or false");
+    }
     if (settings.shadow_resolution == 0) {
         settings.shadow_cascades = 0;
     }
@@ -369,8 +378,9 @@ void set_component(Vec4& vector, std::uint32_t index, float value) {
 
 // Splits the shadowed part of the view among the cascades, near ones short and far ones long, as a
 // blend of even and logarithmic steps, and fits each one's box into its cell of the atlas.
+// `bounds` gets what each cascade's box sees, for skipping casters outside it.
 void fit_cascades(FrameUniforms& frame, const View& camera, Vec3 light_direction,
-                  const Settings& settings) {
+                  const Settings& settings, std::array<core::Frustum, k_max_cascades>& bounds) {
     const std::uint32_t count = settings.shadow_cascades;
     const std::uint32_t resolution = settings.shadow_resolution;
     const float near = camera.z_near;
@@ -389,6 +399,7 @@ void fit_cascades(FrameUniforms& frame, const View& camera, Vec3 light_direction
                                                     (1.0f - k_logarithmic) * even;
 
         const Mat4 view = fit_shadow_view(camera, light_direction, from, to, reach, resolution);
+        bounds[cascade] = core::frustum_from(view);
         // The world's size of one texel sets how far a surface moves along its normal.
         const Vec4 x_axis = view.columns[0];
         const float world_texel =
@@ -489,6 +500,7 @@ public:
         } else {
             description += "; shadows are off";
         }
+        description += m_settings.culling ? "; parts out of view are skipped" : "; culling is off";
         m_description = std::move(description);
         return {};
     }
@@ -529,8 +541,9 @@ private:
 
     core::Result<Pipelines> make_pipelines(const FileReader& read_file);
     void fit_hdr_targets(platform::SurfaceSize size);
+    // Skips the parts outside `view`, when one is given, by their boxes in m_world_bounds.
     void draw_meshes(rhi::CommandList& commands, std::span<const MeshDraw> meshes, bool casters,
-                     FrameStats& stats);
+                     const core::Frustum* view, FrameStats& stats);
     void draw_lines(rhi::CommandList& commands, std::span<const LineVertex> lines,
                     FrameStats& stats);
     void draw_ui(rhi::CommandList& commands, const Frame& frame, FrameStats& stats);
@@ -544,6 +557,8 @@ private:
     OwnedTexture m_hdr_color;
     OwnedTexture m_hdr_depth;
     platform::SurfaceSize m_hdr_size;
+    // Each part's box in world space this frame, reused between frames.
+    std::vector<core::Aabb> m_world_bounds;
 };
 
 core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_file) {
@@ -745,13 +760,18 @@ void ForwardRenderer::fit_hdr_targets(platform::SurfaceSize size) {
 }
 
 void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const MeshDraw> meshes,
-                                  bool casters, FrameStats& stats) {
+                                  bool casters, const core::Frustum* view, FrameStats& stats) {
     rhi::BufferHandle bound_vertices;
     rhi::BufferHandle bound_indices;
     std::optional<Mat4> normals_for;
     Mat4 normals;
-    for (const MeshDraw& mesh : meshes) {
+    for (std::size_t index = 0; index < meshes.size(); ++index) {
+        const MeshDraw& mesh = meshes[index];
         if (casters && !mesh.casts_shadows) {
+            continue;
+        }
+        if (view != nullptr && !core::intersects(*view, m_world_bounds[index])) {
+            ++(casters ? stats.shadow_culled : stats.culled);
             continue;
         }
         if (mesh.vertices != bound_vertices) {
@@ -872,6 +892,7 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
     // The frame's uniforms, which every pass reads, or nothing without a camera.
     std::optional<FrameUniforms> uniforms;
     bool shadows = false;
+    std::array<core::Frustum, k_max_cascades> cascade_bounds{};
     if (frame.view.has_value()) {
         const View& camera = *frame.view;
         FrameUniforms values{
@@ -892,12 +913,25 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
             values.light_color_and_ambient = extend(sun.color * sun.intensity, sun.ambient);
             shadows = sun.casts_shadows && m_shadow_map.exists() && m_pipelines->shadow.exists();
             if (shadows) {
-                fit_cascades(values, camera, sun.direction, m_settings);
+                fit_cascades(values, camera, sun.direction, m_settings, cascade_bounds);
             }
         }
         uniforms = values;
     }
     const auto uniform_bytes = [&] { return std::as_bytes(std::span(&*uniforms, 1)); };
+
+    // Each part's box moved into the world once, for the camera and every cascade.
+    const bool culling = m_settings.culling && frame.view.has_value();
+    std::optional<core::Frustum> camera_bounds;
+    if (culling) {
+        DREAM_PROFILE_ZONE("Culling");
+        m_world_bounds.resize(frame.meshes.size());
+        for (std::size_t index = 0; index < frame.meshes.size(); ++index) {
+            m_world_bounds[index] =
+                core::transformed(frame.meshes[index].model, frame.meshes[index].bounds);
+        }
+        camera_bounds = core::frustum_from(frame.view->view_projection);
+    }
 
     if (shadows) {
         // Each cascade into its own part of the map, kept there by a scissor.
@@ -915,7 +949,8 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
                 .height = cell_size});
             cascade_uniforms.light_view_projection = uniforms->cascades[cascade];
             commands.set_uniforms(std::as_bytes(std::span(&cascade_uniforms, 1)));
-            draw_meshes(commands, frame.meshes, true, stats);
+            draw_meshes(commands, frame.meshes, true, culling ? &cascade_bounds[cascade] : nullptr,
+                        stats);
         }
         commands.end_render_pass();
     }
@@ -933,7 +968,7 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
         if (shadows) {
             commands.bind_texture(rhi::k_shadow_slot, m_shadow_map.get());
         }
-        draw_meshes(commands, frame.meshes, false, stats);
+        draw_meshes(commands, frame.meshes, false, camera_bounds ? &*camera_bounds : nullptr, stats);
     };
     if (hdr && m_hdr_color.exists()) {
         // The scene in HDR, then tone-mapped onto the window, with the lines and interface over it.
@@ -971,6 +1006,8 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
     commands.end_render_pass();
     DREAM_PROFILE_VALUE("Draw calls", stats.draws);
     DREAM_PROFILE_VALUE("Shadow casters", stats.shadow_casters);
+    DREAM_PROFILE_VALUE("Culled parts", stats.culled);
+    DREAM_PROFILE_VALUE("Culled shadow casters", stats.shadow_culled);
     DREAM_PROFILE_VALUE("Debug lines", stats.lines);
     DREAM_PROFILE_VALUE("UI draw commands", stats.ui_commands);
     return stats;
