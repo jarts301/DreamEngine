@@ -80,3 +80,8 @@ give edges a gradient about three texels wide. Outside the map, everything is li
   at the cost of a second set of samples there.
 - Only the first directional light casts shadows. Point and spot lights, and their shadows, come
   with those lights.
+- On Adreno GPUs (seen on a Galaxy A52s's Adreno 642L, through Vulkan), the driver misread the
+  `float4x4 cascades[4]` array in the frame's uniform block. Every point then looked lit, so there
+  were no shadows, while single matrices read correctly. The shaders now declare the same bytes as
+  16 `float4` columns and multiply by them directly. Arrays of matrices in uniform blocks are best
+  avoided in this engine's shaders.

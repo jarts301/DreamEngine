@@ -42,6 +42,8 @@ struct FrameUniforms {
     Vec4 direction_to_light;
     Vec4 light_color_and_ambient;
     Mat4 light_view_projection;
+    // The shaders read these as 16 columns, not as an array of matrices, which Adreno drivers
+    // misread from uniform blocks. The bytes are the same.
     std::array<Mat4, 4> cascades;
     Vec4 cascade_far;
     Vec4 cascade_normal_offset;

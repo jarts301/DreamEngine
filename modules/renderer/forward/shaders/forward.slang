@@ -13,8 +13,9 @@ struct FrameUniforms {
     float4 light_color_and_ambient;
     // The cascade the shadow pass draws, which this shader doesn't read (ADR 0029).
     float4x4 light_view_projection;
-    // From world space to each cascade's part of the shadow map, in its clip space.
-    float4x4 cascades[4];
+    // From world space to each cascade's part of the shadow map, in its clip space: four columns
+    // per cascade. Not an array of matrices, which Adreno drivers read wrongly from uniform blocks.
+    float4 cascade_columns[16];
     // How far from the camera each cascade reaches, along its view.
     float4 cascade_far;
     // How far to move a surface along its normal before looking it up, per cascade, in world units.
@@ -92,7 +93,10 @@ float sunlight(float3 world_position, float3 normal) {
 
     // Moved a little along the normal, which keeps lit surfaces from shadowing themselves.
     const float3 moved = world_position + normal * frame.cascade_normal_offset[cascade];
-    const float4 clip = mul(frame.cascades[cascade], float4(moved, 1.0));
+    const int column = cascade * 4;
+    const float4 clip = frame.cascade_columns[column] * moved.x +
+                        frame.cascade_columns[column + 1] * moved.y +
+                        frame.cascade_columns[column + 2] * moved.z + frame.cascade_columns[column + 3];
     // Clip space has +Y up and depth from 0 to 1, and a texture's first row is its top.
     const float3 position = clip.xyz / clip.w;
     const float2 uv = float2(position.x * 0.5 + 0.5, 0.5 - position.y * 0.5);
