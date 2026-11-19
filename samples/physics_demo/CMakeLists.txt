@@ -2,7 +2,6 @@ dream_add_game(dream_physics_demo
     SOURCES src/physics_demo.cpp
     CONFIG dream.toml
     ASSETS assets ../assets
-    RENDERER
     APPLICATION_ID org.dreamengine.physics
     DISPLAY_NAME "Dream Physics"
 )
@@ -10,35 +9,35 @@ dream_add_game(dream_physics_demo
 if(DREAM_BUILD_TESTS)
     # Jolt and Box2D with no display or GPU: the scripted run checks what the simulation did.
     dream_add_game(dream_physics_demo_check SOURCES src/physics_demo.cpp CONFIG tests/physics.toml
-        ASSETS assets ../assets RENDERER)
+        ASSETS assets ../assets)
 
     # The same script with the null backends, which have no collisions: everything still loads,
     # steps and draws.
     dream_add_game(dream_physics_demo_null SOURCES src/physics_demo.cpp CONFIG tests/null.toml
-        ASSETS assets ../assets RENDERER)
+        ASSETS assets ../assets)
 
     # The scripted run on the real GPU, with validation. Not a CTest, because build servers have no
     # GPU.
     dream_add_game(dream_physics_demo_vulkan_check SOURCES src/physics_demo.cpp
-        CONFIG tests/vulkan.toml ASSETS assets ../assets RENDERER)
+        CONFIG tests/vulkan.toml ASSETS assets ../assets)
 
     # The same run on DirectX, which only Windows can build.
     if(WIN32)
         dream_add_game(dream_physics_demo_directx_check SOURCES src/physics_demo.cpp
-            CONFIG tests/directx.toml ASSETS assets ../assets RENDERER)
+            CONFIG tests/directx.toml ASSETS assets ../assets)
         dream_add_game(dream_physics_demo_directx12_check SOURCES src/physics_demo.cpp
-            CONFIG tests/directx12.toml ASSETS assets ../assets RENDERER)
+            CONFIG tests/directx12.toml ASSETS assets ../assets)
         dream_add_game(dream_physics_demo_opengl_check SOURCES src/physics_demo.cpp
-            CONFIG tests/opengl.toml ASSETS assets ../assets RENDERER)
+            CONFIG tests/opengl.toml ASSETS assets ../assets)
         dream_add_game(dream_physics_demo_opengles_check SOURCES src/physics_demo.cpp
-            CONFIG tests/opengles.toml ASSETS assets ../assets RENDERER)
+            CONFIG tests/opengles.toml ASSETS assets ../assets)
     endif()
 
     # The check run with the other physics backends. Only its configuration differs, and the
     # outcome must not.
     if(WIN32)
         dream_add_game(dream_physics_demo_alternatives_check SOURCES src/physics_demo.cpp
-            CONFIG tests/alternatives.toml ASSETS assets ../assets RENDERER)
+            CONFIG tests/alternatives.toml ASSETS assets ../assets)
     endif()
 
     if(NOT CMAKE_CROSSCOMPILING)

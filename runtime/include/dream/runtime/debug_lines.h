@@ -2,6 +2,7 @@
 
 #include "dream/core/math/quaternion.h"
 #include "dream/core/math/vector.h"
+#include "dream/renderer/scene_renderer.h"
 
 #include <cstddef>
 #include <span>
@@ -9,11 +10,8 @@
 
 namespace dream::runtime {
 
-// One end of a debug line. Matches the vertex layout of runtime/shaders/debug_lines.slang.
-struct DebugVertex {
-    core::Vec3 position;
-    core::Vec4 color;
-};
+// One end of a debug line, as the renderer module draws it.
+using DebugVertex = renderer::LineVertex;
 
 // Lines collected during a frame for Renderer to draw over the scene, such as physics shapes. They
 // are drawn without depth testing, so nothing hides them, and cleared after each frame.

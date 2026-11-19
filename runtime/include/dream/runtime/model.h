@@ -2,6 +2,7 @@
 
 #include "dream/core/math/vector.h"
 #include "dream/core/result.h"
+#include "dream/renderer/scene_renderer.h"
 #include "dream/rhi/rhi.h"
 
 #include <array>
@@ -45,11 +46,8 @@ using GpuTexture = GpuResource<rhi::TextureHandle, &rhi::Device::destroy_texture
 using GpuShader = GpuResource<rhi::ShaderHandle, &rhi::Device::destroy_shader>;
 using GpuPipeline = GpuResource<rhi::PipelineHandle, &rhi::Device::destroy_pipeline>;
 
-struct ModelVertex {
-    core::Vec3 position;
-    core::Vec3 normal;
-    core::Vec2 uv;
-};
+// The vertices of every model, as the renderer module draws them.
+using ModelVertex = renderer::MeshVertex;
 
 // Four bytes per pixel, row by row from the top. A cooked image instead keeps its KTX2 file in
 // `ktx2`, transcoded for the device when the model goes to the GPU, and the rest is left empty.

@@ -2,7 +2,7 @@ struct Constants {
     float4x4 model_view_projection;
 };
 
-// Push constants are register b1 on DirectX; see runtime/shaders/forward.slang.
+// Push constants are register b1 on DirectX; see modules/renderer/forward/shaders/forward.slang.
 [[vk::push_constant]]
 ConstantBuffer<Constants> constants : register(b1);
 

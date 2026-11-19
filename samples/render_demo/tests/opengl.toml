@@ -27,3 +27,4 @@ quit = false
 [modules.windows]
 platform = ["sdl3"]
 rhi = ["opengl"]
+renderer = ["forward"]

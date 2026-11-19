@@ -68,7 +68,11 @@ depth targets for shadow maps, three texture slots with a shadow comparison samp
 pipelines. `samples/render_targets` uses them all, and its picture matches one reference on every
 backend. See [ADR 0027](docs/adr/0027-render-targets.md).
 
-The renderer draws its scene in HDR, into R11G11B10 float where the device takes it and RGBA16 float
+The renderer is a module: a game lists `renderer = ["forward", "null"]` beside its graphics
+backends, and the `forward` module's shaders are compiled for it. `null` only clears the window. See
+[ADR 0030](docs/adr/0030-renderer-module.md).
+
+The forward renderer draws its scene in HDR, into R11G11B10 float where the device takes it and RGBA16 float
 where only that works, and tone-maps it onto the window with Khronos PBR Neutral. Debug lines and
 the interface are drawn after, at their exact colors. A `[renderer]` table sets it:
 
@@ -181,6 +185,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 | Interface | Backends | Windows | Android | Notes |
 |---|---|---|---|---|
 | `rhi` | `vulkan`, `directx12`, `directx`, `opengl`, `opengles`, `null` | all | `vulkan`, `opengles`, `null` | `directx` is Direct3D 11. A game's shaders are compiled for whichever its list names. |
+| `renderer` | `forward`, `null` | all | all | `forward` brings its shaders; `null` only clears the window. |
 | `physics3d` | `jolt`, `impulse`, `null` | all | all | `impulse` is the engine's own library. |
 | `physics2d` | `box2d`, `chipmunk`, `null` | all | all | `chipmunk` has no continuous collision. |
 | `audio` | `miniaudio`, `portaudio`, `null` | all | `miniaudio`, `null` | PortAudio has no Android output. |

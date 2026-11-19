@@ -1,10 +1,10 @@
 #pragma once
 
-#include "dream/core/config.h"
 #include "dream/core/math/matrix.h"
 #include "dream/core/math/vector.h"
 #include "dream/core/result.h"
 #include "dream/platform/event.h"
+#include "dream/renderer/scene_renderer.h"
 #include "dream/rhi/rhi.h"
 #include "dream/runtime/asset_manager.h"
 #include "dream/runtime/debug_lines.h"
@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace dream::runtime {
 
@@ -77,14 +78,23 @@ struct CameraRay {
 [[nodiscard]] std::optional<CameraRay> camera_ray(const World& world, platform::SurfaceSize size,
                                                   core::Vec2 pixel);
 
-// Draws a World: opaque models, one directional light and a camera. Games call render from
-// Game::on_render, between nothing else: it starts and ends the render pass itself.
+// The renderer module's shaders, loaded as one asset, so hot reloading reloads them all when one
+// of their files changes.
+struct RendererShaders {};
+
+// Draws a World with the project's renderer module, chosen by its `renderer` list in dream.toml,
+// such as `renderer = ["forward", "null"]` (ADR 0030). This class is the runtime's side: it gathers
+// the camera, the light, the models, the debug lines and the interface layers from the world each
+// frame, and the module draws them. Games call render from Game::on_render, between nothing else:
+// the module starts and ends its render passes itself. The module's own settings, such as HDR and
+// shadows, are in its documentation and the [renderer] table.
 //
 // initialize also lets scene files use the components "camera", "mesh" and "directional_light":
 //
 //     [entities.lamp.mesh]
 //     model = "assets:/models/lamp.glb"
 //     tint = [1.0, 0.8, 0.6]            # Optional.
+//     casts_shadows = true              # Optional.
 //
 //     [entities.main.camera]
 //     vertical_fov = 60.0               # Optional, in degrees.
@@ -96,77 +106,6 @@ struct CameraRay {
 //     intensity = 1.3
 //     ambient = 0.3
 //     casts_shadows = true
-//
-// A mesh takes `casts_shadows = false` too, for things that shouldn't shadow others.
-//
-// The game needs the RENDERER option on dream_add_game, for the shaders.
-
-// How the renderer turns its HDR scene into the window's colors (ADR 0028).
-enum class ToneMapping : std::uint8_t {
-    // Khronos PBR Neutral: colors as the materials have them up to about 0.8, and brighter ones
-    // rolled off toward white.
-    PbrNeutral,
-    // Only exposure, then clamped to 1, as without HDR.
-    Clamp,
-};
-
-// The [renderer] table of a game's dream.toml:
-//
-//     [renderer]
-//     hdr = "auto"              # "auto", "r11g11b10", "rgba16f" or "off".
-//     tone_mapping = "neutral"  # "neutral" or "none".
-//     exposure = 1.0            # A factor on the scene's colors, before tone mapping.
-//
-//     [renderer.shadows]
-//     mode = "auto"             # "auto", "on" or "off".
-//     resolution = 0            # Each cascade's width and height; 0 picks one per device.
-//     cascades = 0              # From 1 to 4; 0 picks one per device.
-//     distance = 40.0           # How far from the camera shadows reach, in world units.
-//
-// "auto" picks R11G11B10 float where the device can draw into it and filter it, since it takes
-// half the memory bandwidth of RGBA16 float, which matters most on phones, and RGBA16 float where
-// only that works. "off", or a device with neither, draws straight to the window, with no tone
-// mapping.
-//
-// Shadows, with "auto", are four cascades of 2048x2048 on PCs, and three of 1024x1024 on phones that
-// can draw depth targets and have at least 4 GB of memory; phones with less, the weakest GPUs,
-// have none, as has any device that can't draw depth targets. "on" turns them on wherever depth
-// targets work.
-struct RendererSettings {
-    std::optional<rhi::TextureFormat> hdr_format;
-    ToneMapping tone_mapping = ToneMapping::PbrNeutral;
-    float exposure = 1.0f;
-    // Each cascade's width and height, or 0 for no shadows.
-    std::uint32_t shadow_resolution = 0;
-    std::uint32_t shadow_cascades = 0;
-    float shadow_distance = 40.0f;
-
-    [[nodiscard]] static core::Result<RendererSettings> from_config(const core::Config& config,
-                                                                    const rhi::Device& device);
-};
-
-// The renderer's shaders and the pipelines made from them, loaded as one asset.
-struct RendererPipelines {
-    GpuShader vertex_shader;
-    GpuShader fragment_shader;
-    // Draws into the HDR targets, or into the window without HDR.
-    GpuPipeline pipeline;
-    GpuShader line_vertex_shader;
-    GpuShader line_fragment_shader;
-    GpuPipeline line_pipeline;
-    GpuShader ui_vertex_shader;
-    GpuShader ui_fragment_shader;
-    GpuPipeline ui_pipeline;
-    GpuPipeline ui_premultiplied_pipeline;
-    // Only with shadows.
-    std::optional<GpuShader> shadow_vertex_shader;
-    std::optional<GpuPipeline> shadow_pipeline;
-    // Only with HDR.
-    std::optional<GpuShader> tone_map_vertex_shader;
-    std::optional<GpuShader> tone_map_fragment_shader;
-    std::optional<GpuPipeline> tone_map_pipeline;
-};
-
 class Renderer {
 public:
     Renderer();
@@ -175,14 +114,17 @@ public:
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
 
-    // Needs a graphics device, and must be called before any scene that uses these components is
-    // loaded. Game::on_start is the place for it.
+    // Creates the configured renderer module. Needs a graphics device, and must be called before
+    // any scene that uses these components is loaded. Game::on_start is the place for it.
     [[nodiscard]] core::Result<void> initialize(App& app);
 
-    // Draws the world's first camera and light, into the HDR targets, then tone-maps them onto the
-    // window, and draws the debug lines, which it clears, and the interface layers over them.
-    // Without a camera, this only clears the screen. The HDR targets follow the surface's size, and
-    // are made again here when it changes.
+    // The same with a given module, for tests or a game that makes its own.
+    [[nodiscard]] core::Result<void> initialize(App& app,
+                                                std::unique_ptr<renderer::SceneRenderer> backend);
+
+    // Draws the world's first camera and light, its models, then the debug lines, which it clears,
+    // and the interface layers over them. Without a camera, this draws only the interface layers
+    // over the clear color.
     void render(const World& world, rhi::CommandList& commands, platform::SurfaceSize size,
                 rhi::ClearColor clear_color = rhi::ClearColor{0.45f, 0.60f, 0.80f, 1.0f});
 
@@ -193,12 +135,18 @@ public:
 
     // How many parts of models were drawn in the last call to render.
     [[nodiscard]] std::uint32_t last_draw_count() const noexcept {
-        return m_last_draw_count;
+        return m_last_stats.draws;
     }
 
     // How many debug lines the last call to render drew.
     [[nodiscard]] std::uint32_t last_line_count() const noexcept {
-        return m_last_line_count;
+        return m_last_stats.lines;
+    }
+
+    // How many parts of models the last call to render drew into shadow maps, once for each
+    // cascade.
+    [[nodiscard]] std::uint32_t last_shadow_caster_count() const noexcept {
+        return m_last_stats.shadow_casters;
     }
 
     // Draws `list` over the scene in every frame from now on, until replaced or cleared. The list
@@ -213,46 +161,29 @@ public:
     // on_render; DebugOverlay and UserInterface call it from their updates.
     void release_ui_textures();
 
-    // How many parts of models the last call to render drew into the shadow map, once for each
-    // cascade.
-    [[nodiscard]] std::uint32_t last_shadow_caster_count() const noexcept {
-        return m_last_shadow_caster_count;
-    }
-
     // How many interface draw commands the last call to render drew.
     [[nodiscard]] std::uint32_t last_ui_command_count() const noexcept {
-        return m_last_ui_command_count;
+        return m_last_stats.ui_commands;
     }
 
-    // As read from the configuration and the device, valid after initialize.
-    [[nodiscard]] const RendererSettings& settings() const noexcept {
-        return m_settings;
+    // The module drawing, valid after initialize.
+    [[nodiscard]] renderer::SceneRenderer* backend() const noexcept {
+        return m_backend.get();
     }
 
 private:
     class UiTextures;
 
-    void draw_debug_lines(rhi::CommandList& commands);
-    void draw_ui(rhi::CommandList& commands, platform::SurfaceSize size);
-    void draw_meshes(const World& world, rhi::CommandList& commands, bool shadow_casters);
-    void fit_hdr_targets(platform::SurfaceSize size);
-
-    // Reloaded when the shader files change.
-    AssetRef<RendererPipelines> m_pipelines;
+    std::unique_ptr<renderer::SceneRenderer> m_backend;
+    // After the backend, so the asset that reloads its shaders goes first.
+    AssetRef<RendererShaders> m_shaders;
     std::unique_ptr<UiTextures> m_ui_textures;
-    rhi::Device* m_device = nullptr;
-    RendererSettings m_settings;
-    std::optional<GpuTexture> m_hdr_color;
-    std::optional<GpuTexture> m_hdr_depth;
-    platform::SurfaceSize m_hdr_size;
-    std::optional<GpuTexture> m_shadow_map;
     std::array<ui::DrawList, static_cast<std::size_t>(UiLayer::Count)> m_ui_layers;
     std::array<core::Vec2, static_cast<std::size_t>(UiLayer::Count)> m_ui_offsets{};
     DebugLines m_debug_lines;
-    std::uint32_t m_last_draw_count = 0;
-    std::uint32_t m_last_line_count = 0;
-    std::uint32_t m_last_ui_command_count = 0;
-    std::uint32_t m_last_shadow_caster_count = 0;
+    // Reused every frame, so gathering the scene allocates nothing once it has grown.
+    std::vector<renderer::MeshDraw> m_meshes;
+    renderer::FrameStats m_last_stats;
 };
 
 } // namespace dream::runtime

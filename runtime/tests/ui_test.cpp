@@ -4,11 +4,11 @@
 #include "dream/runtime/renderer.h"
 #include "fake_device.h"
 #include "fake_platform.h"
+#include "fake_renderer.h"
 
 #include <doctest/doctest.h>
 
 #include <algorithm>
-#include <format>
 #include <memory>
 #include <ostream> // Needed for doctest to print std::string.
 #include <string>
@@ -20,36 +20,34 @@ using namespace dream::runtime::tests;
 
 namespace {
 
-using Calls = std::vector<std::string>;
-
 const core::Config k_config = core::Config::parse("[app]\nmax_fps = 0").value();
 
 // A renderer inside an App that is never run, so frames are recorded by hand.
 struct UiFixture {
     FakeState platform;
     FakeDeviceState device;
+    FakeRendererState drawn;
     App app;
     Renderer renderer;
 
     UiFixture()
         : app(std::make_unique<FakePlatform>(platform), k_config,
               std::make_unique<FakeDevice>(device)) {
-        for (const char* name : {"forward", "debug_lines", "ui"}) {
-            platform.assets[std::format("shaders/{}.vert.fake", name)] = std::vector<std::byte>(4);
-            platform.assets[std::format("shaders/{}.frag.fake", name)] = std::vector<std::byte>(4);
-        }
-        REQUIRE(renderer.initialize(app).has_value());
+        platform.assets["shaders/fake_renderer.txt"] = std::vector<std::byte>(4);
+        REQUIRE(renderer.initialize(app, std::make_unique<FakeRenderer>(drawn)).has_value());
     }
 
-    // Records one frame of an empty world and returns the device calls it made.
-    Calls frame() {
-        device.calls.clear();
+    // Records one frame of an empty world and returns the game's interface layer, as the
+    // renderer module was given it.
+    FakeUiLayer frame() {
         rhi::CommandList* const commands = app.device()->begin_frame().value();
         REQUIRE(commands != nullptr);
         const World world;
         renderer.render(world, *commands, platform::SurfaceSize{800, 600});
         REQUIRE(app.device()->end_frame().has_value());
-        return device.calls;
+        REQUIRE_FALSE(drawn.frames.empty());
+        REQUIRE(drawn.frames.back().ui_layers.size() == static_cast<std::size_t>(UiLayer::Count));
+        return drawn.frames.back().ui_layers[static_cast<std::size_t>(UiLayer::Game)];
     }
 };
 
@@ -68,10 +66,6 @@ ui::DrawList quads(std::vector<ui::DrawCommand> commands, bool premultiplied = f
         list.commands.push_back(command);
     }
     return list;
-}
-
-bool has(const Calls& calls, std::string_view call) {
-    return std::find(calls.begin(), calls.end(), call) != calls.end();
 }
 
 class FakeDebugUi final : public debug_ui::DebugUi {
@@ -200,22 +194,21 @@ TEST_CASE_FIXTURE(UiFixture, "Renderer draws interface layers with their texture
                           quads({ui::DrawCommand{.texture = texture,
                                                  .clip = ui::ClipRect{10, 20, 30, 40}},
                                  ui::DrawCommand{}}));
-    const Calls calls = frame();
+    const FakeUiLayer layer = frame();
     CHECK(renderer.last_ui_command_count() == 2);
-    CHECK(has(calls, std::format("geometry {} 12", 8 * sizeof(ui::Vertex))));
-    CHECK(has(calls, "scissor 10 20 30 40"));
-    CHECK(has(calls, "draw 0+6"));
-    CHECK(has(calls, "draw 6+6"));
-    const auto last_scissor = std::find_if(calls.rbegin(), calls.rend(), [](const std::string& call) {
-        return call.starts_with("scissor");
-    });
-    REQUIRE(last_scissor != calls.rend());
-    CHECK(*last_scissor == "scissor off");
+    REQUIRE(layer.commands.size() == 2);
+    REQUIRE(layer.commands[0].clip.has_value());
+    CHECK(layer.commands[0].clip->x == 10);
+    CHECK(layer.commands[0].clip->height == 40);
+    CHECK(layer.commands[1].first_index == 6);
+    // The id becomes the texture the host made for it, and none for no texture.
+    CHECK(layer.textures[0].is_valid());
+    CHECK_FALSE(layer.textures[1].is_valid());
 
     // Layers stay until replaced or cleared.
-    CHECK(frame() == calls);
+    CHECK(frame().commands.size() == 2);
     renderer.clear_ui_layer(UiLayer::Game);
-    frame();
+    CHECK(frame().commands.empty());
     CHECK(renderer.last_ui_command_count() == 0);
 }
 
@@ -224,12 +217,13 @@ TEST_CASE_FIXTURE(UiFixture, "Renderer releases interface textures only when ask
     const ui::TextureId texture =
         renderer.ui_host().create_texture(1, 1, pixels, ui::TextureKind::Color).value();
     renderer.set_ui_layer(UiLayer::Game, quads({ui::DrawCommand{.texture = texture}}));
-    const Calls before = frame();
+    const rhi::TextureHandle before = frame().textures.at(0);
+    CHECK(before.is_valid());
 
     renderer.ui_host().release_texture(texture);
-    CHECK(frame() == before);
+    CHECK(frame().textures.at(0) == before);
     renderer.release_ui_textures();
-    CHECK(has(frame(), "bind_texture 0"));
+    CHECK_FALSE(frame().textures.at(0).is_valid());
 }
 
 TEST_CASE_FIXTURE(UiFixture, "Renderer reports interface files and images that can't be read") {
@@ -318,6 +312,9 @@ TEST_CASE_FIXTURE(UiFixture, "Interfaces are laid out inside the safe area") {
     CHECK(game_ui.pointer.x == doctest::Approx(10.0f));
     CHECK(game_ui.pointer.y == doctest::Approx(10.0f));
 
-    // The scissor moves with the layer.
-    CHECK(has(frame(), "scissor 20 100 50 60"));
+    // The layer moves to the safe area, with its clips.
+    const FakeUiLayer layer = frame();
+    CHECK(layer.offset.x == doctest::Approx(20.0f));
+    CHECK(layer.offset.y == doctest::Approx(100.0f));
+    CHECK(layer.premultiplied);
 }

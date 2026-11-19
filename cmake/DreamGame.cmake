@@ -1,10 +1,9 @@
 # Builds a game for the current platform. See docs/adr/0007-platform-and-game-loop.md.
 #
 # Usage: dream_add_game(<name> SOURCES <files...> CONFIG <toml-file> [ASSETS <directories...>]
-#                       [SHADERS <slang-files...>] [RENDERER]
-#                       [APPLICATION_ID <id> DISPLAY_NAME <text>])
+#                       [SHADERS <slang-files...>] [APPLICATION_ID <id> DISPLAY_NAME <text>])
 #
-# RENDERER adds the shaders that runtime::Renderer needs.
+# The shaders of the modules the game links, such as its renderer's, are compiled with its own.
 #
 # Each shader file must define vertex_main and fragment_main. They become the game assets
 # assets:/shaders/<file>.vert and .frag, plus the suffix given by rhi::Device::shader_file_suffix.
@@ -14,17 +13,8 @@
 # On PC this creates an executable, with the assets copied next to it. On Android it creates
 # libmain.so and, if APPLICATION_ID is given and ANDROID_HOME is set, a <name>_apk target.
 function(dream_add_game name)
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "RENDERER" "CONFIG;APPLICATION_ID;DISPLAY_NAME"
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG;APPLICATION_ID;DISPLAY_NAME"
         "SOURCES;SHADERS;ASSETS")
-
-    if(ARG_RENDERER)
-        list(APPEND ARG_SHADERS
-            "${DreamEngine_SOURCE_DIR}/runtime/shaders/forward.slang"
-            "${DreamEngine_SOURCE_DIR}/runtime/shaders/debug_lines.slang"
-            "${DreamEngine_SOURCE_DIR}/runtime/shaders/shadow.slang"
-            "${DreamEngine_SOURCE_DIR}/runtime/shaders/tonemap.slang"
-            "${DreamEngine_SOURCE_DIR}/runtime/shaders/ui.slang")
-    endif()
 
     if(ANDROID)
         set(native_dir "${CMAKE_CURRENT_BINARY_DIR}/${name}_native")
@@ -48,6 +38,12 @@ function(dream_add_game name)
     # A game that lists a profiler counts its heap allocations, which costs a little on every one,
     # so games that don't list one are left alone. See docs/adr/0016-profiling-resources.md.
     get_target_property(module_targets ${name} DREAM_MODULE_TARGETS)
+    foreach(module_target IN LISTS module_targets)
+        get_target_property(module_shaders ${module_target} DREAM_MODULE_SHADERS)
+        if(module_shaders)
+            list(APPEND ARG_SHADERS ${module_shaders})
+        endif()
+    endforeach()
     list(FILTER module_targets INCLUDE REGEX "^dream_module_profiler_")
     if(module_targets)
         target_sources(${name} PRIVATE "${DreamEngine_SOURCE_DIR}/runtime/entry/heap_counting.cpp")

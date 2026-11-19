@@ -47,6 +47,16 @@ through SPIR-V and SPIRV-Cross instead of straight from Slang
 ([ADR 0026](../docs/adr/0026-opengl.md)). See [ADR 0013](../docs/adr/0013-directx-and-shader-formats.md) for the
 shader bindings every backend shares.
 
+A module that draws brings its own Slang shaders with `SHADERS`. Every game that links the module
+gets them compiled with its own, for each of its graphics backends:
+
+```cmake
+dream_add_module(renderer forward SOURCES src/forward_renderer.cpp
+    SHADERS shaders/forward.slang shaders/shadow.slang shaders/tonemap.slang)
+```
+
+The `renderer` interface works this way ([ADR 0030](../docs/adr/0030-renderer-module.md)).
+
 Third-party code must be under a permissive license: MIT, Apache 2.0, BSD, zlib or public domain
 ([ADR 0022](../docs/adr/0022-licenses-and-frozen-libraries.md)). A backend can also build on one
 of the engine's own [libraries](../libraries/README.md), linked as `dream::library_<name>`, and

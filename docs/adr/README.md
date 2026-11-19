@@ -34,6 +34,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0027](0027-render-targets.md) | Render targets, three texture slots with a shadow comparison, and depth-only pipelines |
 | [0028](0028-hdr-and-tone-mapping.md) | The renderer's HDR scene, its format per device, and Khronos PBR Neutral tone mapping |
 | [0029](0029-directional-shadows.md) | Shadows from the directional light, on by default per device |
+| [0030](0030-renderer-module.md) | The renderer is a module, chosen in `dream.toml` |
 
 ## Template
 

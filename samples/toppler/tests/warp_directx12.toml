@@ -34,6 +34,7 @@ quit = true
 [modules.windows]
 platform = ["sdl3"]
 rhi = ["directx12"]
+renderer = ["forward"]
 physics3d = ["jolt"]
 audio = ["miniaudio"]
 ui = ["rmlui"]

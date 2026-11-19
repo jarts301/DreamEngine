@@ -23,7 +23,8 @@ dream_add_game(my_game
 [samples/hello_game](../samples/hello_game/src/hello_game.cpp) is a complete example,
 [samples/scene_demo](../samples/scene_demo/src/scene_demo.cpp) adds scenes, assets and events, and
 [samples/render_demo](../samples/render_demo/src/render_demo.cpp) draws a scene with the renderer.
-For that, add `RENDERER` to `dream_add_game`. See [ADR 0010](../docs/adr/0010-renderer-v1.md).
+For that, list a renderer module, such as `renderer = ["forward"]`, under `[modules.<platform>]`.
+See [ADR 0030](../docs/adr/0030-renderer-module.md).
 [samples/physics_demo](../samples/physics_demo/src/physics_demo.cpp) adds 3D and 2D physics with
 `runtime::Physics3D` and `runtime::Physics2D`, which need `physics3d` or `physics2d` listed under
 `[modules.<platform>]`.

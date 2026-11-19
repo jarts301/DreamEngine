@@ -41,7 +41,8 @@ waits for the GPU, which is fine at load time.
 
 ### Shaders
 
-The `RENDERER` option on `dream_add_game` compiles `runtime/shaders/forward.slang` into that game's
+(Superseded by [ADR 0030](0030-renderer-module.md): the renderer is now the `forward` module, which
+brings its own shaders.) The `RENDERER` option on `dream_add_game` compiled `runtime/shaders/forward.slang` into that game's
 assets, so games that don't use the renderer carry nothing extra.
 
 ## Consequences

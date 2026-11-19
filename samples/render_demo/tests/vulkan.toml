@@ -26,11 +26,14 @@ quit = false
 [modules.windows]
 platform = ["sdl3"]
 rhi = ["vulkan"]
+renderer = ["forward"]
 
 [modules.android]
 platform = ["sdl3"]
 rhi = ["vulkan"]
+renderer = ["forward"]
 
 [modules.linux]
 platform = ["sdl3"]
 rhi = ["vulkan"]
+renderer = ["forward"]

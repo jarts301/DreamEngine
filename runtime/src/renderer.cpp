@@ -2,7 +2,6 @@
 
 #include "dream/core/assert.h"
 #include "dream/core/log.h"
-#include "dream/core/process_stats.h"
 #include "dream/core/profile.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/texture.h"
@@ -11,7 +10,6 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <cstring>
 #include <format>
 #include <span>
 #include <string>
@@ -26,107 +24,12 @@ using core::Mat4;
 using core::Vec3;
 using core::Vec4;
 
-// These two match the blocks of the same names in runtime/shaders/forward.slang.
-struct FrameUniforms {
-    Mat4 view_projection;
-    Vec4 camera_position;
-    Vec4 direction_to_light;
-    Vec4 light_color_and_ambient;
-    Mat4 light_view_projection;
-    std::array<Mat4, 4> cascades;
-    Vec4 cascade_far;
-    Vec4 cascade_normal_offset;
-    Vec4 shadow_settings;
-    Vec4 camera_forward;
-};
-
-struct DrawConstants {
-    Mat4 model;
-    Vec4 normal_x;
-    Vec4 normal_y;
-    Vec4 normal_z;
-    Vec4 base_color;
-};
-
-// Matches ToneMapConstants in runtime/shaders/tonemap.slang.
-struct ToneMapConstants {
-    Vec4 settings;
-};
-
-// Covers the window, with texture coordinates from the top left, for the tone-mapping pass.
-struct ScreenVertex {
-    float position[2];
-    float uv[2];
-};
-
-constexpr std::array<ScreenVertex, 3> k_screen_triangle{{
-    {{-1.0f, -1.0f}, {0.0f, 1.0f}},
-    {{3.0f, -1.0f}, {2.0f, 1.0f}},
-    {{-1.0f, 3.0f}, {0.0f, -1.0f}},
-}};
-
-// The scene's depth, beside the HDR color target.
-constexpr rhi::TextureFormat k_hdr_depth_format = rhi::TextureFormat::Depth32Float;
-
-core::Error setting_error(std::string_view message) {
-    return core::Error{core::ErrorCode::InvalidArgument, std::string(message)};
-}
-
-// Matches UiConstants in runtime/shaders/ui.slang.
-struct UiConstants {
-    core::Vec2 scale;
-    core::Vec2 offset;
-    float premultiplied = 0.0f;
-};
-
-static_assert(sizeof(FrameUniforms) <= rhi::k_max_uniform_size);
-// The layout of the block in runtime/shaders/forward.slang and shadow.slang.
-static_assert(sizeof(FrameUniforms) == 496);
-
-constexpr std::uint32_t k_max_cascades = 4;
-
-// Where cascade `index` of `count` lies in the shadow atlas, in cells: two across, then two down.
-struct CascadeCell {
-    std::uint32_t column = 0;
-    std::uint32_t row = 0;
-};
-
-CascadeCell cascade_cell(std::uint32_t index) {
-    return CascadeCell{index % 2, index / 2};
-}
-
-std::uint32_t atlas_columns(std::uint32_t cascades) {
-    return cascades > 1 ? 2 : 1;
-}
-
-std::uint32_t atlas_rows(std::uint32_t cascades) {
-    return cascades > 2 ? 2 : 1;
-}
-
-static_assert(sizeof(DrawConstants) <= rhi::k_max_push_constant_size);
-
 Vec4 multiply(Vec4 a, Vec4 b) {
     return Vec4{a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w};
 }
 
 Vec4 extend(Vec3 v, float w) {
     return Vec4{v.x, v.y, v.z, w};
-}
-
-core::Result<GpuShader> load_shader(VirtualFileSystem& files, rhi::Device& device,
-                                    std::string_view name, rhi::ShaderStage stage) {
-    const auto code =
-        files.read(std::format("assets:/shaders/{}{}", name, device.shader_file_suffix()));
-    if (!code.has_value()) {
-        return core::Error{code.error().code,
-                           std::format("{} (does the game use the RENDERER option?)",
-                                       code.error().message)};
-    }
-    const auto shader = device.create_shader(stage, code.value());
-    if (!shader.has_value()) {
-        return shader.error();
-    }
-    return GpuShader(device, shader.value());
 }
 
 core::Result<void> read_mesh(ComponentContext& context) {
@@ -320,57 +223,6 @@ void Renderer::release_ui_textures() {
     }
 }
 
-void Renderer::draw_ui(rhi::CommandList& commands, platform::SurfaceSize size) {
-    if (m_pipelines == nullptr || size.width == 0 || size.height == 0) {
-        return;
-    }
-    const float width = static_cast<float>(size.width);
-    const float height = static_cast<float>(size.height);
-
-    for (std::size_t layer = 0; layer < m_ui_layers.size(); ++layer) {
-        const ui::DrawList& list = m_ui_layers[layer];
-        const core::Vec2 offset = m_ui_offsets[layer];
-        if (list.commands.empty() || list.vertices.empty()) {
-            continue;
-        }
-        commands.bind_pipeline(list.premultiplied_alpha
-                                   ? m_pipelines->ui_premultiplied_pipeline.get()
-                                   : m_pipelines->ui_pipeline.get());
-        if (!commands.bind_frame_geometry(std::as_bytes(std::span(list.vertices)),
-                                          list.indices)) {
-            continue;
-        }
-        for (const ui::DrawCommand& command : list.commands) {
-            if (command.index_count == 0 ||
-                command.first_index + command.index_count > list.indices.size()) {
-                continue;
-            }
-            const UiConstants constants{
-                .scale = core::Vec2{2.0f / width, -2.0f / height},
-                .offset = core::Vec2{-1.0f + 2.0f * (command.translation.x + offset.x) / width,
-                                     1.0f - 2.0f * (command.translation.y + offset.y) / height},
-                .premultiplied = list.premultiplied_alpha ? 1.0f : 0.0f,
-            };
-            if (command.clip.has_value()) {
-                const ui::ClipRect& clip = *command.clip;
-                commands.set_scissor(rhi::ScissorRect{
-                    .x = clip.x + static_cast<std::int32_t>(offset.x),
-                    .y = clip.y + static_cast<std::int32_t>(offset.y),
-                    .width = static_cast<std::uint32_t>(std::max(clip.width, 0)),
-                    .height = static_cast<std::uint32_t>(std::max(clip.height, 0)),
-                });
-            } else {
-                commands.set_scissor(std::nullopt);
-            }
-            commands.bind_texture(m_ui_textures->find(command.texture));
-            commands.push_constants(std::as_bytes(std::span(&constants, 1)));
-            commands.draw_indexed_range(command.first_index, command.index_count);
-            ++m_last_ui_command_count;
-        }
-        commands.set_scissor(std::nullopt);
-    }
-}
-
 float fitted_vertical_fov(float vertical_fov_radians, float aspect) noexcept {
     if (aspect >= 1.0f || aspect <= 0.0f) {
         return vertical_fov_radians;
@@ -427,356 +279,53 @@ std::optional<CameraRay> camera_ray(const World& world, platform::SurfaceSize si
     return CameraRay{.origin = camera->eye, .direction = direction};
 }
 
-core::Result<RendererSettings> RendererSettings::from_config(const core::Config& config,
-                                                             const rhi::Device& device) {
-    RendererSettings settings;
-
-    const std::string_view hdr = config.get_string("renderer.hdr").value_or("auto");
-    const auto usable = [&](rhi::TextureFormat format) {
-        return device.supports_render_target(format) &&
-               device.supports_render_target(k_hdr_depth_format);
-    };
-    if (hdr == "auto") {
-        for (const rhi::TextureFormat format :
-             {rhi::TextureFormat::Rg11B10Float, rhi::TextureFormat::Rgba16Float}) {
-            if (usable(format)) {
-                settings.hdr_format = format;
-                break;
-            }
-        }
-    } else if (hdr == "r11g11b10" || hdr == "rgba16f") {
-        const rhi::TextureFormat format = hdr == "r11g11b10" ? rhi::TextureFormat::Rg11B10Float
-                                                             : rhi::TextureFormat::Rgba16Float;
-        if (usable(format)) {
-            settings.hdr_format = format;
-        } else {
-            DREAM_LOG_WARNING("The graphics device can't draw into the format renderer.hdr asks "
-                              "for, so the scene is drawn without HDR");
-        }
-    } else if (hdr != "off") {
-        return setting_error(std::format("Setting 'renderer.hdr' must be \"auto\", "
-                                         "\"r11g11b10\", \"rgba16f\" or \"off\", not \"{}\"",
-                                         hdr));
-    }
-
-    const std::string_view tone_mapping =
-        config.get_string("renderer.tone_mapping").value_or("neutral");
-    if (tone_mapping == "neutral") {
-        settings.tone_mapping = ToneMapping::PbrNeutral;
-    } else if (tone_mapping == "none") {
-        settings.tone_mapping = ToneMapping::Clamp;
-    } else {
-        return setting_error(std::format("Setting 'renderer.tone_mapping' must be \"neutral\" or "
-                                         "\"none\", not \"{}\"",
-                                         tone_mapping));
-    }
-
-    const double exposure = config.get_float("renderer.exposure").value_or(1.0);
-    if (!(exposure > 0.0 && exposure <= 1000.0)) {
-        return setting_error(std::format("Setting 'renderer.exposure' must be above 0 and at most "
-                                         "1000, not {}",
-                                         exposure));
-    }
-    settings.exposure = static_cast<float>(exposure);
-
-    // Shadows, per device unless the game says otherwise.
-#if defined(__ANDROID__)
-    constexpr std::uint32_t k_default_shadow_resolution = 1024;
-    constexpr std::uint32_t k_default_cascades = 3;
-    constexpr bool k_phone = true;
-#else
-    constexpr std::uint32_t k_default_shadow_resolution = 2048;
-    constexpr std::uint32_t k_default_cascades = 4;
-    constexpr bool k_phone = false;
-#endif
-    const std::int64_t cascades = config.get_int("renderer.shadows.cascades").value_or(0);
-    if (cascades < 0 || cascades > k_max_cascades) {
-        return setting_error(std::format("Setting 'renderer.shadows.cascades' must be from 0 to {}, "
-                                         "not {}",
-                                         k_max_cascades, cascades));
-    }
-    settings.shadow_cascades =
-        cascades != 0 ? static_cast<std::uint32_t>(cascades) : k_default_cascades;
-    const bool depth_targets = device.supports_render_target(k_hdr_depth_format);
-    const std::string_view shadows = config.get_string("renderer.shadows.mode").value_or("auto");
-    const std::int64_t resolution = config.get_int("renderer.shadows.resolution").value_or(0);
-    if (resolution != 0 && (resolution < 256 || resolution > 8192)) {
-        return setting_error(std::format("Setting 'renderer.shadows.resolution' must be 0 or from "
-                                         "256 to 8192, not {}",
-                                         resolution));
-    }
-    const auto chosen_resolution = resolution != 0 ? static_cast<std::uint32_t>(resolution)
-                                                   : k_default_shadow_resolution;
-    if (shadows == "auto") {
-        // A phone with less than 4 GB has one of the weakest GPUs, where shadows cost too much.
-        bool capable = depth_targets;
-        if constexpr (k_phone) {
-            if (capable) {
-                const std::optional<core::SystemMemory> memory = core::system_memory();
-                constexpr std::uint64_t k_enough = std::uint64_t{4} * 1000 * 1000 * 1000;
-                capable = memory.has_value() && memory->total_physical_bytes >= k_enough;
-            }
-        }
-        settings.shadow_resolution = capable ? chosen_resolution : 0;
-    } else if (shadows == "on") {
-        if (depth_targets) {
-            settings.shadow_resolution = chosen_resolution;
-        } else {
-            DREAM_LOG_WARNING("The graphics device can't draw depth targets, so there are no "
-                              "shadows");
-        }
-    } else if (shadows != "off") {
-        return setting_error(std::format("Setting 'renderer.shadows.mode' must be \"auto\", "
-                                         "\"on\" or \"off\", not \"{}\"",
-                                         shadows));
-    }
-    const double distance = config.get_float("renderer.shadows.distance").value_or(40.0);
-    if (!(distance >= 1.0 && distance <= 10000.0)) {
-        return setting_error(std::format("Setting 'renderer.shadows.distance' must be from 1 to "
-                                         "10000, not {}",
-                                         distance));
-    }
-    settings.shadow_distance = static_cast<float>(distance);
-    if (settings.shadow_resolution == 0) {
-        settings.shadow_cascades = 0;
-    }
-    return settings;
-}
-
-// The renderer's shaders and pipelines, made from the compiled shader files. The asset manager
-// loads them like any asset, so hot reloading rebuilds them all when one of the files changes.
-static core::Result<RendererPipelines> create_pipelines(VirtualFileSystem& files,
-                                                     rhi::Device& device_ref,
-                                                     const RendererSettings& settings) {
-    rhi::Device* const device = &device_ref;
-    const std::optional<rhi::TextureFormat> hdr = settings.hdr_format;
-
-    core::Result<GpuShader> vertex =
-        load_shader(files, *device, "forward.vert", rhi::ShaderStage::Vertex);
-    if (!vertex.has_value()) {
-        return vertex.error();
-    }
-    core::Result<GpuShader> fragment =
-        load_shader(files, *device, "forward.frag", rhi::ShaderStage::Fragment);
-    if (!fragment.has_value()) {
-        return fragment.error();
-    }
-
-    constexpr std::array k_attributes{
-        rhi::VertexAttribute{0, rhi::VertexFormat::Float3, offsetof(ModelVertex, position)},
-        rhi::VertexAttribute{1, rhi::VertexFormat::Float3, offsetof(ModelVertex, normal)},
-        rhi::VertexAttribute{2, rhi::VertexFormat::Float2, offsetof(ModelVertex, uv)},
-    };
-    const auto pipeline = device->create_pipeline(rhi::PipelineDesc{
-        .vertex_shader = vertex.value().get(),
-        .fragment_shader = fragment.value().get(),
-        .vertex_stride = sizeof(ModelVertex),
-        .attributes = k_attributes,
-        .color_target = hdr,
-        .depth_target = hdr.has_value() ? std::optional(k_hdr_depth_format) : std::nullopt,
-    });
-    if (!pipeline.has_value()) {
-        return pipeline.error();
-    }
-
-    GpuPipeline forward_pipeline(*device, pipeline.value());
-
-    core::Result<GpuShader> line_vertex =
-        load_shader(files, *device, "debug_lines.vert", rhi::ShaderStage::Vertex);
-    if (!line_vertex.has_value()) {
-        return line_vertex.error();
-    }
-    core::Result<GpuShader> line_fragment =
-        load_shader(files, *device, "debug_lines.frag", rhi::ShaderStage::Fragment);
-    if (!line_fragment.has_value()) {
-        return line_fragment.error();
-    }
-    constexpr std::array k_line_attributes{
-        rhi::VertexAttribute{0, rhi::VertexFormat::Float3, offsetof(DebugVertex, position)},
-        rhi::VertexAttribute{1, rhi::VertexFormat::Float4, offsetof(DebugVertex, color)},
-    };
-    const auto line_pipeline = device->create_pipeline(rhi::PipelineDesc{
-        .vertex_shader = line_vertex.value().get(),
-        .fragment_shader = line_fragment.value().get(),
-        .vertex_stride = sizeof(DebugVertex),
-        .attributes = k_line_attributes,
-        .topology = rhi::PrimitiveTopology::Lines,
-        .depth_test = false,
-        .cull = rhi::CullMode::None,
-    });
-    if (!line_pipeline.has_value()) {
-        return line_pipeline.error();
-    }
-    GpuPipeline lines(*device, line_pipeline.value());
-
-    core::Result<GpuShader> ui_vertex =
-        load_shader(files, *device, "ui.vert", rhi::ShaderStage::Vertex);
-    if (!ui_vertex.has_value()) {
-        return ui_vertex.error();
-    }
-    core::Result<GpuShader> ui_fragment =
-        load_shader(files, *device, "ui.frag", rhi::ShaderStage::Fragment);
-    if (!ui_fragment.has_value()) {
-        return ui_fragment.error();
-    }
-    constexpr std::array k_ui_attributes{
-        rhi::VertexAttribute{0, rhi::VertexFormat::Float2, offsetof(ui::Vertex, position)},
-        rhi::VertexAttribute{1, rhi::VertexFormat::Float2, offsetof(ui::Vertex, uv)},
-        rhi::VertexAttribute{2, rhi::VertexFormat::UByte4Norm, offsetof(ui::Vertex, color)},
-    };
-    rhi::PipelineDesc ui_desc{
-        .vertex_shader = ui_vertex.value().get(),
-        .fragment_shader = ui_fragment.value().get(),
-        .vertex_stride = sizeof(ui::Vertex),
-        .attributes = k_ui_attributes,
-        .blend = rhi::BlendMode::Alpha,
-        .depth_test = false,
-        .cull = rhi::CullMode::None,
-    };
-    const auto ui_pipeline = device->create_pipeline(ui_desc);
-    if (!ui_pipeline.has_value()) {
-        return ui_pipeline.error();
-    }
-    GpuPipeline ui(*device, ui_pipeline.value());
-    ui_desc.blend = rhi::BlendMode::PremultipliedAlpha;
-    const auto premultiplied_pipeline = device->create_pipeline(ui_desc);
-    if (!premultiplied_pipeline.has_value()) {
-        return premultiplied_pipeline.error();
-    }
-    GpuPipeline ui_premultiplied(*device, premultiplied_pipeline.value());
-
-    std::optional<GpuShader> shadow_vertex;
-    std::optional<GpuPipeline> shadow;
-    if (settings.shadow_resolution > 0) {
-        core::Result<GpuShader> loaded =
-            load_shader(files, *device, "shadow.vert", rhi::ShaderStage::Vertex);
-        if (!loaded.has_value()) {
-            return loaded.error();
-        }
-        // Depth only. Both faces, since a model's faces needn't make a closed shape, with a bias
-        // that grows with the slope, against surfaces shadowing themselves.
-        const auto shadow_pipeline = device->create_pipeline(rhi::PipelineDesc{
-            .vertex_shader = loaded.value().get(),
-            .vertex_stride = sizeof(ModelVertex),
-            .attributes = std::span(k_attributes).first(1),
-            .cull = rhi::CullMode::None,
-            .depth_bias = 1.0f,
-            .slope_depth_bias = 1.5f,
-            .depth_target = k_hdr_depth_format,
-        });
-        if (!shadow_pipeline.has_value()) {
-            return shadow_pipeline.error();
-        }
-        shadow_vertex.emplace(std::move(loaded).value());
-        shadow.emplace(*device, shadow_pipeline.value());
-    }
-
-    std::optional<GpuShader> tone_map_vertex;
-    std::optional<GpuShader> tone_map_fragment;
-    std::optional<GpuPipeline> tone_map;
-    if (hdr.has_value()) {
-        core::Result<GpuShader> loaded_vertex =
-            load_shader(files, *device, "tonemap.vert", rhi::ShaderStage::Vertex);
-        if (!loaded_vertex.has_value()) {
-            return loaded_vertex.error();
-        }
-        core::Result<GpuShader> loaded_fragment =
-            load_shader(files, *device, "tonemap.frag", rhi::ShaderStage::Fragment);
-        if (!loaded_fragment.has_value()) {
-            return loaded_fragment.error();
-        }
-        constexpr std::array k_screen_attributes{
-            rhi::VertexAttribute{0, rhi::VertexFormat::Float2, offsetof(ScreenVertex, position)},
-            rhi::VertexAttribute{1, rhi::VertexFormat::Float2, offsetof(ScreenVertex, uv)},
-        };
-        const auto tone_map_pipeline = device->create_pipeline(rhi::PipelineDesc{
-            .vertex_shader = loaded_vertex.value().get(),
-            .fragment_shader = loaded_fragment.value().get(),
-            .vertex_stride = sizeof(ScreenVertex),
-            .attributes = k_screen_attributes,
-            .depth_test = false,
-            .cull = rhi::CullMode::None,
-        });
-        if (!tone_map_pipeline.has_value()) {
-            return tone_map_pipeline.error();
-        }
-        tone_map_vertex.emplace(std::move(loaded_vertex).value());
-        tone_map_fragment.emplace(std::move(loaded_fragment).value());
-        tone_map.emplace(*device, tone_map_pipeline.value());
-    }
-    return RendererPipelines{
-        .vertex_shader = std::move(vertex).value(),
-        .fragment_shader = std::move(fragment).value(),
-        .pipeline = std::move(forward_pipeline),
-        .line_vertex_shader = std::move(line_vertex).value(),
-        .line_fragment_shader = std::move(line_fragment).value(),
-        .line_pipeline = std::move(lines),
-        .ui_vertex_shader = std::move(ui_vertex).value(),
-        .ui_fragment_shader = std::move(ui_fragment).value(),
-        .ui_pipeline = std::move(ui),
-        .ui_premultiplied_pipeline = std::move(ui_premultiplied),
-        .shadow_vertex_shader = std::move(shadow_vertex),
-        .shadow_pipeline = std::move(shadow),
-        .tone_map_vertex_shader = std::move(tone_map_vertex),
-        .tone_map_fragment_shader = std::move(tone_map_fragment),
-        .tone_map_pipeline = std::move(tone_map),
-    };
-}
-
 core::Result<void> Renderer::initialize(App& app) {
+    core::Result<std::unique_ptr<renderer::SceneRenderer>> backend =
+        app.create_module<renderer::SceneRenderer>();
+    if (!backend.has_value()) {
+        return backend.error();
+    }
+    return initialize(app, std::move(backend).value());
+}
+
+core::Result<void> Renderer::initialize(App& app,
+                                        std::unique_ptr<renderer::SceneRenderer> backend) {
+    if (backend == nullptr) {
+        return core::Error{core::ErrorCode::InvalidArgument, "The renderer needs a backend"};
+    }
     rhi::Device* const device = app.device();
     if (device == nullptr) {
         return core::Error{core::ErrorCode::InvalidArgument,
                            "The renderer needs a graphics module in the project configuration"};
     }
+    if (const core::Result<void> started = backend->start(*device); !started.has_value()) {
+        return started.error();
+    }
+    DREAM_LOG_INFO("{}", backend->describe());
 
-    core::Result<RendererSettings> settings = RendererSettings::from_config(app.config(), *device);
-    if (!settings.has_value()) {
-        return settings.error();
-    }
-    m_settings = settings.value();
-    m_device = device;
-    if (m_settings.hdr_format.has_value()) {
-        DREAM_LOG_INFO("The scene is drawn in HDR, into {}, with {} tone mapping",
-                       texture_format_name(*m_settings.hdr_format),
-                       m_settings.tone_mapping == ToneMapping::PbrNeutral ? "PBR Neutral" : "no");
-    } else {
-        DREAM_LOG_INFO("The scene is drawn straight to the window, without HDR");
-    }
-    if (m_settings.shadow_resolution > 0) {
-        // The cascades side by side in one map, since shaders read one shadow texture.
-        const core::Result<rhi::TextureHandle> shadow_map = device->create_texture(
-            rhi::TextureDesc{
-                .width = m_settings.shadow_resolution * atlas_columns(m_settings.shadow_cascades),
-                .height = m_settings.shadow_resolution * atlas_rows(m_settings.shadow_cascades),
-                .format = k_hdr_depth_format,
-                .render_target = true},
-            {});
-        if (!shadow_map.has_value()) {
-            DREAM_LOG_WARNING("Could not make the shadow map, so there are no shadows: {}",
-                              shadow_map.error().message);
-            m_settings.shadow_resolution = 0;
-            m_settings.shadow_cascades = 0;
-        } else {
-            m_shadow_map.emplace(*device, shadow_map.value());
-            DREAM_LOG_INFO("Shadows: {0} cascades of {1}x{1}, reaching {2} from the camera",
-                           m_settings.shadow_cascades, m_settings.shadow_resolution,
-                           m_settings.shadow_distance);
-        }
-    } else {
-        DREAM_LOG_INFO("Shadows are off");
-    }
-
-    app.assets().register_loader<RendererPipelines>(
-        [device, chosen = m_settings](AssetLoadContext& context) {
-            return create_pipelines(context.files, *device, chosen);
+    // A reload keeps the same object and only swaps the backend's shaders, which it does between
+    // frames.
+    m_shaders = {};
+    m_backend = std::move(backend);
+    renderer::SceneRenderer* const drawing = m_backend.get();
+    app.assets().register_loader<RendererShaders>(
+        [drawing](AssetLoadContext& context) -> core::Result<RendererShaders> {
+            const core::Result<void> loaded =
+                drawing->load_shaders([&context](std::string_view path) {
+                    return context.files.read(path);
+                });
+            if (!loaded.has_value()) {
+                return loaded.error();
+            }
+            return RendererShaders{};
         });
-    core::Result<AssetRef<RendererPipelines>> pipelines =
-        app.assets().load<RendererPipelines>("assets:/shaders/renderer");
-    if (!pipelines.has_value()) {
-        return pipelines.error();
+    core::Result<AssetRef<RendererShaders>> shaders =
+        app.assets().load<RendererShaders>("assets:/shaders/renderer");
+    if (!shaders.has_value()) {
+        m_backend.reset();
+        return shaders.error();
     }
-    m_pipelines = std::move(pipelines).value();
+    m_shaders = std::move(shaders).value();
     m_ui_textures = std::make_unique<UiTextures>(app, *device);
     DREAM_LOG_INFO("Cooked textures load as {}",
                    texture_format_name(cooked_color_format(*device)));
@@ -815,347 +364,72 @@ core::Result<void> Renderer::initialize(App& app) {
     return {};
 }
 
-void Renderer::draw_debug_lines(rhi::CommandList& commands) {
-    if (m_pipelines == nullptr || m_debug_lines.empty()) {
-        return;
-    }
-    commands.bind_pipeline(m_pipelines->line_pipeline.get());
-
-    // Drawn in pieces that fit the frame's vertex memory, until it is used up.
-    constexpr std::size_t k_vertices_per_draw = 8192;
-    const std::span<const DebugVertex> vertices = m_debug_lines.vertices();
-    for (std::size_t first = 0; first < vertices.size(); first += k_vertices_per_draw) {
-        const std::span<const DebugVertex> piece =
-            vertices.subspan(first, std::min(k_vertices_per_draw, vertices.size() - first));
-        if (!commands.draw_vertices(std::as_bytes(piece), static_cast<std::uint32_t>(piece.size()))) {
-            break;
-        }
-        m_last_line_count += static_cast<std::uint32_t>(piece.size() / 2);
-    }
-}
-
-void Renderer::fit_hdr_targets(platform::SurfaceSize size) {
-    if (size == m_hdr_size && m_hdr_color.has_value()) {
-        return;
-    }
-    // Made between passes, before anything this frame reads the old ones.
-    m_hdr_color.reset();
-    m_hdr_depth.reset();
-    m_hdr_size = {};
-    if (size.width == 0 || size.height == 0 || m_device == nullptr) {
-        return;
-    }
-    const auto make = [&](rhi::TextureFormat format) -> std::optional<GpuTexture> {
-        const core::Result<rhi::TextureHandle> texture = m_device->create_texture(
-            rhi::TextureDesc{.width = size.width, .height = size.height, .format = format,
-                             .render_target = true},
-            {});
-        if (!texture.has_value()) {
-            DREAM_LOG_ERROR("Could not make the renderer's HDR target: {}",
-                            texture.error().message);
-            return std::nullopt;
-        }
-        return GpuTexture(*m_device, texture.value());
-    };
-    if (std::optional<GpuTexture> color = make(*m_settings.hdr_format)) {
-        m_hdr_color.emplace(std::move(*color));
-    }
-    if (std::optional<GpuTexture> depth = make(k_hdr_depth_format)) {
-        m_hdr_depth.emplace(std::move(*depth));
-    }
-    if (!m_hdr_color.has_value() || !m_hdr_depth.has_value()) {
-        m_hdr_color.reset();
-        m_hdr_depth.reset();
-        return;
-    }
-    m_hdr_size = size;
-}
-
-namespace {
-
-// The depth, in clip space, at `distance` in front of the camera, as perspective() maps it.
-float clip_depth(const CameraView& camera, float distance) {
-    const float near = camera.z_near;
-    const float far = camera.z_far;
-    const float clamped = std::clamp(distance, near, far);
-    return far * (clamped - near) / (clamped * (far - near));
-}
-
-// The sun's view for one cascade: an orthographic box around the part of the camera's view from
-// `from` to `to` in front of it, reaching back toward the sun by `reach_back` more, so casters
-// behind the camera still shadow what it sees. The box's size depends only on that part of the
-// view, not on which way the camera turns, and it moves in whole texels of its map, so shadow edges
-// hold still.
-Mat4 fit_shadow_view(const CameraView& camera, Vec3 light_direction, float from, float to,
-                     float reach_back, std::uint32_t resolution) {
-    const std::optional<Mat4> clip_to_world = core::inverse(camera.view_projection);
-    if (!clip_to_world.has_value()) {
-        return Mat4{};
-    }
-    std::array<Vec3, 8> corners{};
-    std::size_t corner = 0;
-    for (const float depth : {clip_depth(camera, from), clip_depth(camera, to)}) {
-        for (const float y : {-1.0f, 1.0f}) {
-            for (const float x : {-1.0f, 1.0f}) {
-                const Vec4 point = *clip_to_world * Vec4{x, y, depth, 1.0f};
-                corners[corner++] = Vec3{point.x, point.y, point.z} * (1.0f / point.w);
-            }
-        }
-    }
-    Vec3 center{};
-    for (const Vec3& point : corners) {
-        center = center + point * (1.0f / 8.0f);
-    }
-    float radius = 0.0f;
-    for (const Vec3& point : corners) {
-        radius = std::max(radius, core::length(point - center));
-    }
-    // Rounded up, so small changes in the view don't change the box's size.
-    radius = std::ceil(radius * 16.0f) / 16.0f;
-
-    const Vec3 direction = core::normalized(light_direction);
-    const Vec3 up = std::abs(direction.y) > 0.99f ? Vec3{0.0f, 0.0f, 1.0f} : Vec3{0.0f, 1.0f, 0.0f};
-    const float back = radius + reach_back;
-    const Mat4 view = core::look_at(center - direction * back, center, up);
-    Mat4 projection = core::orthographic(-radius, radius, -radius, radius, 0.0f, back + radius);
-
-    // Moves the box so the world's origin falls on a texel, by less than one texel.
-    const Vec4 origin = projection * view * Vec4{0.0f, 0.0f, 0.0f, 1.0f};
-    const float half = static_cast<float>(resolution) * 0.5f;
-    const float x = origin.x * half;
-    const float y = origin.y * half;
-    projection.columns[3].x += (std::round(x) - x) / half;
-    projection.columns[3].y += (std::round(y) - y) / half;
-    return projection * view;
-}
-
-} // namespace
-
-// Splits the shadowed part of the view among the cascades, near ones short and far ones long, as
-// a blend of even and logarithmic steps, and fits each one's box into its cell of the atlas.
-namespace {
-
-void set_component(Vec4& vector, std::uint32_t index, float value) {
-    switch (index) {
-    case 0:
-        vector.x = value;
-        break;
-    case 1:
-        vector.y = value;
-        break;
-    case 2:
-        vector.z = value;
-        break;
-    default:
-        vector.w = value;
-        break;
-    }
-}
-
-void fit_cascades(FrameUniforms& frame, const CameraView& camera, Vec3 light_direction,
-                  const RendererSettings& settings) {
-    const std::uint32_t count = settings.shadow_cascades;
-    const std::uint32_t resolution = settings.shadow_resolution;
-    const float near = camera.z_near;
-    const float reach = std::clamp(settings.shadow_distance, near * 2.0f, camera.z_far);
-    constexpr float k_logarithmic = 0.7f;
-
-    const std::uint32_t columns = atlas_columns(count);
-    const std::uint32_t rows = atlas_rows(count);
-    float from = near;
-    for (std::uint32_t cascade = 0; cascade < count; ++cascade) {
-        const float step = static_cast<float>(cascade + 1) / static_cast<float>(count);
-        const float even = near + (reach - near) * step;
-        const float logarithmic = near * std::pow(reach / near, step);
-        const float to = cascade + 1 == count ? reach
-                                              : k_logarithmic * logarithmic +
-                                                    (1.0f - k_logarithmic) * even;
-
-        const Mat4 view = fit_shadow_view(camera, light_direction, from, to, reach, resolution);
-        // The world's size of one texel sets how far a surface moves along its normal.
-        const Vec4 x_axis = view.columns[0];
-        const float world_texel =
-            2.0f / (static_cast<float>(resolution) *
-                    std::max(core::length(Vec3{x_axis.x, x_axis.y, x_axis.z}), 1e-6f));
-
-        // Squeezed into its cell: a quarter of clip space, or a half with two cascades.
-        const CascadeCell cell = cascade_cell(cascade);
-        const float scale_x = 1.0f / static_cast<float>(columns);
-        const float scale_y = 1.0f / static_cast<float>(rows);
-        const float offset_x = -1.0f + static_cast<float>(2 * cell.column + 1) * scale_x;
-        const float offset_y = 1.0f - static_cast<float>(2 * cell.row + 1) * scale_y;
-        frame.cascades[cascade] = core::translation(Vec3{offset_x, offset_y, 0.0f}) *
-                                  core::scaling(Vec3{scale_x, scale_y, 1.0f}) * view;
-        set_component(frame.cascade_far, cascade, to);
-        set_component(frame.cascade_normal_offset, cascade, world_texel * 1.5f);
-        from = to;
-    }
-    frame.shadow_settings =
-        Vec4{static_cast<float>(count), 1.0f / static_cast<float>(resolution * columns), 0.0005f,
-             1.0f / static_cast<float>(resolution * rows)};
-
-    // The camera's forward direction: through the middle of the near plane.
-    if (const std::optional<Mat4> clip_to_world = core::inverse(camera.view_projection)) {
-        const Vec4 middle = *clip_to_world * Vec4{0.0f, 0.0f, 0.0f, 1.0f};
-        const Vec3 point = Vec3{middle.x, middle.y, middle.z} * (1.0f / middle.w);
-        frame.camera_forward = extend(core::normalized(point - camera.eye), 0.0f);
-    }
-}
-
-} // namespace
-
-void Renderer::draw_meshes(const World& world, rhi::CommandList& commands, bool shadow_casters) {
-    for (const auto [entity, transform, mesh] :
-         world.registry().view<const WorldTransform, const MeshRenderer>().each()) {
-        if (mesh.model == nullptr || (shadow_casters && !mesh.casts_shadows)) {
-            continue;
-        }
-        const ModelAsset& model = *mesh.model;
-
-        const std::optional<Mat4> inverted = core::inverse(transform.matrix);
-        const Mat4 normals = inverted.has_value() ? core::transpose(*inverted) : transform.matrix;
-
-        commands.bind_vertex_buffer(model.vertices.get());
-        commands.bind_index_buffer(model.indices.get(), rhi::IndexFormat::UInt32);
-
-        for (const ModelPart& part : model.parts) {
-            const ModelMaterial& material = model.materials[part.material];
-            const DrawConstants constants{
-                .model = transform.matrix,
-                .normal_x = normals.columns[0],
-                .normal_y = normals.columns[1],
-                .normal_z = normals.columns[2],
-                .base_color = multiply(material.base_color, mesh.tint),
-            };
-            if (!shadow_casters) {
-                commands.bind_texture(material.texture);
-            }
-            commands.push_constants(std::as_bytes(std::span(&constants, 1)));
-            commands.draw_indexed_range(part.first_index, part.index_count);
-            if (shadow_casters) {
-                ++m_last_shadow_caster_count;
-            } else {
-                ++m_last_draw_count;
-            }
-        }
-    }
-}
-
 void Renderer::render(const World& world, rhi::CommandList& commands, platform::SurfaceSize size,
                       rhi::ClearColor clear_color) {
     DREAM_PROFILE_ZONE("Draw scene");
-    m_last_draw_count = 0;
-    m_last_line_count = 0;
-    m_last_ui_command_count = 0;
-    m_last_shadow_caster_count = 0;
+    m_last_stats = {};
+    if (m_backend == nullptr) {
+        m_debug_lines.clear();
+        return;
+    }
 
-    // The frame's uniforms, which every pass reads, or nothing without a camera.
-    std::optional<FrameUniforms> uniforms;
-    bool shadows = false;
-    if (const std::optional<CameraView> camera = camera_view(world, size);
-        camera.has_value() && m_pipelines != nullptr) {
-        FrameUniforms frame{
-            .view_projection = camera->view_projection,
-            .camera_position = extend(camera->eye, 1.0f),
-            .direction_to_light = Vec4{0.0f, 1.0f, 0.0f, 0.0f},
-            .light_color_and_ambient = Vec4{0.0f, 0.0f, 0.0f, 0.2f},
-            .light_view_projection = Mat4{},
-            .cascades = {},
-            .cascade_far = Vec4{},
-            .cascade_normal_offset = Vec4{},
-            .shadow_settings = Vec4{},
-            .camera_forward = Vec4{},
-        };
+    renderer::Frame frame{.size = size, .clear_color = clear_color};
+    m_meshes.clear();
+    if (const std::optional<CameraView> camera = camera_view(world, size); camera.has_value()) {
+        frame.view = renderer::View{.view_projection = camera->view_projection,
+                                    .eye = camera->eye,
+                                    .z_near = camera->z_near,
+                                    .z_far = camera->z_far};
+
         const auto lights = world.registry().view<const DirectionalLight>();
         if (const Entity light_entity = lights.front(); light_entity != k_no_entity) {
             const DirectionalLight& light = lights.get<const DirectionalLight>(light_entity);
-            frame.direction_to_light = extend(core::normalized(-light.direction), 0.0f);
-            frame.light_color_and_ambient = extend(light.color * light.intensity, light.ambient);
-            shadows = light.casts_shadows && m_shadow_map.has_value() &&
-                      m_pipelines->shadow_pipeline.has_value();
-            if (shadows) {
-                fit_cascades(frame, *camera, light.direction, m_settings);
+            frame.sun = renderer::Sunlight{.direction = light.direction,
+                                           .color = light.color,
+                                           .intensity = light.intensity,
+                                           .ambient = light.ambient,
+                                           .casts_shadows = light.casts_shadows};
+        }
+
+        for (const auto [entity, transform, mesh] :
+             world.registry().view<const WorldTransform, const MeshRenderer>().each()) {
+            if (mesh.model == nullptr) {
+                continue;
+            }
+            const ModelAsset& model = *mesh.model;
+            for (const ModelPart& part : model.parts) {
+                const ModelMaterial& material = model.materials[part.material];
+                m_meshes.push_back(renderer::MeshDraw{
+                    .vertices = model.vertices.get(),
+                    .indices = model.indices.get(),
+                    .first_index = part.first_index,
+                    .index_count = part.index_count,
+                    .model = transform.matrix,
+                    .base_color = multiply(material.base_color, mesh.tint),
+                    .texture = material.texture,
+                    .casts_shadows = mesh.casts_shadows,
+                });
             }
         }
-        uniforms = frame;
-    }
-    const auto uniform_bytes = [&] { return std::as_bytes(std::span(&*uniforms, 1)); };
-
-    if (shadows) {
-        // Each cascade into its own part of the map, kept there by a scissor.
-        DREAM_PROFILE_ZONE("Shadow map");
-        commands.begin_render_pass(rhi::RenderTargets{.depth = m_shadow_map->get()});
-        commands.bind_pipeline(m_pipelines->shadow_pipeline->get());
-        FrameUniforms cascade_uniforms = *uniforms;
-        const std::uint32_t cell_size = m_settings.shadow_resolution;
-        for (std::uint32_t cascade = 0; cascade < m_settings.shadow_cascades; ++cascade) {
-            const CascadeCell cell = cascade_cell(cascade);
-            commands.set_scissor(rhi::ScissorRect{.x = static_cast<std::int32_t>(cell.column * cell_size),
-                                                  .y = static_cast<std::int32_t>(cell.row * cell_size),
-                                                  .width = cell_size,
-                                                  .height = cell_size});
-            cascade_uniforms.light_view_projection = uniforms->cascades[cascade];
-            commands.set_uniforms(std::as_bytes(std::span(&cascade_uniforms, 1)));
-            draw_meshes(world, commands, true);
-        }
-        commands.end_render_pass();
+        frame.meshes = m_meshes;
+        frame.lines = m_debug_lines.vertices();
     }
 
-    const bool hdr = m_settings.hdr_format.has_value() && m_pipelines != nullptr &&
-                     m_pipelines->tone_map_pipeline.has_value();
-    if (hdr) {
-        fit_hdr_targets(size);
+    std::array<renderer::UiLayer, static_cast<std::size_t>(UiLayer::Count)> layers{};
+    for (std::size_t layer = 0; layer < layers.size(); ++layer) {
+        layers[layer] = renderer::UiLayer{.list = &m_ui_layers[layer], .offset = m_ui_offsets[layer]};
     }
-    const auto draw_lit_scene = [&] {
-        if (!uniforms.has_value()) {
-            return;
-        }
-        commands.bind_pipeline(m_pipelines->pipeline.get());
-        commands.set_uniforms(uniform_bytes());
-        if (shadows) {
-            commands.bind_texture(rhi::k_shadow_slot, m_shadow_map->get());
-        }
-        draw_meshes(world, commands, false);
+    frame.ui_layers = layers;
+    frame.ui_texture = [this](ui::TextureId texture) {
+        return m_ui_textures != nullptr ? m_ui_textures->find(texture) : rhi::TextureHandle{};
     };
-    if (hdr && m_hdr_color.has_value()) {
-        // The scene in HDR, then tone-mapped onto the window, with the lines and interface over it.
-        commands.begin_render_pass(rhi::RenderTargets{.color = m_hdr_color->get(),
-                                                      .depth = m_hdr_depth->get(),
-                                                      .clear_color = clear_color});
-        draw_lit_scene();
-        commands.end_render_pass();
 
-        commands.begin_render_pass(rhi::ClearColor{0.0f, 0.0f, 0.0f, 1.0f});
-        {
-            DREAM_PROFILE_ZONE("Tone mapping");
-            const ToneMapConstants constants{.settings = Vec4{
-                m_settings.exposure,
-                m_settings.tone_mapping == ToneMapping::PbrNeutral ? 1.0f : 0.0f, 0.0f, 0.0f}};
-            commands.bind_pipeline(m_pipelines->tone_map_pipeline->get());
-            commands.bind_texture(1, m_hdr_color->get());
-            commands.push_constants(std::as_bytes(std::span(&constants, 1)));
-            commands.draw_vertices(std::as_bytes(std::span(k_screen_triangle)),
-                                   static_cast<std::uint32_t>(k_screen_triangle.size()));
-        }
-        // A pass starts without the scene's uniforms on some backends, and the lines read them.
-        if (uniforms.has_value()) {
-            commands.set_uniforms(uniform_bytes());
-        }
-    } else {
-        commands.begin_render_pass(clear_color);
-        draw_lit_scene();
-    }
-
-    if (uniforms.has_value()) {
-        draw_debug_lines(commands);
-    }
+    m_last_stats = m_backend->render(commands, frame);
     m_debug_lines.clear();
-    draw_ui(commands, size);
-    commands.end_render_pass();
-    DREAM_PROFILE_VALUE("Draw calls", m_last_draw_count);
-    DREAM_PROFILE_VALUE("Shadow casters", m_last_shadow_caster_count);
-    DREAM_PROFILE_VALUE("Debug lines", m_last_line_count);
-    DREAM_PROFILE_VALUE("UI draw commands", m_last_ui_command_count);
+    DREAM_PROFILE_VALUE("Draw calls", m_last_stats.draws);
+    DREAM_PROFILE_VALUE("Shadow casters", m_last_stats.shadow_casters);
+    DREAM_PROFILE_VALUE("Debug lines", m_last_stats.lines);
+    DREAM_PROFILE_VALUE("UI draw commands", m_last_stats.ui_commands);
 }
 
 } // namespace dream::runtime

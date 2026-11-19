@@ -3,13 +3,12 @@
 #include "dream/runtime/app.h"
 #include "fake_device.h"
 #include "fake_platform.h"
+#include "fake_renderer.h"
 
 #include <doctest/doctest.h>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
-#include <cstring>
 #include <memory>
 #include <optional>
 #include <ostream> // Needed for doctest to print std::string.
@@ -24,40 +23,28 @@ using doctest::Approx;
 
 namespace {
 
-using Calls = std::vector<std::string>;
-
 constexpr platform::SurfaceSize k_size{800, 600};
 
 const core::Config k_config = core::Config::parse("[app]\nmax_fps = 0").value();
 
-std::vector<std::byte> fake_shader() {
-    return std::vector<std::byte>(4);
-}
-
-// Runs a Renderer inside a real App, against a device that records what it is told.
+// Runs a Renderer inside a real App, with a renderer module that records what it is given.
 struct RenderFixture {
     FakeState state;
     FakeDeviceState device_state;
+    FakeRendererState renderer_state;
 
     RenderFixture() {
-        state.assets["shaders/forward.vert.fake"] = fake_shader();
-        state.assets["shaders/forward.frag.fake"] = fake_shader();
-        state.assets["shaders/debug_lines.vert.fake"] = fake_shader();
-        state.assets["shaders/debug_lines.frag.fake"] = fake_shader();
-        state.assets["shaders/ui.vert.fake"] = fake_shader();
-        state.assets["shaders/ui.frag.fake"] = fake_shader();
-        state.assets["shaders/tonemap.vert.fake"] = fake_shader();
-        state.assets["shaders/shadow.vert.fake"] = fake_shader();
-        state.assets["shaders/tonemap.frag.fake"] = fake_shader();
+        state.assets["shaders/fake_renderer.txt"] = std::vector<std::byte>(4);
     }
 
     // Calls `body` from inside a frame, with everything set up.
-    template <typename Body> Calls in_frame(Body body) {
+    template <typename Body> void in_frame(Body body) {
         struct TestGame final : Game {
             Renderer renderer;
-            Body* run;
+            FakeRendererState* renderer_state = nullptr;
+            Body* run = nullptr;
             core::Result<void> on_start(App& app) override {
-                return renderer.initialize(app);
+                return renderer.initialize(app, std::make_unique<FakeRenderer>(*renderer_state));
             }
             void on_update(App&, const core::FrameTime&) override {}
             void on_render(App& app, rhi::CommandList& commands) override {
@@ -69,9 +56,14 @@ struct RenderFixture {
         App app(std::make_unique<FakePlatform>(state), k_config,
                 std::make_unique<FakeDevice>(device_state));
         TestGame game;
+        game.renderer_state = &renderer_state;
         game.run = &body;
         REQUIRE(app.run(game).has_value());
-        return device_state.calls;
+    }
+
+    [[nodiscard]] const FakeFrame& last_frame() const {
+        REQUIRE_FALSE(renderer_state.frames.empty());
+        return renderer_state.frames.back();
     }
 };
 
@@ -102,15 +94,16 @@ Entity add_camera(World& world) {
     return entity;
 }
 
-Calls only_drawing(const Calls& calls) {
-    Calls result;
-    for (const std::string& call : calls) {
-        if (call.starts_with("draw") || call.starts_with("bind_texture") || call == "uniforms") {
-            result.push_back(call);
-        }
+// A game that only initializes a renderer, with the given module or the configured one.
+struct StartOnly final : Game {
+    Renderer renderer;
+    std::unique_ptr<renderer::SceneRenderer> backend;
+    core::Result<void> on_start(App& app) override {
+        return backend != nullptr ? renderer.initialize(app, std::move(backend))
+                                  : renderer.initialize(app);
     }
-    return result;
-}
+    void on_update(App&, const core::FrameTime&) override {}
+};
 
 } // namespace
 
@@ -165,30 +158,45 @@ TEST_CASE("camera_ray goes from the eye through the pixel, as the camera draws i
     CHECK(ahead->direction.z == Approx(-1.0f));
 }
 
-TEST_CASE_FIXTURE(RenderFixture, "Renderer only clears the screen without a camera") {
+TEST_CASE_FIXTURE(RenderFixture, "Renderer starts its module and loads its shaders through the game's files") {
+    in_frame([](App&, Renderer& renderer, rhi::CommandList&) {
+        CHECK(renderer.backend() != nullptr);
+    });
+    CHECK(renderer_state.started);
+    CHECK(renderer_state.shader_loads == 1);
+}
+
+TEST_CASE_FIXTURE(RenderFixture, "Renderer gives only the clear color and interface without a camera") {
     std::uint32_t draws = 99;
     World world;
 
-    const Calls calls = in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
+    in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
         add_model(app, world, 1, false);
         world.update_transforms();
-        renderer.render(world, commands, k_size);
+        renderer.render(world, commands, k_size, rhi::ClearColor{0.1f, 0.2f, 0.3f, 1.0f});
         draws = renderer.last_draw_count();
         world.registry().clear();
     });
 
     CHECK(draws == 0);
-    CHECK(only_drawing(calls).empty());
+    const FakeFrame& frame = last_frame();
+    CHECK_FALSE(frame.view.has_value());
+    CHECK(frame.meshes.empty());
+    CHECK(frame.clear_color.g == Approx(0.2f));
+    CHECK(frame.size == k_size);
+    CHECK(frame.ui_layers.size() == static_cast<std::size_t>(UiLayer::Count));
 }
 
-TEST_CASE_FIXTURE(RenderFixture, "Renderer draws each part of each model") {
+TEST_CASE_FIXTURE(RenderFixture, "Renderer gives each part of each model") {
     std::uint32_t draws = 0;
     World world;
 
-    const Calls calls = in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
+    in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
         add_camera(world);
-        add_model(app, world, 2, false);
-        add_model(app, world, 1, false);
+        const Entity first = add_model(app, world, 2, false);
+        world.registry().get<MeshRenderer>(first).tint = core::Vec4{0.5f, 1.0f, 1.0f, 1.0f};
+        world.registry().get<Transform>(first).position = Vec3{4.0f, 0.0f, 0.0f};
+        add_model(app, world, 1, true);
         world.update_transforms();
         renderer.render(world, commands, k_size);
         draws = renderer.last_draw_count();
@@ -196,46 +204,41 @@ TEST_CASE_FIXTURE(RenderFixture, "Renderer draws each part of each model") {
     });
 
     CHECK(draws == 3);
-
-    // Uniforms are set once for the frame. The order of the models doesn't matter.
-    Calls drawing = only_drawing(calls);
-    REQUIRE(drawing.size() == 7);
-    CHECK(drawing.front() == "uniforms");
-    std::ranges::sort(drawing);
-    CHECK(drawing == Calls{"bind_texture 0", "bind_texture 0", "bind_texture 0", "draw 0+3",
-                           "draw 0+3", "draw 3+3", "uniforms"});
-}
-
-TEST_CASE_FIXTURE(RenderFixture, "Renderer binds a model's texture, and white for untextured ones") {
-    World world;
-
-    const Calls calls = in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
-        add_camera(world);
-        add_model(app, world, 1, true);
-        world.update_transforms();
-        renderer.render(world, commands, k_size);
-        world.registry().clear();
+    const FakeFrame& frame = last_frame();
+    REQUIRE(frame.meshes.size() == 3);
+    // The order of the models doesn't matter, so they are found by what they are.
+    const auto textured = std::ranges::count_if(
+        frame.meshes, [](const renderer::MeshDraw& mesh) { return mesh.texture.is_valid(); });
+    CHECK(textured == 1);
+    const auto tinted = std::ranges::find_if(frame.meshes, [](const renderer::MeshDraw& mesh) {
+        return mesh.first_index == 3;
     });
-
-    CHECK(only_drawing(calls) == Calls{"uniforms", "bind_texture 1", "draw 0+3"});
+    REQUIRE(tinted != frame.meshes.end());
+    CHECK(tinted->index_count == 3);
+    CHECK(tinted->base_color.x == Approx(0.5f));
+    CHECK(tinted->model.columns[3].x == Approx(4.0f));
+    CHECK(tinted->vertices.is_valid());
+    CHECK(tinted->indices.is_valid());
 }
 
-TEST_CASE_FIXTURE(RenderFixture, "Renderer skips drawing on a surface with no size") {
+TEST_CASE_FIXTURE(RenderFixture, "Renderer gives no view on a surface with no size") {
     std::uint32_t draws = 99;
     World world;
 
     in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
         add_camera(world);
         add_model(app, world, 1, false);
+        world.update_transforms();
         renderer.render(world, commands, platform::SurfaceSize{0, 0});
         draws = renderer.last_draw_count();
         world.registry().clear();
     });
 
     CHECK(draws == 0);
+    CHECK_FALSE(last_frame().view.has_value());
 }
 
-TEST_CASE_FIXTURE(RenderFixture, "Renderer sends the camera position and the way to the light") {
+TEST_CASE_FIXTURE(RenderFixture, "Renderer gives the camera and the first light") {
     World world;
 
     in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
@@ -243,56 +246,84 @@ TEST_CASE_FIXTURE(RenderFixture, "Renderer sends the camera position and the way
         world.registry().get<Transform>(camera).position = Vec3{1.0f, 2.0f, 3.0f};
         const Entity sun = world.create_entity();
         world.registry().emplace<DirectionalLight>(
-            sun, DirectionalLight{.direction = Vec3{0.0f, -2.0f, 0.0f}, .ambient = 0.5f});
+            sun, DirectionalLight{.direction = Vec3{0.0f, -2.0f, 0.0f},
+                                  .ambient = 0.5f,
+                                  .casts_shadows = false});
         add_model(app, world, 1, false);
         world.update_transforms();
         renderer.render(world, commands, k_size);
         world.registry().clear();
     });
 
-    // The layout of FrameUniforms: a matrix, then three vectors.
-    REQUIRE(device_state.last_uniforms.size() >= 112);
-    std::array<float, 12> vectors{};
-    std::memcpy(vectors.data(), device_state.last_uniforms.data() + 64, sizeof(vectors));
-    CHECK(vectors[0] == Approx(1.0f));
-    CHECK(vectors[2] == Approx(3.0f));
-    CHECK(vectors[5] == Approx(1.0f));
-    CHECK(vectors[11] == Approx(0.5f));
+    const FakeFrame& frame = last_frame();
+    REQUIRE(frame.view.has_value());
+    CHECK(frame.view->eye.x == Approx(1.0f));
+    CHECK(frame.view->eye.z == Approx(3.0f));
+    CHECK(frame.view->z_near == Approx(Camera{}.z_near));
+    REQUIRE(frame.sun.has_value());
+    CHECK(frame.sun->direction.y == Approx(-2.0f));
+    CHECK(frame.sun->ambient == Approx(0.5f));
+    CHECK_FALSE(frame.sun->casts_shadows);
 }
 
-TEST_CASE("Renderer explains what's wrong when its shaders are missing") {
+TEST_CASE_FIXTURE(RenderFixture, "Renderer tells which models cast shadows") {
+    World world;
+    std::uint32_t casters = 0;
+
+    in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
+        add_camera(world);
+        world.registry().emplace<DirectionalLight>(world.create_entity());
+        add_model(app, world, 2, false);
+        const Entity hidden = add_model(app, world, 1, false);
+        world.registry().get<MeshRenderer>(hidden).casts_shadows = false;
+        world.update_transforms();
+        renderer.render(world, commands, k_size);
+        casters = renderer.last_shadow_caster_count();
+        world.registry().clear();
+    });
+
+    CHECK(casters == 2);
+    CHECK(std::ranges::count_if(last_frame().meshes, [](const renderer::MeshDraw& mesh) {
+              return !mesh.casts_shadows;
+          }) == 1);
+}
+
+TEST_CASE("Renderer passes on why its module can't load its shaders") {
+    FakeState state;
+    FakeDeviceState device_state;
+    FakeRendererState renderer_state;
+    state.script = {k_end_of_frame};
+    App app(std::make_unique<FakePlatform>(state), k_config,
+            std::make_unique<FakeDevice>(device_state));
+
+    StartOnly game;
+    game.backend = std::make_unique<FakeRenderer>(renderer_state);
+    const core::Result<void> result = app.run(game);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().message.find("fake_renderer.txt") != std::string::npos);
+    CHECK(game.renderer.backend() == nullptr);
+}
+
+TEST_CASE("Renderer needs a graphics device") {
+    FakeState state;
+    FakeRendererState renderer_state;
+    state.script = {k_end_of_frame};
+    App app(std::make_unique<FakePlatform>(state), k_config);
+
+    StartOnly game;
+    game.backend = std::make_unique<FakeRenderer>(renderer_state);
+    CHECK_FALSE(app.run(game).has_value());
+    CHECK_FALSE(renderer_state.started);
+}
+
+TEST_CASE("Renderer needs a renderer module in the project configuration") {
     FakeState state;
     FakeDeviceState device_state;
     state.script = {k_end_of_frame};
     App app(std::make_unique<FakePlatform>(state), k_config,
             std::make_unique<FakeDevice>(device_state));
 
-    struct TestGame final : Game {
-        Renderer renderer;
-        core::Result<void> on_start(App& started) override {
-            return renderer.initialize(started);
-        }
-        void on_update(App&, const core::FrameTime&) override {}
-    } game;
-
-    const core::Result<void> result = app.run(game);
-    REQUIRE_FALSE(result.has_value());
-    CHECK(result.error().message.find("RENDERER") != std::string::npos);
-}
-
-TEST_CASE("Renderer needs a graphics device") {
-    FakeState state;
-    state.script = {k_end_of_frame};
-    App app(std::make_unique<FakePlatform>(state), k_config);
-
-    struct TestGame final : Game {
-        Renderer renderer;
-        core::Result<void> on_start(App& started) override {
-            return renderer.initialize(started);
-        }
-        void on_update(App&, const core::FrameTime&) override {}
-    } game;
-
+    StartOnly game;
     CHECK_FALSE(app.run(game).has_value());
 }
 
@@ -334,8 +365,8 @@ TEST_CASE_FIXTURE(RenderFixture, "Renderer reports a mistake in a mesh component
     CHECK(message.find("'model'") != std::string::npos);
 }
 
-TEST_CASE_FIXTURE(RenderFixture, "Renderer draws debug lines once, after the models") {
-    const Calls calls = in_frame([](App& app, Renderer& renderer, rhi::CommandList& commands) {
+TEST_CASE_FIXTURE(RenderFixture, "Renderer gives the debug lines once, then clears them") {
+    in_frame([](App& app, Renderer& renderer, rhi::CommandList& commands) {
         World world;
         add_camera(world);
         add_model(app, world, 1, false);
@@ -353,23 +384,21 @@ TEST_CASE_FIXTURE(RenderFixture, "Renderer draws debug lines once, after the mod
         CHECK(renderer.last_line_count() == 0);
     });
 
-    const auto lines = std::find(calls.begin(), calls.end(), "vertices 26");
-    REQUIRE(lines != calls.end());
-    CHECK(std::count(calls.begin(), calls.end(), "vertices 26") == 1);
-    const auto model = std::find(calls.begin(), calls.end(), "draw 0+3");
-    CHECK(model < lines);
+    REQUIRE(renderer_state.frames.size() == 2);
+    CHECK(renderer_state.frames[0].lines.size() == 26);
+    CHECK(renderer_state.frames[0].lines[1].position.x == Approx(1.0f));
+    CHECK(renderer_state.frames[1].lines.empty());
 }
 
 TEST_CASE_FIXTURE(RenderFixture, "Renderer drops debug lines when there is no camera") {
-    const Calls calls = in_frame([](App&, Renderer& renderer, rhi::CommandList& commands) {
+    in_frame([](App&, Renderer& renderer, rhi::CommandList& commands) {
         World world;
         renderer.debug_lines().cross(Vec3{}, 1.0f, core::Vec4{1, 1, 1, 1});
         renderer.render(world, commands, k_size);
         CHECK(renderer.last_line_count() == 0);
         CHECK(renderer.debug_lines().empty());
     });
-    CHECK(std::none_of(calls.begin(), calls.end(),
-                       [](const std::string& call) { return call.starts_with("vertices"); }));
+    CHECK(last_frame().lines.empty());
 }
 
 TEST_CASE("DebugLines builds shapes out of line pairs") {
@@ -397,169 +426,4 @@ TEST_CASE("DebugLines builds shapes out of line pairs") {
     for (const DebugVertex& vertex : lines.vertices()) {
         CHECK(std::abs(vertex.position.y) <= 1.5f + 1e-4f);
     }
-}
-
-TEST_CASE("Renderer settings pick an HDR format the device draws into") {
-    FakeDeviceState state;
-    const FakeDevice device(state);
-    const auto settings = [&](std::string_view text) {
-        return RendererSettings::from_config(core::Config::parse(text).value(), device);
-    };
-
-    // Neither float format: straight to the window.
-    CHECK_FALSE(settings("").value().hdr_format.has_value());
-
-    state.render_target_formats = {rhi::TextureFormat::Rgba16Float,
-                                   rhi::TextureFormat::Depth32Float};
-    CHECK(settings("").value().hdr_format == rhi::TextureFormat::Rgba16Float);
-
-    // The smaller format wins where both work.
-    state.render_target_formats.push_back(rhi::TextureFormat::Rg11B10Float);
-    CHECK(settings("").value().hdr_format == rhi::TextureFormat::Rg11B10Float);
-    CHECK(settings("[renderer]\nhdr = \"rgba16f\"").value().hdr_format ==
-          rhi::TextureFormat::Rgba16Float);
-    CHECK_FALSE(settings("[renderer]\nhdr = \"off\"").value().hdr_format.has_value());
-
-    // Without a depth target to go with it, there is no HDR.
-    state.render_target_formats = {rhi::TextureFormat::Rg11B10Float};
-    CHECK_FALSE(settings("").value().hdr_format.has_value());
-
-    CHECK(settings("").value().tone_mapping == ToneMapping::PbrNeutral);
-    CHECK(settings("[renderer]\ntone_mapping = \"none\"").value().tone_mapping ==
-          ToneMapping::Clamp);
-    CHECK(settings("[renderer]\nexposure = 2.5").value().exposure == Approx(2.5f));
-
-    CHECK_FALSE(settings("[renderer]\nhdr = \"yes\"").has_value());
-    CHECK_FALSE(settings("[renderer]\ntone_mapping = \"filmic\"").has_value());
-    CHECK_FALSE(settings("[renderer]\nexposure = 0.0").has_value());
-}
-
-TEST_CASE_FIXTURE(RenderFixture, "Renderer draws the scene in HDR, then tone-maps it onto the window") {
-    device_state.render_target_formats = {rhi::TextureFormat::Rg11B10Float,
-                                          rhi::TextureFormat::Depth32Float};
-    World world;
-    std::optional<rhi::TextureFormat> chosen;
-
-    const Calls calls = in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
-        add_camera(world);
-        add_model(app, world, 1, false);
-        world.update_transforms();
-        renderer.render(world, commands, k_size);
-        chosen = renderer.settings().hdr_format;
-        world.registry().clear();
-    });
-
-    CHECK(chosen == rhi::TextureFormat::Rg11B10Float);
-
-    // A color and a depth target the size of the surface, beside the shadow map.
-    std::vector<rhi::TextureFormat> targets;
-    for (const rhi::TextureDesc& desc : device_state.textures) {
-        if (desc.render_target && desc.width == k_size.width && desc.height == k_size.height) {
-            targets.push_back(desc.format);
-        }
-    }
-    CHECK(targets == std::vector{rhi::TextureFormat::Rg11B10Float,
-                                 rhi::TextureFormat::Depth32Float});
-
-    // The model is drawn in the pass into the targets, and the tone mapping reads the color target
-    // in slot 1 afterwards.
-    const auto at = [&](std::string_view call) {
-        return std::ranges::find_if(calls, [&](const std::string& c) { return c.starts_with(call); }) -
-               calls.begin();
-    };
-    const auto pass = at("render_targets");
-    const auto model = at("draw 0+3");
-    const auto tone_map = at("bind_texture");
-    REQUIRE(pass < static_cast<std::ptrdiff_t>(calls.size()));
-    CHECK(pass < model);
-    const auto read = std::ranges::find_if(
-        calls, [](const std::string& c) { return c.ends_with(" at 1"); });
-    REQUIRE(read != calls.end());
-    CHECK(read - calls.begin() > model);
-    CHECK(tone_map < static_cast<std::ptrdiff_t>(calls.size()));
-}
-
-TEST_CASE("Renderer settings give PCs shadows, unless the device can't draw depth") {
-    FakeDeviceState state;
-    const FakeDevice device(state);
-    const auto settings = [&](std::string_view text) {
-        return RendererSettings::from_config(core::Config::parse(text).value(), device);
-    };
-
-    CHECK(settings("").value().shadow_resolution == 0);
-    CHECK(settings("[renderer.shadows]\nmode = \"on\"").value().shadow_resolution == 0);
-
-    state.render_target_formats = {rhi::TextureFormat::Depth32Float};
-    CHECK(settings("").value().shadow_resolution == 2048);
-    CHECK(settings("[renderer.shadows]\nresolution = 1024").value().shadow_resolution == 1024);
-    CHECK(settings("[renderer.shadows]\nmode = \"off\"").value().shadow_resolution == 0);
-    CHECK(settings("").value().shadow_cascades == 4);
-    CHECK(settings("[renderer.shadows]\ncascades = 2").value().shadow_cascades == 2);
-    CHECK_FALSE(settings("[renderer.shadows]\ncascades = 5").has_value());
-    CHECK(settings("[renderer.shadows]\ndistance = 25.0").value().shadow_distance ==
-          Approx(25.0f));
-
-    CHECK_FALSE(settings("[renderer.shadows]\nmode = \"maybe\"").has_value());
-    CHECK_FALSE(settings("[renderer.shadows]\nresolution = 100").has_value());
-    CHECK_FALSE(settings("[renderer.shadows]\ndistance = 0.5").has_value());
-}
-
-TEST_CASE_FIXTURE(RenderFixture, "Renderer draws shadow casters into the shadow map first") {
-    device_state.render_target_formats = {rhi::TextureFormat::Depth32Float};
-    World world;
-    std::uint32_t casters = 0;
-    std::uint32_t draws = 0;
-
-    const Calls calls = in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
-        add_camera(world);
-        world.registry().emplace<DirectionalLight>(world.create_entity());
-        add_model(app, world, 2, false);
-        const Entity hidden = add_model(app, world, 1, false);
-        world.registry().get<MeshRenderer>(hidden).casts_shadows = false;
-        world.update_transforms();
-        renderer.render(world, commands, k_size);
-        casters = renderer.last_shadow_caster_count();
-        draws = renderer.last_draw_count();
-        world.registry().clear();
-    });
-
-    // Both parts of the first model cast shadows, into each cascade, and every part is drawn.
-    CHECK(casters == 2 * 4);
-    CHECK(draws == 3);
-
-    // The shadow pass comes first, then the scene reads the shadow map in the shadow slot.
-    const auto first = [&](auto predicate) {
-        return std::ranges::find_if(calls, predicate) - calls.begin();
-    };
-    const auto shadow_pass = first([](const std::string& c) { return c == "render_targets"; });
-    const auto shadow_read = first([](const std::string& c) { return c.ends_with(" at 2"); });
-    REQUIRE(shadow_pass < static_cast<std::ptrdiff_t>(calls.size()));
-    REQUIRE(shadow_read < static_cast<std::ptrdiff_t>(calls.size()));
-    CHECK(shadow_pass < shadow_read);
-
-    const auto shadow_map = std::ranges::find_if(device_state.textures, [](const auto& desc) {
-        return desc.render_target && desc.format == rhi::TextureFormat::Depth32Float &&
-               desc.width == 4096 && desc.height == 4096;
-    });
-    CHECK(shadow_map != device_state.textures.end());
-}
-
-TEST_CASE_FIXTURE(RenderFixture, "Renderer draws no shadows for a light that casts none") {
-    device_state.render_target_formats = {rhi::TextureFormat::Depth32Float};
-    World world;
-    std::uint32_t casters = 1;
-
-    const Calls calls = in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
-        add_camera(world);
-        const Entity sun = world.create_entity();
-        world.registry().emplace<DirectionalLight>(sun).casts_shadows = false;
-        add_model(app, world, 1, false);
-        world.update_transforms();
-        renderer.render(world, commands, k_size);
-        casters = renderer.last_shadow_caster_count();
-        world.registry().clear();
-    });
-
-    CHECK(casters == 0);
-    CHECK(std::ranges::find(calls, "render_targets") == calls.end());
 }

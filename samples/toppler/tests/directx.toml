@@ -30,6 +30,7 @@ quit = false
 [modules.windows]
 platform = ["sdl3"]
 rhi = ["directx"]
+renderer = ["forward"]
 physics3d = ["impulse"]
 audio = ["portaudio"]
 ui = ["markup"]

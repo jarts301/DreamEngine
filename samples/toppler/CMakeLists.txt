@@ -2,7 +2,6 @@ dream_add_game(dream_toppler
     SOURCES src/toppler.cpp
     CONFIG dream.toml
     ASSETS assets ../assets
-    RENDERER
     APPLICATION_ID org.dreamengine.toppler
     DISPLAY_NAME "Toppler"
 )
@@ -13,26 +12,26 @@ if(DREAM_BUILD_TESTS)
     set(toppler_result "cleared=10 stars=[1-3][0-9] saved_stars=[1-3]+ saved_music=0.30 menu_opened=1")
 
     dream_add_game(dream_toppler_check SOURCES src/toppler.cpp CONFIG tests/check.toml
-        ASSETS assets ../assets RENDERER)
+        ASSETS assets ../assets)
 
     # The scripted run on the real GPU and sound hardware. Not a CTest, because build servers have
     # neither.
     dream_add_game(dream_toppler_vulkan_check SOURCES src/toppler.cpp CONFIG tests/vulkan.toml
-        ASSETS assets ../assets tests/reference RENDERER)
+        ASSETS assets ../assets tests/reference)
 
     if(WIN32)
         dream_add_game(dream_toppler_directx_check SOURCES src/toppler.cpp
-            CONFIG tests/directx.toml ASSETS assets ../assets tests/reference RENDERER)
+            CONFIG tests/directx.toml ASSETS assets ../assets tests/reference)
         dream_add_game(dream_toppler_directx12_check SOURCES src/toppler.cpp
-            CONFIG tests/directx12.toml ASSETS assets ../assets tests/reference RENDERER)
+            CONFIG tests/directx12.toml ASSETS assets ../assets tests/reference)
         dream_add_game(dream_toppler_opengl_check SOURCES src/toppler.cpp
-            CONFIG tests/opengl.toml ASSETS assets ../assets tests/reference RENDERER)
+            CONFIG tests/opengl.toml ASSETS assets ../assets tests/reference)
         dream_add_game(dream_toppler_opengles_check SOURCES src/toppler.cpp
-            CONFIG tests/opengles.toml ASSETS assets ../assets tests/reference RENDERER)
+            CONFIG tests/opengles.toml ASSETS assets ../assets tests/reference)
 
         # The check run with the other physics, audio and interface backends.
         dream_add_game(dream_toppler_alternatives_check SOURCES src/toppler.cpp
-            CONFIG tests/alternatives.toml ASSETS assets ../assets RENDERER)
+            CONFIG tests/alternatives.toml ASSETS assets ../assets)
     endif()
 
     if(NOT CMAKE_CROSSCOMPILING)
@@ -53,12 +52,12 @@ if(DREAM_BUILD_TESTS)
     # reference image, so build servers without a GPU check it too. See docs/adr/0021.
     if(WIN32 AND NOT CMAKE_CROSSCOMPILING)
         dream_add_game(dream_toppler_warp_check SOURCES src/toppler.cpp CONFIG tests/warp.toml
-            ASSETS assets ../assets tests/reference RENDERER)
+            ASSETS assets ../assets tests/reference)
         add_test(NAME dream_toppler_warp_check COMMAND dream_toppler_warp_check)
         set_tests_properties(dream_toppler_warp_check PROPERTIES
             PASS_REGULAR_EXPRESSION "Screenshot matches")
         dream_add_game(dream_toppler_directx12_warp_check SOURCES src/toppler.cpp
-            CONFIG tests/warp_directx12.toml ASSETS assets ../assets tests/reference RENDERER)
+            CONFIG tests/warp_directx12.toml ASSETS assets ../assets tests/reference)
         add_test(NAME dream_toppler_directx12_warp_check
             COMMAND dream_toppler_directx12_warp_check)
         set_tests_properties(dream_toppler_directx12_warp_check PROPERTIES
