@@ -6,12 +6,14 @@
 #include "dream/mesh_simplifier/mesh_simplifier.h"
 #include "dream/renderer/scene_renderer.h"
 #include "dream/rhi/rhi.h"
+#include "dream/tangent_generator/tangent_generator.h"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -56,15 +58,30 @@ using ModelVertex = renderer::MeshVertex;
 struct ImageData {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
-    std::vector<std::byte> pixels;
-    std::vector<std::byte> ktx2;
+    std::vector<std::byte> pixels{};
+    std::vector<std::byte> ktx2{};
+    // Whether it holds sRGB colors, like a base color; otherwise linear data, like a normal map.
+    // An image used both ways is kept twice.
+    bool color = true;
+    // Its file name, or its place in the model, for messages.
+    std::string name{};
 };
 
+// A material, in glTF's metallic-roughness model (ADR 0033). The textures are indices into
+// ModelData::images, or -1 for none.
 struct ModelMaterialData {
     core::Vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};
+    float metallic = 0.0f;
+    float roughness = 0.5f;
+    float normal_scale = 1.0f;
+    float occlusion_strength = 1.0f;
+    core::Vec3 emissive{0.0f, 0.0f, 0.0f};
 
-    // An index into ModelData::images, or -1 for no texture.
     int image = -1;
+    int normal_image = -1;
+    int metallic_roughness_image = -1;
+    int occlusion_image = -1;
+    int emissive_image = -1;
 };
 
 struct ModelPart {
@@ -105,6 +122,12 @@ struct LodOptions {
                                                mesh_simplifier::MeshSimplifier& simplifier,
                                                const LodOptions& options = {});
 
+// Gives the parts whose material has a normal map tangents, where their file had none, splitting
+// vertices that need different tangents in different triangles. Parts that have tangents, or no
+// normal map, are left as they are.
+[[nodiscard]] core::Result<void> generate_tangents(ModelData& data,
+                                                   tangent_generator::TangentGenerator& generator);
+
 // Reads a PNG or JPEG.
 [[nodiscard]] core::Result<ImageData> decode_image(std::span<const std::byte> file);
 
@@ -115,16 +138,14 @@ using ModelFileReader =
 // Reads a binary glTF (.glb) file. Node transforms are baked into the vertices, and only triangles
 // with normals are accepted. Animation and skinning are ignored. Images are PNG, JPEG or KTX2,
 // embedded or in files of their own, which `read_file` reads; textures with the KHR_texture_basisu
-// extension use their KTX2 image.
+// extension use their KTX2 image. Materials keep their metallic-roughness factors and textures,
+// normal map, occlusion and emission, with KHR_materials_emissive_strength; every texture is read
+// with the first texture coordinates.
 [[nodiscard]] core::Result<ModelData> parse_glb(std::span<const std::byte> file,
                                                 const ModelFileReader& read_file = {});
 
-struct ModelMaterial {
-    core::Vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};
-
-    // Invalid for a material with no texture, which draws with plain white.
-    rhi::TextureHandle texture;
-};
+// A material on the GPU, as the renderer module draws it. Missing textures are invalid handles.
+using ModelMaterial = renderer::MeshMaterial;
 
 // A model on the GPU, as used by runtime::MeshRenderer.
 struct ModelAsset {

@@ -104,14 +104,19 @@ MeshDraw mesh(std::uint32_t first_index, std::uint32_t texture = 0) {
                     .indices = rhi::BufferHandle{.index = 2, .generation = 1},
                     .first_index = first_index,
                     .index_count = 3,
-                    .texture = texture != 0 ? rhi::TextureHandle{.index = texture, .generation = 1}
-                                            : rhi::TextureHandle{}};
+                    .material = MeshMaterial{
+                        .base_color_texture = texture != 0
+                                                  ? rhi::TextureHandle{.index = texture,
+                                                                       .generation = 1}
+                                                  : rhi::TextureHandle{}}};
 }
 
+// Draws, uniforms and the textures bound at slot 0, which the base color and the interface use.
 Calls only_drawing(const Calls& calls) {
     Calls result;
     for (const std::string& call : calls) {
-        if (call.starts_with("draw") || call.starts_with("bind_texture") || call == "uniforms") {
+        if (call.starts_with("draw") || call == "uniforms" ||
+            (call.starts_with("bind_texture") && call.find(" at ") == std::string::npos)) {
             result.push_back(call);
         }
     }
@@ -460,7 +465,10 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer skips casters outside each shad
 TEST_CASE_FIXTURE(Fixture, "The forward renderer draws parts that share a mesh as instances of one draw") {
     start();
     std::array meshes{box_part(Vec3{-1.0f, 0.0f, 0.0f}), mesh(3), box_part(Vec3{1.0f, 0.0f, 0.0f})};
-    meshes[2].base_color = Vec4{1.0f, 0.0f, 0.0f, 1.0f};
+    // Other factors don't split a group: they are each instance's.
+    meshes[2].material.base_color = Vec4{1.0f, 0.0f, 0.0f, 1.0f};
+    meshes[2].material.metallic = 1.0f;
+    meshes[2].material.roughness = 0.2f;
     FrameStats stats;
     const Calls calls =
         draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes}, &stats);
@@ -470,11 +478,44 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer draws parts that share a mesh a
     CHECK(std::ranges::count(calls, "draw 0+3 x2") == 1);
     CHECK(std::ranges::count(calls, "draw 3+3 x1") == 1);
 
-    // Each instance's model matrix, normals and color, 128 bytes, in the order given. The last
+    // Each instance's model matrix, normals and material, 160 bytes, in the order given. The last
     // instances bound are the one part drawn alone.
     const auto group = std::ranges::find(calls, "draw 0+3 x2");
     REQUIRE(group != calls.begin());
-    CHECK(*std::prev(group) == "instances 256");
+    CHECK(*std::prev(group) == "instances 320");
+    // That part's material factors, after its matrices and color: a default material's.
+    REQUIRE(state.last_instances.size() == 160);
+    std::array<float, 4> factors{};
+    std::memcpy(factors.data(), state.last_instances.data() + 128, sizeof(factors));
+    CHECK(factors == std::array{0.0f, 0.5f, 1.0f, 1.0f});
+}
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer binds a material's textures, or a flat normal map") {
+    start();
+    std::array meshes{mesh(0), mesh(0)};
+    meshes[1].material.normal_texture = rhi::TextureHandle{.index = 40, .generation = 1};
+    meshes[1].material.metallic_roughness_texture = rhi::TextureHandle{.index = 41, .generation = 1};
+    meshes[1].material.occlusion_texture = rhi::TextureHandle{.index = 42, .generation = 1};
+    meshes[1].material.emissive_texture = rhi::TextureHandle{.index = 43, .generation = 1};
+    FrameStats stats;
+    const Calls calls =
+        draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes}, &stats);
+
+    // Different textures make different draws.
+    CHECK(stats.draw_calls == 2);
+    CHECK(std::ranges::count(calls, "bind_texture 40 at 3") == 1);
+    CHECK(std::ranges::count(calls, "bind_texture 41 at 4") == 1);
+    CHECK(std::ranges::count(calls, "bind_texture 42 at 5") == 1);
+    CHECK(std::ranges::count(calls, "bind_texture 43 at 6") == 1);
+
+    // The part without a normal map gets the renderer's flat one: one linear texel.
+    const auto flat = std::ranges::find_if(state.textures, [](const rhi::TextureDesc& desc) {
+        return desc.width == 1 && desc.height == 1 &&
+               desc.format == rhi::TextureFormat::Rgba8Unorm;
+    });
+    REQUIRE(flat != state.textures.end());
+    const auto flat_index = static_cast<std::size_t>(flat - state.textures.begin()) + 1;
+    CHECK(std::ranges::count(calls, std::format("bind_texture {} at 3", flat_index)) == 1);
 }
 
 namespace {

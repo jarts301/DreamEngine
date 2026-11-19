@@ -723,17 +723,34 @@ private:
         sampler.MaxAnisotropy = 1;
         sampler.ComparisonFunc = D3D11_COMPARISON_NEVER;
         sampler.MaxLOD = D3D11_FLOAT32_MAX;
-        HRESULT result = m_device->CreateSamplerState(&sampler, &m_samplers[0]);
+        ComPtr<ID3D11SamplerState> repeating;
+        ComPtr<ID3D11SamplerState> clamped;
+        ComPtr<ID3D11SamplerState> comparing;
+        HRESULT result = m_device->CreateSamplerState(&sampler, &repeating);
         if (SUCCEEDED(result)) {
             sampler.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
             sampler.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
             sampler.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-            result = m_device->CreateSamplerState(&sampler, &m_samplers[1]);
+            result = m_device->CreateSamplerState(&sampler, &clamped);
         }
         if (SUCCEEDED(result)) {
             sampler.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
             sampler.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
-            result = m_device->CreateSamplerState(&sampler, &m_samplers[k_shadow_slot]);
+            result = m_device->CreateSamplerState(&sampler, &comparing);
+        }
+        // One sampler per slot, as ADR 0027 lists them.
+        for (std::uint32_t slot = 0; slot < k_texture_slots; ++slot) {
+            switch (slot_sampler(slot)) {
+            case SlotSampler::Repeat:
+                m_samplers[slot] = repeating;
+                break;
+            case SlotSampler::Clamp:
+                m_samplers[slot] = clamped;
+                break;
+            case SlotSampler::ShadowCompare:
+                m_samplers[slot] = comparing;
+                break;
+            }
         }
         if (FAILED(result)) {
             return directx_error("Creating the samplers", result);

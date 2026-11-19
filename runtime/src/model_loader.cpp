@@ -1,5 +1,6 @@
 #include "dream/runtime/model.h"
 
+#include "dream/core/log.h"
 #include "dream/core/math/matrix.h"
 #include "dream/runtime/texture.h"
 
@@ -13,18 +14,38 @@
 #include <cgltf.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <format>
 #include <limits>
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace dream::runtime {
 namespace {
 
 core::Error model_error(std::string message) {
     return core::Error{core::ErrorCode::ParseError, std::move(message)};
+}
+
+// The same format, read as sRGB colors or as linear data.
+rhi::TextureFormat with_color_space(rhi::TextureFormat format, bool srgb) {
+    using enum rhi::TextureFormat;
+    switch (format) {
+    case Rgba8Srgb:
+    case Rgba8Unorm:
+        return srgb ? Rgba8Srgb : Rgba8Unorm;
+    case Bc7Srgb:
+    case Bc7Unorm:
+        return srgb ? Bc7Srgb : Bc7Unorm;
+    case Astc4x4Srgb:
+    case Astc4x4Unorm:
+        return srgb ? Astc4x4Srgb : Astc4x4Unorm;
+    default:
+        return format;
+    }
 }
 
 struct CgltfDeleter {
@@ -35,12 +56,14 @@ struct CgltfDeleter {
 
 using GltfPointer = std::unique_ptr<cgltf_data, CgltfDeleter>;
 
-// Decodes an image once, however many materials use it, and returns its index in `model.images`.
-// A KTX2 image is kept as it is, to be transcoded once the device is known.
-core::Result<int> add_image(const cgltf_image& image, ModelData& model,
-                            std::map<const cgltf_image*, int>& known,
-                            const ModelFileReader& read_file) {
-    if (const auto existing = known.find(&image); existing != known.end()) {
+// Each image the model has read, by its glTF image and whether it is read as colors.
+using KnownImages = std::map<std::pair<const cgltf_image*, bool>, int>;
+
+// Decodes an image once, however many materials use it the same way, and returns its index in
+// `model.images`. A KTX2 image is kept as it is, to be transcoded once the device is known.
+core::Result<int> add_image(const cgltf_image& image, bool color, ModelData& model,
+                            KnownImages& known, const ModelFileReader& read_file) {
+    if (const auto existing = known.find({&image, color}); existing != known.end()) {
         return existing->second;
     }
 
@@ -76,39 +99,93 @@ core::Result<int> add_image(const cgltf_image& image, ModelData& model,
         data = std::move(decoded).value();
     }
 
+    data.color = color;
+    data.name = image.uri != nullptr  ? std::string(image.uri)
+                : image.name != nullptr ? std::string(image.name)
+                                        : std::format("image {}", model.images.size());
     const int index = static_cast<int>(model.images.size());
     model.images.push_back(std::move(data));
-    known.emplace(&image, index);
+    known.emplace(std::make_pair(&image, color), index);
     return index;
+}
+
+// The image a texture reads, or -1 for none. KHR_texture_basisu gives a texture a KTX2 image,
+// preferred over its plain one.
+core::Result<int> add_texture(const cgltf_texture_view& view, bool color, ModelData& model,
+                              KnownImages& images, const ModelFileReader& read_file) {
+    const cgltf_texture* const texture = view.texture;
+    const cgltf_image* const source =
+        texture == nullptr ? nullptr
+        : texture->has_basisu && texture->basisu_image != nullptr ? texture->basisu_image
+                                                                   : texture->image;
+    if (source == nullptr) {
+        return -1;
+    }
+    if (view.texcoord != 0) {
+        DREAM_LOG_WARNING("A material's texture uses texture coordinates {}, but only the first "
+                          "set is read; it is read with those",
+                          view.texcoord);
+    }
+    return add_image(*source, color, model, images, read_file);
 }
 
 core::Result<std::uint32_t> add_material(const cgltf_material* material, ModelData& model,
                                          std::map<const cgltf_material*, std::uint32_t>& known,
-                                         std::map<const cgltf_image*, int>& images,
-                                         const ModelFileReader& read_file) {
+                                         KnownImages& images, const ModelFileReader& read_file) {
     if (const auto existing = known.find(material); existing != known.end()) {
         return existing->second;
     }
 
+    // glTF's defaults, which a primitive without a material also gets: white, fully metallic and
+    // fully rough.
     ModelMaterialData data;
-    if (material != nullptr && material->has_pbr_metallic_roughness) {
-        const cgltf_pbr_metallic_roughness& pbr = material->pbr_metallic_roughness;
-        data.base_color = core::Vec4{pbr.base_color_factor[0], pbr.base_color_factor[1],
-                                     pbr.base_color_factor[2], pbr.base_color_factor[3]};
-
-        // KHR_texture_basisu gives a texture a KTX2 image, preferred over its plain one.
-        const cgltf_texture* const texture = pbr.base_color_texture.texture;
-        const cgltf_image* const source =
-            texture == nullptr ? nullptr
-            : texture->has_basisu && texture->basisu_image != nullptr ? texture->basisu_image
-                                                                       : texture->image;
-        if (source != nullptr) {
-            core::Result<int> image = add_image(*source, model, images, read_file);
-            if (!image.has_value()) {
-                return image.error();
+    data.metallic = 1.0f;
+    data.roughness = 1.0f;
+    if (material != nullptr) {
+        const auto texture = [&](const cgltf_texture_view& view, bool color,
+                                 int& image) -> core::Result<void> {
+            const core::Result<int> added = add_texture(view, color, model, images, read_file);
+            if (!added.has_value()) {
+                return added.error();
             }
-            data.image = image.value();
+            image = added.value();
+            return {};
+        };
+        if (material->has_pbr_metallic_roughness) {
+            const cgltf_pbr_metallic_roughness& pbr = material->pbr_metallic_roughness;
+            data.base_color = core::Vec4{pbr.base_color_factor[0], pbr.base_color_factor[1],
+                                         pbr.base_color_factor[2], pbr.base_color_factor[3]};
+            data.metallic = pbr.metallic_factor;
+            data.roughness = pbr.roughness_factor;
+            if (auto added = texture(pbr.base_color_texture, true, data.image); !added.has_value()) {
+                return added.error();
+            }
+            if (auto added = texture(pbr.metallic_roughness_texture, false,
+                                     data.metallic_roughness_image);
+                !added.has_value()) {
+                return added.error();
+            }
         }
+        if (auto added = texture(material->normal_texture, false, data.normal_image);
+            !added.has_value()) {
+            return added.error();
+        }
+        data.normal_scale = data.normal_image >= 0 ? material->normal_texture.scale : 1.0f;
+        if (auto added = texture(material->occlusion_texture, false, data.occlusion_image);
+            !added.has_value()) {
+            return added.error();
+        }
+        data.occlusion_strength = data.occlusion_image >= 0 ? material->occlusion_texture.scale
+                                                            : 1.0f;
+        if (auto added = texture(material->emissive_texture, true, data.emissive_image);
+            !added.has_value()) {
+            return added.error();
+        }
+        const float strength =
+            material->has_emissive_strength ? material->emissive_strength.emissive_strength : 1.0f;
+        data.emissive = core::Vec3{material->emissive_factor[0], material->emissive_factor[1],
+                                   material->emissive_factor[2]} *
+                        strength;
     }
 
     const auto index = static_cast<std::uint32_t>(model.materials.size());
@@ -120,8 +197,7 @@ core::Result<std::uint32_t> add_material(const cgltf_material* material, ModelDa
 core::Result<void> add_primitive(const cgltf_primitive& primitive, const core::Mat4& world,
                                  const core::Mat4& normal_matrix, ModelData& model,
                                  std::map<const cgltf_material*, std::uint32_t>& materials,
-                                 std::map<const cgltf_image*, int>& images,
-                                 const ModelFileReader& read_file) {
+                                 KnownImages& images, const ModelFileReader& read_file) {
     if (primitive.type != cgltf_primitive_type_triangles) {
         return model_error("Only triangles are supported");
     }
@@ -129,6 +205,7 @@ core::Result<void> add_primitive(const cgltf_primitive& primitive, const core::M
     const cgltf_accessor* position = nullptr;
     const cgltf_accessor* normal = nullptr;
     const cgltf_accessor* uv = nullptr;
+    const cgltf_accessor* tangent = nullptr;
     for (cgltf_size index = 0; index < primitive.attributes_count; ++index) {
         const cgltf_attribute& attribute = primitive.attributes[index];
         if (attribute.type == cgltf_attribute_type_position) {
@@ -137,6 +214,8 @@ core::Result<void> add_primitive(const cgltf_primitive& primitive, const core::M
             normal = attribute.data;
         } else if (attribute.type == cgltf_attribute_type_texcoord && attribute.index == 0) {
             uv = attribute.data;
+        } else if (attribute.type == cgltf_attribute_type_tangent) {
+            tangent = attribute.data;
         }
     }
     if (position == nullptr) {
@@ -149,20 +228,40 @@ core::Result<void> add_primitive(const cgltf_primitive& primitive, const core::M
     if (model.vertices.size() + position->count > std::numeric_limits<std::uint32_t>::max()) {
         return model_error("The model has too many vertices");
     }
+    // Tangents move with the surface, and a mirroring transform turns their bitangents around.
+    const core::Vec3 x_axis{world.columns[0].x, world.columns[0].y, world.columns[0].z};
+    const core::Vec3 y_axis{world.columns[1].x, world.columns[1].y, world.columns[1].z};
+    const core::Vec3 z_axis{world.columns[2].x, world.columns[2].y, world.columns[2].z};
+    const float handedness = core::dot(core::cross(x_axis, y_axis), z_axis) < 0.0f ? -1.0f : 1.0f;
+
     const auto base = static_cast<std::uint32_t>(model.vertices.size());
     for (cgltf_size index = 0; index < position->count; ++index) {
         std::array<cgltf_float, 3> p{};
         std::array<cgltf_float, 3> n{};
         std::array<cgltf_float, 2> t{};
+        std::array<cgltf_float, 4> tangent_value{};
         cgltf_accessor_read_float(position, index, p.data(), 3);
         cgltf_accessor_read_float(normal, index, n.data(), 3);
         if (uv != nullptr) {
             cgltf_accessor_read_float(uv, index, t.data(), 2);
         }
+        core::Vec4 world_tangent;
+        if (tangent != nullptr) {
+            cgltf_accessor_read_float(tangent, index, tangent_value.data(), 4);
+            const core::Vec3 moved = core::transform_direction(
+                world, core::Vec3{tangent_value[0], tangent_value[1], tangent_value[2]});
+            if (core::length(moved) > 0.0f) {
+                const core::Vec3 unit = core::normalized(moved);
+                world_tangent = core::Vec4{unit.x, unit.y, unit.z,
+                                           (tangent_value[3] < 0.0f ? -1.0f : 1.0f) * handedness};
+            }
+        }
         model.vertices.push_back(ModelVertex{
-            core::transform_point(world, core::Vec3{p[0], p[1], p[2]}),
-            core::normalized(core::transform_direction(normal_matrix, core::Vec3{n[0], n[1], n[2]})),
-            core::Vec2{t[0], t[1]},
+            .position = core::transform_point(world, core::Vec3{p[0], p[1], p[2]}),
+            .normal = core::normalized(
+                core::transform_direction(normal_matrix, core::Vec3{n[0], n[1], n[2]})),
+            .uv = core::Vec2{t[0], t[1]},
+            .tangent = world_tangent,
         });
     }
 
@@ -236,7 +335,7 @@ core::Result<ModelData> parse_glb(std::span<const std::byte> file,
 
     ModelData model;
     std::map<const cgltf_material*, std::uint32_t> materials;
-    std::map<const cgltf_image*, int> images;
+    KnownImages images;
 
     for (cgltf_size node_index = 0; node_index < gltf->nodes_count; ++node_index) {
         const cgltf_node& node = gltf->nodes[node_index];
@@ -267,6 +366,83 @@ core::Result<ModelData> parse_glb(std::span<const std::byte> file,
         return model_error("The model has no meshes");
     }
     return model;
+}
+
+core::Result<void> generate_tangents(ModelData& data,
+                                     tangent_generator::TangentGenerator& generator) {
+    for (const ModelPart& part : data.parts) {
+        if (part.material >= data.materials.size() ||
+            data.materials[part.material].normal_image < 0 ||
+            std::size_t{part.first_index} + part.index_count > data.indices.size()) {
+            continue;
+        }
+        const std::span<std::uint32_t> indices =
+            std::span(data.indices).subspan(part.first_index, part.index_count);
+        // A part whose file gave tangents keeps them.
+        const bool has_tangents = std::ranges::any_of(indices, [&](std::uint32_t index) {
+            return index < data.vertices.size() && data.vertices[index].tangent.w != 0.0f;
+        });
+        if (has_tangents) {
+            continue;
+        }
+
+        const core::Result<std::vector<core::Vec4>> generated =
+            generator.generate(tangent_generator::Request{
+                // Again for each part, since earlier parts may have added vertices.
+                .vertices = std::as_bytes(std::span(data.vertices)),
+                .stride = sizeof(ModelVertex),
+                .position_offset = offsetof(ModelVertex, position),
+                .normal_offset = offsetof(ModelVertex, normal),
+                .uv_offset = offsetof(ModelVertex, uv),
+                .indices = indices,
+            });
+        if (!generated.has_value()) {
+            return generated.error();
+        }
+        const std::vector<core::Vec4>& tangents = generated.value();
+        if (tangents.size() != indices.size()) {
+            return core::Error{core::ErrorCode::InvalidArgument,
+                               "The tangent generator gave the wrong number of tangents"};
+        }
+
+        // Each corner's vertex takes its tangent. A vertex that already has a different one, on a
+        // seam of the texture, is copied for this corner, or a copy made earlier is reused.
+        const auto same = [](const core::Vec4& a, const core::Vec4& b) {
+            return a.w == b.w && core::dot(core::Vec3{a.x, a.y, a.z}, core::Vec3{b.x, b.y, b.z}) >
+                                     0.999f;
+        };
+        std::map<std::uint32_t, std::vector<std::uint32_t>> copies;
+        for (std::size_t corner = 0; corner < indices.size(); ++corner) {
+            const core::Vec4& tangent = tangents[corner];
+            std::uint32_t& index = indices[corner];
+            ModelVertex& vertex = data.vertices[index];
+            if (vertex.tangent.w == 0.0f) {
+                vertex.tangent = tangent;
+                continue;
+            }
+            if (same(vertex.tangent, tangent)) {
+                continue;
+            }
+            std::vector<std::uint32_t>& made = copies[index];
+            const auto found = std::ranges::find_if(made, [&](std::uint32_t copy) {
+                return same(data.vertices[copy].tangent, tangent);
+            });
+            if (found != made.end()) {
+                index = *found;
+                continue;
+            }
+            if (data.vertices.size() >= std::numeric_limits<std::uint32_t>::max()) {
+                return model_error("The model has too many vertices");
+            }
+            ModelVertex copy = data.vertices[index];
+            copy.tangent = tangent;
+            const auto copy_index = static_cast<std::uint32_t>(data.vertices.size());
+            data.vertices.push_back(copy);
+            made.push_back(copy_index);
+            index = copy_index;
+        }
+    }
+    return {};
 }
 
 core::Result<void> generate_lods(ModelData& data, mesh_simplifier::MeshSimplifier& simplifier,
@@ -337,14 +513,28 @@ core::Result<ModelAsset> create_model_asset(rhi::Device& device, const ModelData
     for (const ImageData& image : data.images) {
         core::Result<rhi::TextureHandle> texture = rhi::TextureHandle{};
         if (!image.ktx2.empty()) {
-            const core::Result<TextureData> loaded = load_ktx2(image.ktx2, device);
+            core::Result<TextureData> loaded = load_ktx2(image.ktx2, device);
             if (!loaded.has_value()) {
                 return loaded.error();
             }
-            texture = device.create_texture(loaded.value().desc, loaded.value().pixels);
+            // How the material uses it decides how it is read. The bytes are the same either way,
+            // but the cooking made its smaller levels for the color space its name asked for.
+            rhi::TextureDesc desc = loaded.value().desc;
+            if (rhi::is_srgb(desc.format) != image.color) {
+                DREAM_LOG_WARNING("'{}' was cooked as {}, but a material reads it as {}; see "
+                                  "docs/guides/materials.md on naming textures",
+                                  image.name, image.color ? "linear data" : "colors",
+                                  image.color ? "colors" : "linear data");
+                desc.format = with_color_space(desc.format, image.color);
+            }
+            texture = device.create_texture(desc, loaded.value().pixels);
         } else {
             texture = device.create_texture(
-                rhi::TextureDesc{.width = image.width, .height = image.height}, image.pixels);
+                rhi::TextureDesc{.width = image.width,
+                                 .height = image.height,
+                                 .format = image.color ? rhi::TextureFormat::Rgba8Srgb
+                                                       : rhi::TextureFormat::Rgba8Unorm},
+                image.pixels);
         }
         if (!texture.has_value()) {
             return texture.error();
@@ -352,13 +542,26 @@ core::Result<ModelAsset> create_model_asset(rhi::Device& device, const ModelData
         textures.emplace_back(device, texture.value());
     }
 
+    const auto texture_of = [&](int image) {
+        return image >= 0 && static_cast<std::size_t>(image) < textures.size()
+                   ? textures[static_cast<std::size_t>(image)].get()
+                   : rhi::TextureHandle{};
+    };
     std::vector<ModelMaterial> materials;
     materials.reserve(data.materials.size());
     for (const ModelMaterialData& material : data.materials) {
         materials.push_back(ModelMaterial{
-            material.base_color,
-            material.image >= 0 ? textures[static_cast<std::size_t>(material.image)].get()
-                                : rhi::TextureHandle{},
+            .base_color = material.base_color,
+            .metallic = material.metallic,
+            .roughness = material.roughness,
+            .normal_scale = material.normal_scale,
+            .occlusion_strength = material.occlusion_strength,
+            .emissive = material.emissive,
+            .base_color_texture = texture_of(material.image),
+            .normal_texture = texture_of(material.normal_image),
+            .metallic_roughness_texture = texture_of(material.metallic_roughness_image),
+            .occlusion_texture = texture_of(material.occlusion_image),
+            .emissive_texture = texture_of(material.emissive_image),
         });
     }
 

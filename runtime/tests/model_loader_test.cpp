@@ -4,6 +4,7 @@
 
 #include <doctest/doctest.h>
 
+#include <cstddef>
 #include <cstring>
 #include <format>
 #include <ostream> // Needed for doctest to print std::string.
@@ -194,9 +195,22 @@ TEST_CASE("create_model_asset creates one texture per image and links materials 
     ModelData data;
     data.vertices.resize(3);
     data.indices = {0, 1, 2};
-    data.images.push_back(ImageData{2, 1, std::vector<std::byte>(8), {}});
-    data.materials.push_back(ModelMaterialData{{1, 1, 1, 1}, 0});
-    data.materials.push_back(ModelMaterialData{{1, 0, 0, 1}, -1});
+    data.images.push_back(
+        ImageData{.width = 2, .height = 1, .pixels = std::vector<std::byte>(8), .name = "colors"});
+    data.images.push_back(ImageData{.width = 2,
+                                    .height = 1,
+                                    .pixels = std::vector<std::byte>(8),
+                                    .color = false,
+                                    .name = "normals"});
+    data.materials.push_back(ModelMaterialData{.metallic = 0.25f,
+                                               .roughness = 0.75f,
+                                               .emissive = core::Vec3{2.0f, 0.0f, 0.0f},
+                                               .image = 0,
+                                               .normal_image = 1,
+                                               .metallic_roughness_image = 1,
+                                               .occlusion_image = 1,
+                                               .emissive_image = 0});
+    data.materials.push_back(ModelMaterialData{.base_color = core::Vec4{1, 0, 0, 1}});
     data.parts.push_back(ModelPart{.first_index = 0, .index_count = 3, .material = 1, .bounds = {}});
 
     FakeDeviceState state;
@@ -205,10 +219,25 @@ TEST_CASE("create_model_asset creates one texture per image and links materials 
     const core::Result<ModelAsset> asset = create_model_asset(device, data);
     REQUIRE(asset.has_value());
 
-    CHECK(state.calls == std::vector<std::string>{"texture 2x1"});
+    CHECK(state.calls == std::vector<std::string>{"texture 2x1", "texture 2x1"});
+    // Colors are read as sRGB, and data such as normal maps as they are.
+    REQUIRE(state.textures.size() == 2);
+    CHECK(state.textures[0].format == rhi::TextureFormat::Rgba8Srgb);
+    CHECK(state.textures[1].format == rhi::TextureFormat::Rgba8Unorm);
+
     REQUIRE(asset.value().materials.size() == 2);
-    CHECK(asset.value().materials[0].texture.is_valid());
-    CHECK_FALSE(asset.value().materials[1].texture.is_valid());
+    const ModelMaterial& textured = asset.value().materials[0];
+    CHECK(textured.base_color_texture.is_valid());
+    CHECK(textured.emissive_texture == textured.base_color_texture);
+    CHECK(textured.normal_texture.is_valid());
+    CHECK(textured.normal_texture != textured.base_color_texture);
+    CHECK(textured.metallic_roughness_texture == textured.normal_texture);
+    CHECK(textured.occlusion_texture == textured.normal_texture);
+    CHECK(textured.metallic == 0.25f);
+    CHECK(textured.roughness == 0.75f);
+    CHECK(textured.emissive.x == 2.0f);
+    CHECK_FALSE(asset.value().materials[1].base_color_texture.is_valid());
+    CHECK_FALSE(asset.value().materials[1].normal_texture.is_valid());
 }
 
 namespace {
@@ -265,6 +294,106 @@ TEST_CASE("parse_glb reads an image from a file beside the model") {
         REQUIRE_FALSE(failed.has_value());
         CHECK(failed.error().message.find("textures/two pixels.png") != std::string::npos);
     }
+}
+
+TEST_CASE("parse_glb reads every texture and factor of a metallic-roughness material") {
+    std::string json = model_json(
+        R"({"mesh":0})", k_attributes,
+        R"(,"textures":[{"source":0},{"source":1}],"images":[{"uri":"color.png"},{"uri":"data.png"}],)"
+        R"("extensionsUsed":["KHR_materials_emissive_strength"])");
+    const std::string plain =
+        R"("materials":[{"pbrMetallicRoughness":{"baseColorFactor":[0.5,0.25,0.75,1]}}])";
+    const std::string full =
+        R"("materials":[{"pbrMetallicRoughness":{"baseColorFactor":[0.5,0.25,0.75,1],)"
+        R"("baseColorTexture":{"index":0},"metallicFactor":0.25,"roughnessFactor":0.5,)"
+        R"("metallicRoughnessTexture":{"index":1}},)"
+        R"("normalTexture":{"index":1,"scale":0.5},"occlusionTexture":{"index":1,"strength":0.75},)"
+        R"("emissiveTexture":{"index":0},"emissiveFactor":[1,0.5,0],)"
+        R"("extensions":{"KHR_materials_emissive_strength":{"emissiveStrength":4}}}])";
+    json.replace(json.find(plain), plain.size(), full);
+    const ModelFileReader read = [](std::string_view) -> core::Result<std::vector<std::byte>> {
+        return std::vector<std::byte>(png_file().begin(), png_file().end());
+    };
+
+    const core::Result<ModelData> model = parse_glb(make_glb(json, triangle_binary()), read);
+    REQUIRE_MESSAGE(model.has_value(), model.error().message);
+    const ModelData& data = model.value();
+    REQUIRE(data.materials.size() == 1);
+    const ModelMaterialData& material = data.materials[0];
+    CHECK(material.metallic == Approx(0.25f));
+    CHECK(material.roughness == Approx(0.5f));
+    CHECK(material.normal_scale == Approx(0.5f));
+    CHECK(material.occlusion_strength == Approx(0.75f));
+    CHECK(material.emissive.x == Approx(4.0f));
+    CHECK(material.emissive.y == Approx(2.0f));
+
+    // One image for the colors, and one for the data, each decoded once.
+    REQUIRE(data.images.size() == 2);
+    CHECK(material.image == material.emissive_image);
+    CHECK(data.images[static_cast<std::size_t>(material.image)].color);
+    CHECK(data.images[static_cast<std::size_t>(material.image)].name == "color.png");
+    CHECK(material.normal_image == material.metallic_roughness_image);
+    CHECK(material.normal_image == material.occlusion_image);
+    CHECK_FALSE(data.images[static_cast<std::size_t>(material.normal_image)].color);
+}
+
+TEST_CASE("parse_glb keeps an image read both as colors and as data twice") {
+    std::string json = model_json(R"({"mesh":0})", k_attributes,
+                                  R"(,"textures":[{"source":0}],"images":[{"uri":"both.png"}])");
+    const std::string plain = R"("pbrMetallicRoughness":{"baseColorFactor":[0.5,0.25,0.75,1]})";
+    json.replace(json.find(plain), plain.size(),
+                 R"("pbrMetallicRoughness":{"baseColorTexture":{"index":0}},)"
+                 R"("normalTexture":{"index":0})");
+    const ModelFileReader read = [](std::string_view) -> core::Result<std::vector<std::byte>> {
+        return std::vector<std::byte>(png_file().begin(), png_file().end());
+    };
+    const core::Result<ModelData> model = parse_glb(make_glb(json, triangle_binary()), read);
+    REQUIRE_MESSAGE(model.has_value(), model.error().message);
+    REQUIRE(model.value().images.size() == 2);
+    CHECK(model.value().images[0].color != model.value().images[1].color);
+}
+
+TEST_CASE("parse_glb follows glTF's defaults: metallic and rough") {
+    std::string json = model_json(R"({"mesh":0})", k_attributes);
+    const std::string plain = R"("pbrMetallicRoughness":{"baseColorFactor":[0.5,0.25,0.75,1]})";
+    json.replace(json.find(plain), plain.size(), R"("name":"plain")");
+    const core::Result<ModelData> model = parse_glb(make_glb(json, triangle_binary()));
+    REQUIRE(model.has_value());
+    CHECK(model.value().materials[0].metallic == 1.0f);
+    CHECK(model.value().materials[0].roughness == 1.0f);
+    CHECK(model.value().materials[0].normal_image == -1);
+    CHECK(model.value().materials[0].emissive.x == 0.0f);
+}
+
+TEST_CASE("parse_glb reads tangents, turning them with the node") {
+    // The triangle, then a tangent per vertex along +X with its bitangent along +Y.
+    std::vector<std::byte> binary = triangle_binary();
+    while (binary.size() % 4 != 0) {
+        binary.push_back(std::byte{0});
+    }
+    constexpr float k_tangents[] = {1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1};
+    append<float>(binary, k_tangents);
+    const auto json_for = [](const std::string& node) {
+        std::string json = model_json(node, R"({"POSITION":0,"NORMAL":1,"TEXCOORD_0":2,"TANGENT":4})");
+        json.replace(json.find(R"("byteLength":104)"), 16, R"("byteLength":152)");
+        json.replace(json.find(R"("byteLength":6}])"), 16,
+                     R"("byteLength":6},{"buffer":0,"byteOffset":104,"byteLength":48}])");
+        json.replace(json.find(R"("type":"SCALAR"}])"), 17,
+                     R"("type":"SCALAR"},{"bufferView":4,"componentType":5126,"count":3,"type":"VEC4"}])");
+        return json;
+    };
+
+    const core::Result<ModelData> plain = parse_glb(make_glb(json_for(R"({"mesh":0})"), binary));
+    REQUIRE_MESSAGE(plain.has_value(), plain.error().message);
+    CHECK(plain.value().vertices[0].tangent.x == Approx(1.0f));
+    CHECK(plain.value().vertices[0].tangent.w == 1.0f);
+
+    // Mirrored across X: the tangent turns around, and so does the bitangent's sign.
+    const core::Result<ModelData> mirrored =
+        parse_glb(make_glb(json_for(R"({"mesh":0,"scale":[-1,1,1]})"), binary));
+    REQUIRE_MESSAGE(mirrored.has_value(), mirrored.error().message);
+    CHECK(mirrored.value().vertices[0].tangent.x == Approx(-1.0f));
+    CHECK(mirrored.value().vertices[0].tangent.w == -1.0f);
 }
 
 TEST_CASE("parse_glb keeps a KTX2 image, preferring KHR_texture_basisu's") {
@@ -349,4 +478,74 @@ TEST_CASE("generate_lods leaves small parts alone and stops when a version saves
     REQUIRE(generate_lods(data, simplifier, LodOptions{.reduction = 0.9f}).has_value());
     CHECK(data.parts[0].lods.empty());
     CHECK(data.indices.size() == 1200);
+}
+
+namespace {
+
+// Gives each corner the tangent its test asks for.
+class ListedTangents final : public tangent_generator::TangentGenerator {
+public:
+    explicit ListedTangents(std::vector<core::Vec4> tangents) : m_tangents(std::move(tangents)) {}
+
+    core::Result<std::vector<core::Vec4>> generate(
+        const tangent_generator::Request& request) override {
+        ++calls;
+        CHECK(request.stride == sizeof(ModelVertex));
+        CHECK(request.uv_offset == offsetof(ModelVertex, uv));
+        return std::vector<core::Vec4>(m_tangents.begin(),
+                                       m_tangents.begin() +
+                                           static_cast<std::ptrdiff_t>(request.indices.size()));
+    }
+    int calls = 0;
+
+private:
+    std::vector<core::Vec4> m_tangents;
+};
+
+// Two triangles sharing vertices 0 and 2, with a material that has a normal map.
+ModelData normal_mapped_square() {
+    ModelData data;
+    data.vertices.resize(4);
+    data.vertices[3].position = core::Vec3{1.0f, 0.0f, 0.0f};
+    data.indices = {0, 1, 2, 0, 2, 3};
+    data.materials.push_back(ModelMaterialData{.normal_image = 0});
+    data.parts.push_back(ModelPart{.first_index = 0, .index_count = 6, .material = 0, .bounds = {}});
+    return data;
+}
+
+} // namespace
+
+TEST_CASE("generate_tangents gives each vertex its tangent, copying vertices on seams") {
+    ModelData data = normal_mapped_square();
+    const core::Vec4 along_x{1.0f, 0.0f, 0.0f, 1.0f};
+    const core::Vec4 mirrored{-1.0f, 0.0f, 0.0f, -1.0f};
+    // The second triangle's texture is mirrored, so the vertices it shares need copies.
+    ListedTangents generator({along_x, along_x, along_x, mirrored, mirrored, mirrored});
+    REQUIRE(generate_tangents(data, generator).has_value());
+
+    REQUIRE(data.vertices.size() == 6);
+    CHECK(data.indices == std::vector<std::uint32_t>{0, 1, 2, 4, 5, 3});
+    CHECK(data.vertices[0].tangent.x == 1.0f);
+    CHECK(data.vertices[3].tangent.x == -1.0f);
+    CHECK(data.vertices[4].tangent.w == -1.0f);
+    CHECK(data.vertices[4].position.x == data.vertices[0].position.x);
+    CHECK(data.vertices[5].tangent.w == -1.0f);
+}
+
+TEST_CASE("generate_tangents leaves parts without normal maps, or with tangents, alone") {
+    ListedTangents generator(std::vector<core::Vec4>(6, core::Vec4{1.0f, 0.0f, 0.0f, 1.0f}));
+
+    ModelData plain = normal_mapped_square();
+    plain.materials[0].normal_image = -1;
+    REQUIRE(generate_tangents(plain, generator).has_value());
+
+    ModelData given = normal_mapped_square();
+    for (ModelVertex& vertex : given.vertices) {
+        vertex.tangent = core::Vec4{0.0f, 1.0f, 0.0f, 1.0f};
+    }
+    REQUIRE(generate_tangents(given, generator).has_value());
+
+    CHECK(generator.calls == 0);
+    CHECK(plain.vertices[0].tangent.w == 0.0f);
+    CHECK(given.vertices[0].tangent.y == 1.0f);
 }

@@ -193,18 +193,29 @@ enum class PrimitiveTopology : std::uint8_t { Triangles, Lines };
 // space. Shadow maps often cull the front faces, so the back ones cast the shadow.
 enum class CullMode : std::uint8_t { None, Back, Front };
 
-// How many textures a draw can read, each at a slot with its own sampler (ADR 0027):
+// How many textures a draw can read, each at a slot with its own sampler (ADR 0027, ADR 0033):
 //
 // | Slot | Sampler | Vulkan | DirectX | OpenGL |
 // |---|---|---|---|---|
 // | 0 | linear, mipmaps, repeating | set 0, binding 1 | t0, s0 | texture unit 1 |
 // | 1 | linear, clamped to the edge | set 0, binding 2 | t1, s1 | texture unit 2 |
 // | 2 | depth comparison, less or equal, linear, clamped | set 0, binding 3 | t2, s2 | texture unit 3 |
+// | 3 to 6 | linear, mipmaps, repeating | set 0, bindings 4 to 7 | t3 to t6, s3 to s6 | texture units 4 to 7 |
 //
 // Slot 2 takes a Depth32Float texture, read with a shader's shadow sampler: Sampler2DShadow in
-// Slang.
-inline constexpr std::uint32_t k_texture_slots = 3;
+// Slang. Slots 3 to 6 are for a material's other textures, such as its normal map.
+inline constexpr std::uint32_t k_texture_slots = 7;
 inline constexpr std::uint32_t k_shadow_slot = 2;
+
+// How a slot's sampler reads its texture.
+enum class SlotSampler : std::uint8_t { Repeat, Clamp, ShadowCompare };
+
+[[nodiscard]] constexpr SlotSampler slot_sampler(std::uint32_t slot) noexcept {
+    if (slot == k_shadow_slot) {
+        return SlotSampler::ShadowCompare;
+    }
+    return slot == 1 ? SlotSampler::Clamp : SlotSampler::Repeat;
+}
 
 // How drawn colors combine with what is already there. Alpha uses the color's alpha as its
 // opacity; PremultipliedAlpha expects colors already multiplied by their alpha.
@@ -331,7 +342,7 @@ public:
 
     // Sets the texture that shaders read at `slot`, below k_texture_slots, for this and later draws
     // in the pass. Each pass starts with defaults, which an invalid handle also selects: plain
-    // white for slots 0 and 1, and a depth at the far plane for the shadow slot, so every
+    // white for every color slot, and a depth at the far plane for the shadow slot, so every
     // comparison passes.
     virtual void bind_texture(std::uint32_t slot, TextureHandle texture) = 0;
 

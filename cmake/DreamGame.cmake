@@ -129,6 +129,13 @@ endfunction()
 # name in `output_dir`, with UASTC data and every mip level, compressed with zstd. The game loads it
 # in place of the PNG and transcodes it for its GPU. Cooking runs on the build machine, with the
 # ktx tool vcpkg builds for it. See docs/adr/0024-texture-cooking.md.
+#
+# Textures are colors, in sRGB, unless their names end in one of the suffixes below, which mark
+# linear data such as normal maps, whose smaller levels must be made without sRGB's curve. Normal
+# maps' smaller levels are also made unit length again. See docs/guides/materials.md.
+set(_DREAM_NORMAL_TEXTURE_SUFFIXES "_normal" "_normals" "_nrm")
+set(_DREAM_LINEAR_TEXTURE_SUFFIXES "_orm" "_metallic_roughness" "_mr" "_roughness" "_metallic"
+    "_occlusion" "_ao" "_linear")
 function(_dream_cook_textures target output_dir)
     file(GLOB ktx_dirs "${VCPKG_INSTALLED_DIR}/*/tools/ktx")
     find_program(DREAM_KTX ktx HINTS ${ktx_dirs} NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
@@ -142,12 +149,33 @@ function(_dream_cook_textures target output_dir)
                 continue()
             endif()
             string(REGEX REPLACE "\.[Pp][Nn][Gg]$" ".ktx2" relative "${relative}")
+            cmake_path(GET source STEM LAST_ONLY stem)
+            string(TOLOWER "${stem}" stem)
+            set(kind color)
+            foreach(suffix IN LISTS _DREAM_NORMAL_TEXTURE_SUFFIXES _DREAM_LINEAR_TEXTURE_SUFFIXES)
+                if(stem MATCHES "${suffix}$")
+                    list(FIND _DREAM_NORMAL_TEXTURE_SUFFIXES "${suffix}" normal_index)
+                    if(normal_index GREATER -1)
+                        set(kind normal)
+                    else()
+                        set(kind linear)
+                    endif()
+                    break()
+                endif()
+            endforeach()
+            if(kind STREQUAL "color")
+                set(color_options --format R8G8B8A8_SRGB --assign-tf srgb)
+            elseif(kind STREQUAL "normal")
+                set(color_options --format R8G8B8A8_UNORM --assign-tf linear --normalize)
+            else()
+                set(color_options --format R8G8B8A8_UNORM --assign-tf linear)
+            endif()
             set(output "${output_dir}/${relative}")
             cmake_path(GET output PARENT_PATH output_parent)
             add_custom_command(
                 OUTPUT "${output}"
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${output_parent}"
-                COMMAND "${DREAM_KTX}" create --format R8G8B8A8_SRGB --assign-tf srgb --encode uastc
+                COMMAND "${DREAM_KTX}" create ${color_options} --encode uastc
                     --uastc-quality 2 --zstd 18 --generate-mipmap
                     "${source}" "${output}"
                 DEPENDS "${source}"

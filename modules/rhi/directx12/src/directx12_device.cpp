@@ -1058,7 +1058,7 @@ private:
         std::array<D3D12_STATIC_SAMPLER_DESC, k_texture_slots> samplers{};
         for (UINT slot = 0; slot < k_texture_slots; ++slot) {
             D3D12_STATIC_SAMPLER_DESC& sampler = samplers[slot];
-            const D3D12_TEXTURE_ADDRESS_MODE address = slot == 0
+            const D3D12_TEXTURE_ADDRESS_MODE address = slot_sampler(slot) == SlotSampler::Repeat
                                                            ? D3D12_TEXTURE_ADDRESS_MODE_WRAP
                                                            : D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
             sampler.Filter = slot == k_shadow_slot

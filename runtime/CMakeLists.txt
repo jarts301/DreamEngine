@@ -39,7 +39,8 @@ target_link_libraries(dream_runtime PUBLIC
     dream::core dream::interface_platform dream::interface_rhi dream::interface_physics2d
     dream::interface_physics3d dream::interface_audio dream::interface_ui
     dream::interface_debug_ui dream::interface_profiler dream::interface_renderer
-    dream::interface_mesh_simplifier EnTT::EnTT)
+    dream::interface_mesh_simplifier dream::interface_tangent_generator
+    EnTT::EnTT)
 target_link_libraries(dream_runtime PRIVATE KTX::ktx)
 dream_configure_target(dream_runtime)
 

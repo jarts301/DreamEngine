@@ -89,7 +89,9 @@ struct RendererShaders {};
 // the module starts and ends its render passes itself. The module's own settings, such as HDR and
 // shadows, are in its documentation and the [renderer] table. When the project also lists a
 // `mesh_simplifier`, models get simpler versions as they load, which the [lods] table sets out, for
-// the module to draw far away (ADR 0032).
+// the module to draw far away (ADR 0032). When it lists a `tangent_generator`, models with normal
+// maps but no tangents get them as they load (ADR 0033); docs/guides/materials.md explains
+// materials.
 //
 // initialize also lets scene files use the components "camera", "mesh" and "directional_light":
 //
@@ -184,6 +186,7 @@ private:
     std::unique_ptr<renderer::SceneRenderer> m_backend;
     // Makes simpler versions of models as they load, when the project lists one.
     std::unique_ptr<mesh_simplifier::MeshSimplifier> m_simplifier;
+    std::unique_ptr<tangent_generator::TangentGenerator> m_tangents;
     // After the backend, so the asset that reloads its shaders goes first.
     AssetRef<RendererShaders> m_shaders;
     std::unique_ptr<UiTextures> m_ui_textures;

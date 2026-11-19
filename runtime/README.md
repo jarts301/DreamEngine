@@ -26,7 +26,11 @@ dream_add_game(my_game
 For that, list a renderer module, such as `renderer = ["forward"]`, under `[modules.<platform>]`.
 See [ADR 0030](../docs/adr/0030-renderer-module.md). Listing a `mesh_simplifier` as well, such as
 `mesh_simplifier = ["meshoptimizer"]`, gives models simpler versions for the renderer to draw far
-away ([ADR 0032](../docs/adr/0032-instancing-and-lods.md)).
+away ([ADR 0032](../docs/adr/0032-instancing-and-lods.md)). Listing a `tangent_generator`, such as
+`tangent_generator = ["mikktspace"]`, makes tangents for normal maps on models that have none
+([ADR 0033](../docs/adr/0033-pbr-materials-and-normal-maps.md)); the
+[materials guide](../docs/guides/materials.md) explains how to make models whose materials look
+right.
 [samples/physics_demo](../samples/physics_demo/src/physics_demo.cpp) adds 3D and 2D physics with
 `runtime::Physics3D` and `runtime::Physics2D`, which need `physics3d` or `physics2d` listed under
 `[modules.<platform>]`.

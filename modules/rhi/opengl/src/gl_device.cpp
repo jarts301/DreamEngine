@@ -1284,9 +1284,10 @@ private:
         m_gl.GenSamplers(static_cast<GLsizei>(m_samplers.size()), m_samplers.data());
         for (std::uint32_t slot = 0; slot < k_texture_slots; ++slot) {
             const GLuint sampler = m_samplers[slot];
-            const GLint wrap = slot == 0 ? GL_REPEAT : GL_CLAMP_TO_EDGE;
+            const bool repeat = slot_sampler(slot) == SlotSampler::Repeat;
+            const GLint wrap = repeat ? GL_REPEAT : GL_CLAMP_TO_EDGE;
             m_gl.SamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER,
-                                   slot == 0 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+                                   repeat ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
             m_gl.SamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             m_gl.SamplerParameteri(sampler, GL_TEXTURE_WRAP_S, wrap);
             m_gl.SamplerParameteri(sampler, GL_TEXTURE_WRAP_T, wrap);

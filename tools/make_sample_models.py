@@ -2,7 +2,10 @@
 """Generates the original models shared by the samples, in samples/assets/models, as .glb files.
 
 Textures are PNG files of their own in models/textures, which the build cooks into KTX2 (see
-docs/adr/0024-texture-cooking.md); the models refer to them by name.
+docs/adr/0024-texture-cooking.md); the models refer to them by name. Every material states its
+metallic and roughness factors, since glTF's defaults are fully metallic and fully rough (see
+docs/guides/materials.md). The brick wall has a normal map and an occlusion-roughness-metallic
+map, and no tangents, which the engine's tangent generator makes.
 
 Usage: python tools/make_sample_models.py
 
@@ -39,9 +42,22 @@ def png_bytes(width, height, pixel):
     )
 
 
-def write_glb(path, positions, normals, uvs, indices, base_color, image=None):
-    """Writes one mesh with one material, and optionally a texture: (file name, PNG bytes), saved
-    in the textures folder beside the model."""
+def write_glb(
+    path,
+    positions,
+    normals,
+    uvs,
+    indices,
+    base_color,
+    image=None,
+    metallic=0.0,
+    roughness=0.7,
+    normal_image=None,
+    orm_image=None,
+):
+    """Writes one mesh with one material. Each image is (file name, PNG bytes), saved in the
+    textures folder beside the model: `image` is the base color, `normal_image` a normal map, and
+    `orm_image` occlusion in red, roughness in green and metallic in blue."""
     views = []
     accessors = []
     binary = bytearray()
@@ -83,7 +99,14 @@ def write_glb(path, positions, normals, uvs, indices, base_color, image=None):
     )
     index_accessor = len(accessors) - 1
 
-    material = {"pbrMetallicRoughness": {"baseColorFactor": list(base_color)}, "name": path.stem}
+    material = {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": list(base_color),
+            "metallicFactor": metallic,
+            "roughnessFactor": roughness,
+        },
+        "name": path.stem,
+    }
     gltf = {
         "asset": {"version": "2.0", "generator": "DreamEngine make_sample_models.py"},
         "scene": 0,
@@ -109,14 +132,24 @@ def write_glb(path, positions, normals, uvs, indices, base_color, image=None):
         "bufferViews": views,
     }
 
-    if image is not None:
-        name, png = image
+    def add_texture(named_png):
+        name, png = named_png
         (path.parent / "textures").mkdir(exist_ok=True)
         (path.parent / "textures" / name).write_bytes(png)
-        gltf["images"] = [{"uri": f"textures/{name}"}]
+        gltf.setdefault("images", []).append({"uri": f"textures/{name}"})
         gltf["samplers"] = [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}]
-        gltf["textures"] = [{"source": 0, "sampler": 0}]
-        material["pbrMetallicRoughness"]["baseColorTexture"] = {"index": 0}
+        textures = gltf.setdefault("textures", [])
+        textures.append({"source": len(gltf["images"]) - 1, "sampler": 0})
+        return len(textures) - 1
+
+    if image is not None:
+        material["pbrMetallicRoughness"]["baseColorTexture"] = {"index": add_texture(image)}
+    if normal_image is not None:
+        material["normalTexture"] = {"index": add_texture(normal_image)}
+    if orm_image is not None:
+        index = add_texture(orm_image)
+        material["pbrMetallicRoughness"]["metallicRoughnessTexture"] = {"index": index}
+        material["occlusionTexture"] = {"index": index}
 
     while len(binary) % 4:
         binary.append(0)
@@ -172,27 +205,111 @@ def block_pixel(x, y):
     return (shade, shade, shade)
 
 
-def cube(path, image):
-    """A cube 2 m across, with the image on each face."""
+def box(half, texture_size=None):
+    """A box with these half sizes along X, Y and Z. Without a texture size, each face shows the
+    whole texture; with one, in meters, the texture repeats across faces at that size."""
     corners = [(-1, -1, (0, 1)), (1, -1, (1, 1)), (1, 1, (1, 0)), (-1, 1, (0, 0))]
     positions, normals, uvs, indices = [], [], [], []
     for normal, u, v in CUBE_FACES:
         first = len(positions)
+        width = sum(abs(u[i]) * half[i] for i in range(3)) * 2
+        height = sum(abs(v[i]) * half[i] for i in range(3)) * 2
         for su, sv, uv in corners:
-            positions.append(tuple(normal[i] + su * u[i] + sv * v[i] for i in range(3)))
+            positions.append(
+                tuple(half[i] * (normal[i] + su * u[i] + sv * v[i]) for i in range(3))
+            )
             normals.append(normal)
-            uvs.append(uv)
+            if texture_size is None:
+                uvs.append(uv)
+            else:
+                uvs.append((uv[0] * width / texture_size, uv[1] * height / texture_size))
         indices += [first, first + 1, first + 2, first, first + 2, first + 3]
-    write_glb(path, positions, normals, uvs, indices, (1, 1, 1, 1), image)
+    return positions, normals, uvs, indices
+
+
+def cube(path, image, roughness):
+    """A cube 2 m across, with the image on each face."""
+    write_glb(path, *box((1, 1, 1)), (1, 1, 1, 1), image, roughness=roughness)
 
 
 def make_block():
     # Nearly white, so scenes can give each block any color with a tint.
-    cube(OUTPUT / "block.glb", ("block.png", png_bytes(64, 64, block_pixel)))
+    cube(OUTPUT / "block.glb", ("block.png", png_bytes(64, 64, block_pixel)), 0.5)
 
 
 def make_crate():
-    cube(OUTPUT / "crate.glb", ("crate.png", png_bytes(64, 64, wood_pixel)))
+    cube(OUTPUT / "crate.glb", ("crate.png", png_bytes(64, 64, wood_pixel)), 0.8)
+
+
+# Bricks of the wall's texture: four rows, two bricks across, each row shifted by half a brick,
+# with mortar between them.
+BRICK_SIZE = 128
+BRICK_ROWS = 4
+BRICK_MORTAR = 5
+
+
+def brick_height(x, y):
+    """How far the surface stands out, from 0 in the mortar to 1 on a brick's face, with bevelled
+    edges and a little roughness on the face."""
+    row_height = BRICK_SIZE // BRICK_ROWS
+    brick_width = BRICK_SIZE // 2
+    row = (y % BRICK_SIZE) // row_height
+    shifted = (x + (brick_width // 2 if row % 2 else 0)) % BRICK_SIZE
+    inside_y = y % row_height
+    inside_x = shifted % brick_width
+    edge = min(inside_x, brick_width - 1 - inside_x, inside_y, row_height - 1 - inside_y)
+    if edge < BRICK_MORTAR // 2:
+        return 0.0
+    bevel = min(1.0, (edge - BRICK_MORTAR // 2 + 1) / 3)
+    speckle = ((x * 73 + y * 151 + (x * y) % 37) % 17) / 17 * 0.08
+    return bevel * (0.92 + speckle)
+
+
+def brick_color(x, y):
+    height = brick_height(x, y)
+    if height == 0.0:
+        return (150, 146, 138)
+    row = (y % BRICK_SIZE) // (BRICK_SIZE // BRICK_ROWS)
+    brick = (x + (BRICK_SIZE // 4 if row % 2 else 0)) // (BRICK_SIZE // 2) + row * 2
+    shade = 0.82 + ((brick * 41) % 7) / 7 * 0.25
+    return tuple(min(255, int(c * shade)) for c in (168, 74, 52))
+
+
+def brick_normal(x, y):
+    """The tangent-space normal of brick_height, as glTF stores it: red along +U, green toward the
+    top of the image, blue out of the surface."""
+
+    def height(px, py):
+        return brick_height(px % BRICK_SIZE, py % BRICK_SIZE)
+
+    strength = 2.5
+    along_u = (height(x + 1, y) - height(x - 1, y)) * 0.5
+    # The image's rows grow downward, so up the image is toward smaller y.
+    up_image = (height(x, y - 1) - height(x, y + 1)) * 0.5
+    nx, ny, nz = -along_u * strength, -up_image * strength, 1.0
+    length = math.sqrt(nx * nx + ny * ny + nz * nz)
+    return tuple(int(round((c / length * 0.5 + 0.5) * 255)) for c in (nx, ny, nz))
+
+
+def brick_orm(x, y):
+    """Occlusion darkens the mortar's grooves; bricks are rough, mortar rougher, nothing metal."""
+    height = brick_height(x, y)
+    occlusion = 0.55 + 0.45 * height
+    roughness = 0.95 - 0.15 * height
+    return (int(occlusion * 255), int(roughness * 255), 0)
+
+
+def make_brick_wall():
+    # 3 m long, 1.5 m high and 0.3 m thick, with the texture's four rows of bricks each meter.
+    write_glb(
+        OUTPUT / "brick_wall.glb",
+        *box((1.5, 0.75, 0.15), texture_size=1.0),
+        (1, 1, 1, 1),
+        ("brick.png", png_bytes(BRICK_SIZE, BRICK_SIZE, brick_color)),
+        roughness=1.0,
+        normal_image=("brick_normal.png", png_bytes(BRICK_SIZE, BRICK_SIZE, brick_normal)),
+        orm_image=("brick_orm.png", png_bytes(BRICK_SIZE, BRICK_SIZE, brick_orm)),
+    )
 
 
 def make_ground():
@@ -207,10 +324,11 @@ def make_ground():
         [0, 1, 2, 0, 2, 3],
         (1, 1, 1, 1),
         ("ground.png", png_bytes(64, 64, checker_pixel)),
+        roughness=0.9,
     )
 
 
-def make_ball():
+def sphere():
     rows, columns = 16, 24
     positions, normals, uvs, indices = [], [], [], []
     for row in range(rows + 1):
@@ -226,8 +344,17 @@ def make_ball():
             a = row * (columns + 1) + column
             b = a + columns + 1
             indices += [a, b, b + 1, a, b + 1, a + 1]
-    # White, so scenes can give each ball any color with a tint.
-    write_glb(OUTPUT / "ball.glb", positions, normals, uvs, indices, (1, 1, 1, 1))
+    return positions, normals, uvs, indices
+
+
+def make_ball():
+    # White, so scenes can give each ball any color with a tint: a smooth, glossy plastic.
+    write_glb(OUTPUT / "ball.glb", *sphere(), (1, 1, 1, 1), roughness=0.35)
+
+
+def make_gold_ball():
+    # Gold's reflectance, as linear color: metals take their color from the base color.
+    write_glb(OUTPUT / "gold_ball.glb", *sphere(), (1.0, 0.71, 0.29, 1), metallic=1.0, roughness=0.3)
 
 
 if __name__ == "__main__":
@@ -236,3 +363,5 @@ if __name__ == "__main__":
     make_block()
     make_ground()
     make_ball()
+    make_gold_ball()
+    make_brick_wall()

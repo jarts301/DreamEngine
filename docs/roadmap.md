@@ -80,6 +80,7 @@ and `null` modules ([ADR 0030](adr/0030-renderer-module.md)).
    rhi = ["vulkan", "directx12", "directx", "opengl", "null"]
    renderer = ["forward", "null"]
    mesh_simplifier = ["meshoptimizer", "null"]
+   tangent_generator = ["mikktspace", "null"]
    physics3d = ["jolt"]
    audio = ["miniaudio", "null"]
    ui = ["rmlui"]
@@ -89,6 +90,7 @@ and `null` modules ([ADR 0030](adr/0030-renderer-module.md)).
    rhi = ["vulkan", "opengles", "null"]
    renderer = ["forward", "null"]
    mesh_simplifier = ["meshoptimizer", "null"]
+   tangent_generator = ["mikktspace", "null"]
    physics3d = ["jolt"]
    audio = ["miniaudio", "null"]
    ui = ["rmlui"]
@@ -124,7 +126,7 @@ saved progress, music and settings, built this way and played on PC and phones.
 | Area | Available now |
 |---|---|
 | Platforms | Windows, and Android phones (arm64, Android 10 and up). Linux builds but is untested. |
-| Graphics | Five graphics APIs; the same picture on each. Static glTF models with base-color textures; one directional light with soft cascaded shadows; HDR with PBR Neutral tone mapping; frustum culling, instancing and levels of detail made as models load; debug lines. |
+| Graphics | Five graphics APIs; the same picture on each. Static glTF models with metallic-roughness PBR materials, normal, occlusion and emissive maps; one directional light with soft cascaded shadows; HDR with PBR Neutral tone mapping; frustum culling, instancing and levels of detail made as models load; debug lines. |
 | Textures | PNG cooked to KTX2, sent to the GPU as BC7 on PC and ASTC on phones. |
 | Physics | 3D (Jolt or the engine's own impulse solver): bodies, joints, triggers, ray casts. 2D (Box2D or Chipmunk). |
 | Audio | WAV, MP3 and FLAC; streamed music; buses with volumes; sounds placed in 3D. |
@@ -139,8 +141,8 @@ static props, prototypes and game jams.
 
 Not yet possible without writing engine code first:
 - **Characters:** animated characters (no skinning or animation).
-- **Rendering:** rich materials (no normal or roughness maps, no PBR), more than one light, visual
-  effects (no particles), very large worlds (culling, instancing and LODs exist, but no streaming
+- **Rendering:** environment lighting and transparency (materials are PBR, but reflect only the
+  sun and a flat ambient, and draw opaque), more than one light, visual effects (no particles), very large worlds (culling, instancing and LODs exist, but no streaming
   or spatial structures), 2D sprite games (no sprite renderer).
 - **Input:** gamepads.
 - **Online:** any online play.
@@ -153,7 +155,7 @@ Not yet possible without writing engine code first:
 |---|---|---|
 | Gamepad input | Required on Steam Deck and expected on PC and TV; common on phones | `input_device`: `sdl3_gamepad`, `null` |
 | Skeletal animation | Characters, creatures, anything that moves by itself | `animation`: `ozz` (MIT), `null` |
-| PBR materials and normal maps | glTF assets look as their artists made them | Part of the `renderer` module |
+| PBR materials and normal maps | glTF assets look as their artists made them | Done in `forward`, with tangents from `tangent_generator`: `mikktspace`, `null` (ADR 0033) |
 | Point and spot lights, many lights | Interiors, night scenes, effects | `renderer`: `forward_plus` |
 | Particles | Fire, smoke, impacts, magic | `particles`: GPU or CPU backend, `null` |
 | Culling, instancing, LOD | Scenes with thousands of objects | Done in `forward` and `mesh_simplifier` (ADR 0031, 0032); a `visibility` interface later for spatial structures |
@@ -225,14 +227,17 @@ and the remaining platforms.
 
 - **Done:** render targets (ADR 0027), HDR and tone mapping (ADR 0028), cascaded shadows
   (ADR 0029), the OpenGL backends (ADR 0026), the renderer as a module (ADR 0030), frustum
-  culling (ADR 0031), and instancing and levels of detail (ADR 0032).
+  culling (ADR 0031), instancing and levels of detail (ADR 0032), and PBR materials with normal
+  maps (ADR 0033, with a [guide](guides/materials.md)).
 - **Next, in order:**
-  1. PBR materials from glTF: metallic, roughness, normal and emissive maps.
-  2. Point and spot lights, with `forward_plus` for many lights.
-  3. Skeletal animation (`animation: ozz`).
-  4. Particles (`particles`).
-  5. Gamepads (`input_device: sdl3_gamepad`).
-  6. 2D sprites (`sprite_renderer`).
+  1. Point and spot lights, with `forward_plus` for many lights.
+  2. Skeletal animation (`animation: ozz`).
+  3. Particles (`particles`).
+  4. Gamepads (`input_device: sdl3_gamepad`).
+  5. 2D sprites (`sprite_renderer`).
+  6. Materials, after ADR 0033: environment lighting (image-based, with reflection probes),
+     alpha-tested and blended materials, double-sided materials, reading `.gltf` files so
+     Blender's images are cooked, and measuring the PBR shader's cost on phones.
   7. Smaller items: blending between shadow cascades, a frame-rate cap, removing the ~13
      allocations per frame found on the A52s, and cooking levels of detail at build time instead of
      when models load.

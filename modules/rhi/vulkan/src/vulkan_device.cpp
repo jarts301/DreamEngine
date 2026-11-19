@@ -1286,10 +1286,10 @@ private:
                 ? VK_FILTER_LINEAR
                 : VK_FILTER_NEAREST;
         for (std::uint32_t slot = 0; slot < k_texture_slots; ++slot) {
-            const bool shadow = slot == k_shadow_slot;
-            const VkSamplerAddressMode address = slot == 0
-                                                     ? VK_SAMPLER_ADDRESS_MODE_REPEAT
-                                                     : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            const bool shadow = slot_sampler(slot) == SlotSampler::ShadowCompare;
+            const bool repeat = slot_sampler(slot) == SlotSampler::Repeat;
+            const VkSamplerAddressMode address = repeat ? VK_SAMPLER_ADDRESS_MODE_REPEAT
+                                                        : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
             const VkFilter filter = shadow ? compare_filter : VK_FILTER_LINEAR;
             const VkSamplerCreateInfo sampler{
                 .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -1301,7 +1301,7 @@ private:
                 .addressModeW = address,
                 .compareEnable = shadow ? VK_TRUE : VK_FALSE,
                 .compareOp = shadow ? VK_COMPARE_OP_LESS_OR_EQUAL : VK_COMPARE_OP_NEVER,
-                .maxLod = slot == 0 ? VK_LOD_CLAMP_NONE : 0.0f,
+                .maxLod = repeat ? VK_LOD_CLAMP_NONE : 0.0f,
             };
             if (const VkResult result =
                     vkCreateSampler(m_device, &sampler, nullptr, &m_samplers[slot]);

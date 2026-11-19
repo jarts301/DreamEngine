@@ -72,9 +72,9 @@ ModelAsset make_model(rhi::Device& device, std::uint32_t parts, bool textured) {
     data.vertices.resize(3);
     data.indices = {0, 1, 2};
     if (textured) {
-        data.images.push_back(ImageData{1, 1, std::vector<std::byte>(4), {}});
+        data.images.push_back(ImageData{.width = 1, .height = 1, .pixels = std::vector<std::byte>(4)});
     }
-    data.materials.push_back(ModelMaterialData{{1, 1, 1, 1}, textured ? 0 : -1});
+    data.materials.push_back(ModelMaterialData{.image = textured ? 0 : -1});
     for (std::uint32_t part = 0; part < parts; ++part) {
         data.parts.push_back(
             ModelPart{.first_index = part * 3, .index_count = 3, .material = 0, .bounds = {}});
@@ -209,14 +209,14 @@ TEST_CASE_FIXTURE(RenderFixture, "Renderer gives each part of each model") {
     REQUIRE(frame.meshes.size() == 3);
     // The order of the models doesn't matter, so they are found by what they are.
     const auto textured = std::ranges::count_if(
-        frame.meshes, [](const renderer::MeshDraw& mesh) { return mesh.texture.is_valid(); });
+        frame.meshes, [](const renderer::MeshDraw& mesh) { return mesh.material.base_color_texture.is_valid(); });
     CHECK(textured == 1);
     const auto tinted = std::ranges::find_if(frame.meshes, [](const renderer::MeshDraw& mesh) {
         return mesh.first_index == 3;
     });
     REQUIRE(tinted != frame.meshes.end());
     CHECK(tinted->index_count == 3);
-    CHECK(tinted->base_color.x == Approx(0.5f));
+    CHECK(tinted->material.base_color.x == Approx(0.5f));
     CHECK(tinted->model.columns[3].x == Approx(4.0f));
     CHECK(tinted->vertices.is_valid());
     // Each part's box, which the renderer culls by, comes from the model's vertices. The test models

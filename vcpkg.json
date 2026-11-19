@@ -21,6 +21,7 @@
       ]
     },
     "meshoptimizer",
+    "mikktspace",
     "miniaudio",
     {
       "name": "opengl-registry",

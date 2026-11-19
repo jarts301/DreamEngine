@@ -37,6 +37,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0030](0030-renderer-module.md) | The renderer is a module, chosen in `dream.toml` |
 | [0031](0031-frustum-culling.md) | Parts out of the camera's view, or out of a shadow cascade, are skipped |
 | [0032](0032-instancing-and-lods.md) | Repeated parts are drawn as instances, and distant ones with simpler versions |
+| [0033](0033-pbr-materials-and-normal-maps.md) | Materials are glTF's metallic-roughness PBR, with normal maps and tangents from a module |
 
 ## Template
 

@@ -64,8 +64,8 @@ has `_opengl_check` and `_opengles_check` programs on Windows. See
 [ADR 0026](docs/adr/0026-opengl.md).
 
 Every backend can draw into textures and read them in later passes: float color targets for HDR,
-depth targets for shadow maps, three texture slots with a shadow comparison sampler, and depth-only
-pipelines. `samples/render_targets` uses them all, and its picture matches one reference on every
+depth targets for shadow maps, seven texture slots, one with a shadow comparison sampler, and
+depth-only pipelines. `samples/render_targets` uses them all, and its picture matches one reference on every
 backend. See [ADR 0027](docs/adr/0027-render-targets.md).
 
 The renderer is a module: a game lists `renderer = ["forward", "null"]` beside its graphics
@@ -99,6 +99,13 @@ in the scene and in each shadow cascade. When a project lists a `mesh_simplifier
 simpler versions as they load, and the renderer draws the simplest one whose error stays within
 `lod_error` pixels on screen (1 by default). `[lods]` sets how many versions are made. See
 [ADR 0032](docs/adr/0032-instancing-and-lods.md).
+
+Surfaces use glTF's metallic-roughness materials: base color, metallic, roughness, normal,
+occlusion and emissive maps, lit with a physically based model. Normal maps need tangents, which a
+model's file may have; listing `tangent_generator = ["mikktspace", "null"]` makes them for models
+that don't. Textures named like `rock_normal.png` or `rock_orm.png` are cooked as data rather than
+colors. [Materials](docs/guides/materials.md) explains how to make models that look right, and
+[ADR 0033](docs/adr/0033-pbr-materials-and-normal-maps.md) records the design.
 
 ## Screenshot tests
 
@@ -197,6 +204,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 | `rhi` | `vulkan`, `directx12`, `directx`, `opengl`, `opengles`, `null` | all | `vulkan`, `opengles`, `null` | `directx` is Direct3D 11. A game's shaders are compiled for whichever its list names. |
 | `renderer` | `forward`, `null` | all | all | `forward` brings its shaders; `null` only clears the window. |
 | `mesh_simplifier` | `meshoptimizer`, `null` | all | all | Makes the simpler versions of models that the renderer draws far away. Optional. |
+| `tangent_generator` | `mikktspace`, `null` | all | all | Makes tangents for normal maps on models exported without them. Optional. |
 | `physics3d` | `jolt`, `impulse`, `null` | all | all | `impulse` is the engine's own library. |
 | `physics2d` | `box2d`, `chipmunk`, `null` | all | all | `chipmunk` has no continuous collision. |
 | `audio` | `miniaudio`, `portaudio`, `null` | all | `miniaudio`, `null` | PortAudio has no Android output. |

@@ -13,6 +13,7 @@
 #include <format>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -103,6 +104,25 @@ core::Result<void> read_directional_light(ComponentContext& context) {
 }
 
 // The [lods] table, which says how simpler versions of models are made.
+// Normal maps need tangents, which neither the file nor a tangent generator gave these parts.
+void warn_about_missing_tangents(const ModelData& data, std::string_view path) {
+    const bool missing = std::ranges::any_of(data.parts, [&](const ModelPart& part) {
+        if (part.material >= data.materials.size() ||
+            data.materials[part.material].normal_image < 0 || part.index_count == 0 ||
+            part.first_index >= data.indices.size()) {
+            return false;
+        }
+        const std::uint32_t vertex = data.indices[part.first_index];
+        return vertex < data.vertices.size() && data.vertices[vertex].tangent.w == 0.0f;
+    });
+    if (missing) {
+        DREAM_LOG_WARNING("'{}' has normal maps but no tangents, so they are ignored; export it "
+                          "with tangents, or list a tangent_generator module such as "
+                          "\"mikktspace\"",
+                          path);
+    }
+}
+
 core::Result<LodOptions> read_lod_options(const core::Config& config) {
     LodOptions options;
     const std::int64_t levels = config.get_int("lods.levels").value_or(options.levels);
@@ -374,8 +394,21 @@ core::Result<void> Renderer::initialize(App& app,
         DREAM_LOG_INFO("Models get up to {} simpler versions each", lod_options.value().levels);
     }
 
+    // Tangents for normal maps whose models have none, when the project lists a generator (ADR
+    // 0033).
+    m_tangents.reset();
+    if (app.has_module<tangent_generator::TangentGenerator>()) {
+        core::Result<std::unique_ptr<tangent_generator::TangentGenerator>> tangents =
+            app.create_module<tangent_generator::TangentGenerator>();
+        if (!tangents.has_value()) {
+            return tangents.error();
+        }
+        m_tangents = std::move(tangents).value();
+    }
+
     app.assets().register_loader<ModelAsset>(
-        [device, simplifier = m_simplifier.get(), options = lod_options.value()](
+        [device, simplifier = m_simplifier.get(), tangents = m_tangents.get(),
+         options = lod_options.value()](
             AssetLoadContext& context) -> core::Result<ModelAsset> {
             const auto file = context.files.read(context.path);
             if (!file.has_value()) {
@@ -400,6 +433,15 @@ core::Result<void> Renderer::initialize(App& app,
             if (!data.has_value()) {
                 return data.error();
             }
+            if (tangents != nullptr) {
+                if (const core::Result<void> made = generate_tangents(data.value(), *tangents);
+                    !made.has_value()) {
+                    return core::Error{made.error().code,
+                                       std::format("Making tangents for '{}': {}", context.path,
+                                                   made.error().message)};
+                }
+            }
+            warn_about_missing_tangents(data.value(), context.path);
             if (simplifier != nullptr) {
                 if (const core::Result<void> made = generate_lods(data.value(), *simplifier, options);
                     !made.has_value()) {
@@ -451,15 +493,15 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
             }
             const ModelAsset& model = *mesh.model;
             for (const ModelPart& part : model.parts) {
-                const ModelMaterial& material = model.materials[part.material];
+                renderer::MeshMaterial material = model.materials[part.material];
+                material.base_color = multiply(material.base_color, mesh.tint);
                 m_meshes.push_back(renderer::MeshDraw{
                     .vertices = model.vertices.get(),
                     .indices = model.indices.get(),
                     .first_index = part.first_index,
                     .index_count = part.index_count,
                     .model = transform.matrix,
-                    .base_color = multiply(material.base_color, mesh.tint),
-                    .texture = material.texture,
+                    .material = material,
                     .casts_shadows = mesh.casts_shadows,
                     .bounds = part.bounds,
                     .lods = part.lods,

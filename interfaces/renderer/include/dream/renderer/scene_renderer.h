@@ -27,6 +27,39 @@ struct MeshVertex {
     core::Vec3 position;
     core::Vec3 normal;
     core::Vec2 uv;
+    // The direction in which `uv.x` grows along the surface, for normal maps, with w = 1 or -1
+    // saying which way the bitangent, cross(normal, tangent) * w, points. All zero when unknown,
+    // and then normal maps are ignored there (ADR 0033).
+    core::Vec4 tangent{};
+};
+
+// How a surface looks, in glTF's metallic-roughness model (ADR 0033). Factors multiply their
+// textures, and a missing texture reads as white, so the factors alone apply.
+struct MeshMaterial {
+    // Linear. Its alpha is kept in the output, but surfaces are drawn opaque.
+    core::Vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};
+    // 0 for dielectrics such as wood, stone and plastic; 1 for bare metal. The texture's blue
+    // channel.
+    float metallic = 0.0f;
+    // 0 mirror-smooth, 1 fully matte. The texture's green channel.
+    float roughness = 0.5f;
+    // How strongly the normal map tilts the surface.
+    float normal_scale = 1.0f;
+    // How much of the occlusion texture's red channel darkens ambient light.
+    float occlusion_strength = 1.0f;
+    // Light the surface gives off, linear and in the same units as the sun's intensity.
+    core::Vec3 emissive{0.0f, 0.0f, 0.0f};
+
+    // sRGB colors.
+    rhi::TextureHandle base_color_texture{};
+    // Tangent-space normals, linear: red +X along the tangent, green +Y along the bitangent.
+    rhi::TextureHandle normal_texture{};
+    // Linear: roughness in green, metallic in blue. The same texture can also be the occlusion.
+    rhi::TextureHandle metallic_roughness_texture{};
+    // Linear: ambient occlusion in red.
+    rhi::TextureHandle occlusion_texture{};
+    // sRGB colors.
+    rhi::TextureHandle emissive_texture{};
 };
 
 // The vertices of debug lines, two per line.
@@ -51,10 +84,8 @@ struct MeshDraw {
     std::uint32_t index_count = 0;
     // Model space to world space.
     core::Mat4 model;
-    // The material's color, times the instance's tint. Linear.
-    core::Vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};
-    // Invalid for none, which draws as white.
-    rhi::TextureHandle texture;
+    // The material, with its base color already multiplied by the instance's tint.
+    MeshMaterial material;
     bool casts_shadows = true;
     // Around the part, in model space, for skipping parts out of view. Empty when unknown, and then
     // the part is always drawn.

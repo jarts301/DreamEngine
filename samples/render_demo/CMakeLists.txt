@@ -30,7 +30,7 @@ if(DREAM_BUILD_TESTS)
     if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME dream_render_demo_null COMMAND dream_render_demo_null)
         set_tests_properties(dream_render_demo_null PROPERTIES
-            PASS_REGULAR_EXPRESSION "frames=5 draws=6"
+            PASS_REGULAR_EXPRESSION "frames=5 draws=8"
             ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
     endif()
 

@@ -1,7 +1,7 @@
 // The 'forward' renderer (ADR 0030): one directional light with cascaded shadows (ADR 0029), drawn
 // in HDR and tone-mapped with Khronos PBR Neutral (ADR 0028), then debug lines and the interface
 // layers over the result. Parts out of the camera's view, or out of a shadow cascade, are skipped
-// (ADR 0031).
+// (ADR 0031). Surfaces are lit with glTF's metallic-roughness model and normal maps (ADR 0033).
 
 #include "dream/core/config.h"
 #include "dream/core/log.h"
@@ -53,13 +53,24 @@ struct FrameUniforms {
 };
 
 // One instance of a part, as forward.slang reads it per instance: the columns of its model
-// matrix and of its normals' matrix, and its color. shadow.slang reads the model matrix alone
-// (ADR 0032).
+// matrix and of its normals' matrix, and its material's factors. shadow.slang reads the model
+// matrix alone (ADR 0032, ADR 0033).
 struct InstanceData {
     std::array<Vec4, 4> model;
     std::array<Vec4, 3> normals;
     Vec4 base_color;
+    // Metallic, roughness, normal scale and occlusion strength.
+    Vec4 material;
+    // Emissive color; w is unused.
+    Vec4 emissive;
 };
+
+// Where forward.slang reads a material's textures, besides the base color at slot 0.
+constexpr std::uint32_t k_normal_slot = 3;
+constexpr std::uint32_t k_metallic_roughness_slot = 4;
+constexpr std::uint32_t k_occlusion_slot = 5;
+constexpr std::uint32_t k_emissive_slot = 6;
+static_assert(k_emissive_slot < rhi::k_texture_slots);
 
 struct ToneMapConstants {
     Vec4 settings;
@@ -73,7 +84,7 @@ struct UiConstants {
 
 static_assert(sizeof(FrameUniforms) <= rhi::k_max_uniform_size);
 static_assert(sizeof(FrameUniforms) == 496);
-static_assert(sizeof(InstanceData) == 128);
+static_assert(sizeof(InstanceData) == 160);
 
 // How many instances one draw takes at most, so each call's data stays small.
 constexpr std::size_t k_max_instances_per_draw = 1024;
@@ -469,6 +480,7 @@ public:
         // Before the device's own objects, in no particular order: the device outlives this.
         m_pipelines.reset();
         m_shadow_map.reset();
+        m_flat_normal.reset();
         m_hdr_color.reset();
         m_hdr_depth.reset();
     }
@@ -480,6 +492,15 @@ public:
             return settings.error();
         }
         m_settings = settings.value();
+
+        constexpr std::array<std::uint8_t, 4> k_flat{128, 128, 255, 255};
+        const core::Result<rhi::TextureHandle> flat = device.create_texture(
+            rhi::TextureDesc{.width = 1, .height = 1, .format = rhi::TextureFormat::Rgba8Unorm},
+            std::as_bytes(std::span(k_flat)));
+        if (!flat.has_value()) {
+            return flat.error();
+        }
+        m_flat_normal = OwnedTexture(device, flat.value());
 
         std::string description;
         if (m_settings.hdr_format.has_value()) {
@@ -522,6 +543,7 @@ public:
                            ? std::format("; simpler versions of parts within {} pixels",
                                          m_settings.lod_error)
                            : std::string("; parts are always drawn in full");
+        description += "; materials are metallic-roughness PBR with normal maps";
         m_description = std::move(description);
         return {};
     }
@@ -580,6 +602,8 @@ private:
     std::string m_description;
     std::unique_ptr<Pipelines> m_pipelines;
     OwnedTexture m_shadow_map;
+    // One texel pointing straight out of the surface, for parts without a normal map.
+    OwnedTexture m_flat_normal;
     OwnedTexture m_hdr_color;
     OwnedTexture m_hdr_depth;
     platform::SurfaceSize m_hdr_size;
@@ -632,10 +656,12 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
         rhi::VertexAttribute{0, rhi::VertexFormat::Float3, offsetof(MeshVertex, position)},
         rhi::VertexAttribute{1, rhi::VertexFormat::Float3, offsetof(MeshVertex, normal)},
         rhi::VertexAttribute{2, rhi::VertexFormat::Float2, offsetof(MeshVertex, uv)},
+        rhi::VertexAttribute{3, rhi::VertexFormat::Float4, offsetof(MeshVertex, tangent)},
     };
-    // Each instance's model matrix, normals' matrix and color, after the vertex's own inputs.
+    // Each instance's model matrix, normals' matrix and material, after the vertex's own inputs.
+    constexpr std::size_t k_instance_vec4s = sizeof(InstanceData) / sizeof(Vec4);
     constexpr auto instance_attributes = [](std::uint32_t first_location, std::size_t count) {
-        std::array<rhi::VertexAttribute, 8> attributes{};
+        std::array<rhi::VertexAttribute, k_instance_vec4s> attributes{};
         for (std::size_t index = 0; index < count; ++index) {
             attributes[index] = rhi::VertexAttribute{
                 first_location + static_cast<std::uint32_t>(index), rhi::VertexFormat::Float4,
@@ -643,7 +669,7 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
         }
         return attributes;
     };
-    static constexpr std::array k_instance_attributes = instance_attributes(3, 8);
+    static constexpr std::array k_instance_attributes = instance_attributes(4, k_instance_vec4s);
     static constexpr std::array k_shadow_instance_attributes = instance_attributes(1, 4);
     core::Result<OwnedPipeline> forward = pipeline(rhi::PipelineDesc{
         .vertex_shader = vertex.value(),
@@ -845,7 +871,10 @@ void ForwardRenderer::prepare_meshes(const Frame& frame, bool boxes) {
         m_instances[index] = InstanceData{
             .model = mesh.model.columns,
             .normals = {normals.columns[0], normals.columns[1], normals.columns[2]},
-            .base_color = mesh.base_color,
+            .base_color = mesh.material.base_color,
+            .material = Vec4{mesh.material.metallic, mesh.material.roughness,
+                             mesh.material.normal_scale, mesh.material.occlusion_strength},
+            .emissive = extend(mesh.material.emissive, 0.0f),
         };
 
         // The simplest version whose error stays under the limit on screen, at the part's nearest
@@ -890,13 +919,21 @@ void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const Me
         m_order.push_back(static_cast<std::uint32_t>(index));
     }
 
-    // Parts that draw the same indices with the same texture become one draw. Shadows ignore
-    // textures.
+    // Parts that draw the same indices with the same textures become one draw, whatever their
+    // material's factors. Shadows ignore textures.
     const auto key = [&](std::uint32_t index) {
         const MeshDraw& mesh = meshes[index];
         const Chosen& chosen = m_chosen[index];
+        const MeshMaterial& material = mesh.material;
+        const auto texture = [&](rhi::TextureHandle handle) {
+            return casters ? rhi::TextureHandle{} : handle;
+        };
         return std::make_tuple(mesh.vertices, mesh.indices, chosen.first_index, chosen.index_count,
-                               casters ? rhi::TextureHandle{} : mesh.texture);
+                               texture(material.base_color_texture),
+                               texture(material.normal_texture),
+                               texture(material.metallic_roughness_texture),
+                               texture(material.occlusion_texture),
+                               texture(material.emissive_texture));
     };
     std::ranges::stable_sort(m_order, [&](std::uint32_t a, std::uint32_t b) { return key(a) < key(b); });
 
@@ -926,7 +963,15 @@ void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const Me
             bound_indices = mesh.indices;
         }
         if (!casters) {
-            commands.bind_texture(mesh.texture);
+            const MeshMaterial& material = mesh.material;
+            commands.bind_texture(material.base_color_texture);
+            // Without a normal map, a flat one, which leaves the surface's normal as it is.
+            commands.bind_texture(k_normal_slot, material.normal_texture.is_valid()
+                                                     ? material.normal_texture
+                                                     : m_flat_normal.get());
+            commands.bind_texture(k_metallic_roughness_slot, material.metallic_roughness_texture);
+            commands.bind_texture(k_occlusion_slot, material.occlusion_texture);
+            commands.bind_texture(k_emissive_slot, material.emissive_texture);
         }
         if (!commands.bind_instances(std::as_bytes(std::span(m_batch)))) {
             if (!m_warned_instances) {
