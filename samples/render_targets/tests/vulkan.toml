@@ -26,14 +26,17 @@ quit = true
 
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["vulkan"]
 
 [modules.android]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["vulkan"]
 
 [modules.linux]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["vulkan"]
 
 [audio]

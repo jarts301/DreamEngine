@@ -269,6 +269,17 @@ core::Result<void> App::run(Game& game) {
             return attached;
         }
 
+        // Gamepads are optional: a game without them still runs.
+        if (has_module<input_device::InputDevice>()) {
+            core::Result<std::unique_ptr<input_device::InputDevice>> gamepads =
+                create_module<input_device::InputDevice>();
+            if (gamepads.has_value()) {
+                m_gamepads = std::move(gamepads).value();
+            } else {
+                DREAM_LOG_WARNING("No gamepads: {}", gamepads.error().message);
+            }
+        }
+
         if (core::Result<void> started = game.on_start(*this); !started.has_value()) {
             return started;
         }
@@ -309,6 +320,11 @@ core::Result<void> App::run(Game& game) {
             // Time spent paused belongs to no frame.
             previous_frame_end.reset();
             continue;
+        }
+        if (m_gamepads != nullptr) {
+            DREAM_PROFILE_ZONE("Gamepads");
+            m_gamepads->update();
+            m_input.apply(m_gamepads->gamepads());
         }
         if (!previous_frame_end.has_value()) {
             previous_frame_end = core::now();

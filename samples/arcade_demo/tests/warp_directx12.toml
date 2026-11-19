@@ -35,6 +35,7 @@ quit = true
 # Only built on Windows, so only its table is listed.
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["directx12"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]

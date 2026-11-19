@@ -7,10 +7,11 @@ height = 720
 
 [input.actions]
 throw = ["mouse:left", "touch"]
-menu = ["key:escape", "key:back"]
+menu = ["key:escape", "key:back", "gamepad:start"]
 
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
 renderer = ["forward", "null"]
 mesh_simplifier = ["meshoptimizer", "null"]
@@ -21,6 +22,7 @@ ui = ["rmlui", "markup"]
 
 [modules.android]
 platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "opengles", "null"]
 renderer = ["forward", "null"]
 mesh_simplifier = ["meshoptimizer", "null"]
@@ -31,6 +33,7 @@ ui = ["rmlui", "markup"]
 
 [modules.linux]
 platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "null"]
 renderer = ["forward", "null"]
 mesh_simplifier = ["meshoptimizer", "null"]

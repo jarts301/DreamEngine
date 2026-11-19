@@ -119,6 +119,24 @@ as for glass, and double-sided. [Materials](docs/guides/materials.md) explains h
 that look right, and [ADR 0033](docs/adr/0033-pbr-materials-and-normal-maps.md) and
 [ADR 0034](docs/adr/0034-transparency.md) record the design.
 
+## Input and gamepads
+
+Games read named actions, which `[input.actions]` in `dream.toml` binds to keys, mouse buttons,
+touch and gamepad buttons, sticks and triggers. Listing `input_device = ["sdl3_gamepad", "null"]`
+brings gamepads, through SDL3, on Windows and Android:
+
+```toml
+[input.actions]
+jump = ["key:space", "touch", "gamepad:south"]
+move_left = ["key:a", "gamepad:left_stick_left", "gamepad:dpad_left"]
+move_right = ["key:d", "gamepad:left_stick_right", "gamepad:dpad_right"]
+```
+
+Sticks and triggers are analog: `app.input().axis("move_left", "move_right")` goes from -1 to 1
+with keys and sticks alike. In the render demo, the left stick, the d-pad or WASD orbit the camera,
+and the triggers zoom. [Input](docs/guides/input.md) explains bindings, deadzones, several
+players and rumble, and [ADR 0035](docs/adr/0035-gamepads.md) records the design.
+
 ## Screenshot tests
 
 A `[screenshot]` table in a game's `dream.toml` captures one frame, saves it next to the program,
@@ -177,7 +195,8 @@ The game logs each asset it reloads. `[hot_reload] enabled = false` turns it off
 ## Play Toppler
 
 Toppler is a small physics puzzle built on the engine: knock every gold crate down within each
-level's throws, by tapping or clicking where a ball should land. Escape, or Back on Android, pauses.
+level's throws, by tapping or clicking where a ball should land. Escape, Back on Android, or Start
+on a gamepad pauses.
 After building, run it on Windows:
 
 ```bash
@@ -233,6 +252,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 | `renderer` | `forward`, `null` | all | all | `forward` brings its shaders; `null` only clears the window. |
 | `mesh_simplifier` | `meshoptimizer`, `null` | all | all | Makes the simpler versions of models that the renderer draws far away. Optional. |
 | `tangent_generator` | `mikktspace`, `null` | all | all | Makes tangents for normal maps on models exported without them. Optional. |
+| `input_device` | `sdl3_gamepad`, `null` | all | all | Gamepads, bound to the same actions as keys. Optional. |
 | `physics3d` | `jolt`, `impulse`, `null` | all | all | `impulse` is the engine's own library. |
 | `physics2d` | `box2d`, `chipmunk`, `null` | all | all | `chipmunk` has no continuous collision. |
 | `audio` | `miniaudio`, `portaudio`, `null` | all | `miniaudio`, `null` | PortAudio has no Android output. |

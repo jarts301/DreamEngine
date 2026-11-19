@@ -13,12 +13,15 @@ quit = ["key:escape"]
 
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["null"]
 
 [modules.android]
 platform = ["sdl3"]
+input_device = ["null"]
 
 [modules.linux]
 platform = ["sdl3"]
+input_device = ["null"]
 
 [audio]
 muted = true

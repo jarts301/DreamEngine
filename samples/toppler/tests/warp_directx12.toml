@@ -34,6 +34,7 @@ quit = true
 
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["directx12"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]

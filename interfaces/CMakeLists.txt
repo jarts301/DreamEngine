@@ -1,6 +1,7 @@
 add_subdirectory(audio)
 add_subdirectory(debug_ui)
 add_subdirectory(greeter)
+add_subdirectory(input_device)
 add_subdirectory(mesh_simplifier)
 add_subdirectory(physics2d)
 add_subdirectory(physics3d)

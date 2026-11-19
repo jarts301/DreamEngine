@@ -29,6 +29,7 @@ quit = false
 
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["vulkan"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]
@@ -39,6 +40,7 @@ ui = ["rmlui"]
 
 [modules.android]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["vulkan"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]
@@ -49,6 +51,7 @@ ui = ["rmlui"]
 
 [modules.linux]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["vulkan"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]

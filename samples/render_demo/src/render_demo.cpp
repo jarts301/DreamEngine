@@ -1,5 +1,6 @@
-// A scene file drawn by the engine's renderer. The game only says what spins: loading models,
-// lighting and drawing all come from the engine.
+// A scene file drawn by the engine's renderer. The game only says what spins, and orbits the
+// camera with keys or a gamepad's stick: loading models, lighting and drawing all come from the
+// engine.
 
 #include "dream/core/log.h"
 #include "dream/core/math/quaternion.h"
@@ -8,6 +9,8 @@
 #include "dream/runtime/renderer.h"
 #include "dream/runtime/world.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <format>
@@ -50,6 +53,20 @@ public:
             return world.error();
         }
         m_world = std::move(world).value();
+
+        // The camera orbits its target, starting where the scene put it.
+        const auto cameras = m_world->registry().view<runtime::Camera, runtime::Transform>();
+        if (const runtime::Entity camera = cameras.front(); camera != runtime::k_no_entity) {
+            const runtime::Camera& lens = cameras.get<runtime::Camera>(camera);
+            const Vec3 position = cameras.get<runtime::Transform>(camera).position;
+            m_target = lens.target.value_or(Vec3{});
+            const Vec3 offset = position - m_target;
+            m_distance = core::length(offset);
+            m_start_distance = m_distance;
+            m_height = offset.y;
+            m_yaw = std::atan2(offset.x, offset.z);
+            m_camera = camera;
+        }
         return {};
     }
 
@@ -60,6 +77,7 @@ public:
             m_spinning = !m_spinning;
             DREAM_LOG_INFO("Spinning: {}", m_spinning);
         }
+        orbit(app, static_cast<float>(time.delta_seconds));
         if (m_spinning) {
             const Vec3 axis{0.0f, 1.0f, 0.0f};
             for (const auto [entity, transform, spin] :
@@ -97,7 +115,35 @@ public:
     }
 
 private:
+    // Turns the camera around its target, and moves it nearer or farther, by how far the orbit and
+    // zoom actions are held: fully for keys, partly for a stick or trigger pushed partway.
+    void orbit(runtime::App& app, float seconds) {
+        const float turn = app.input().axis("orbit_left", "orbit_right");
+        const float zoom = app.input().axis("zoom_out", "zoom_in");
+        if ((turn == 0.0f && zoom == 0.0f) || m_camera == runtime::k_no_entity) {
+            return;
+        }
+        constexpr float k_turn_speed = 1.5f; // Radians per second.
+        constexpr float k_zoom_speed = 0.8f; // Of the distance per second.
+        m_yaw -= turn * k_turn_speed * seconds;
+        const float scale = std::clamp(1.0f - zoom * k_zoom_speed * seconds, 0.5f, 1.5f);
+        m_distance = std::clamp(m_distance * scale, 4.0f, 30.0f);
+
+        // The height stays in proportion to the distance, so zooming keeps the view's angle.
+        const float height = m_height * (m_distance / std::max(m_start_distance, 0.001f));
+        const float across = std::sqrt(std::max(m_distance * m_distance - height * height, 0.0f));
+        Vec3& position = m_world->registry().get<runtime::Transform>(m_camera).position;
+        position = m_target + Vec3{std::sin(m_yaw) * across, height, std::cos(m_yaw) * across};
+    }
+
     runtime::Renderer m_renderer;
+    runtime::Entity m_camera = runtime::k_no_entity;
+    Vec3 m_target;
+    float m_distance = 1.0f;
+    // As the scene placed it.
+    float m_start_distance = 1.0f;
+    float m_height = 0.0f;
+    float m_yaw = 0.0f;
     std::unique_ptr<runtime::World> m_world;
     std::int64_t m_quit_after_frames = 0;
     std::int64_t m_frames = 0;

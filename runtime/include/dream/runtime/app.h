@@ -5,6 +5,7 @@
 #include "dream/core/crash_handler.h"
 #include "dream/core/module_project.h"
 #include "dream/core/result.h"
+#include "dream/input_device/input_device.h"
 #include "dream/platform/platform.h"
 #include "dream/runtime/asset_manager.h"
 #include "dream/runtime/event_bus.h"
@@ -15,8 +16,10 @@
 #include "dream/runtime/scene_loader.h"
 #include "dream/runtime/virtual_file_system.h"
 
+#include <cstdint>
 #include <format>
 #include <memory>
+#include <span>
 
 namespace dream::runtime {
 
@@ -44,6 +47,9 @@ namespace dream::runtime {
 //
 // The frame it is on goes into crash reports, and [crash_report] simulate crashes it on purpose
 // (see CrashReportConfig).
+//
+// When the project lists an `input_device` module, such as `input_device = ["sdl3_gamepad",
+// "null"]`, it reads the gamepads every frame and feeds them to the input actions (ADR 0035).
 class App {
 public:
     // `config` must outlive this object. `device` is null for a program that draws nothing.
@@ -65,6 +71,18 @@ public:
 
     [[nodiscard]] const InputActions& input() const noexcept {
         return m_input;
+    }
+
+    // Every connected gamepad, as of this frame, for games that tell players apart; most games
+    // only need input(). Empty without an input_device module.
+    [[nodiscard]] std::span<const input_device::GamepadState> gamepads() const {
+        return m_gamepads != nullptr ? m_gamepads->gamepads()
+                                     : std::span<const input_device::GamepadState>{};
+    }
+
+    // See input_device::InputDevice::rumble. False without an input_device module.
+    bool rumble(std::uint32_t gamepad, float low, float high, std::uint32_t milliseconds) {
+        return m_gamepads != nullptr && m_gamepads->rumble(gamepad, low, high, milliseconds);
     }
 
     [[nodiscard]] VirtualFileSystem& files() noexcept {
@@ -173,6 +191,8 @@ private:
     SceneLoader m_scenes;
     EventBus m_events;
     InputActions m_input;
+    // After the platform, so it goes first: it may use the platform's library.
+    std::unique_ptr<input_device::InputDevice> m_gamepads;
     platform::SurfaceSize m_surface_size;
     core::FixedTimestep m_fixed_steps;
     bool m_running = true;

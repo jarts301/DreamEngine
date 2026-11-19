@@ -131,7 +131,7 @@ saved progress, music and settings, built this way and played on PC and phones.
 | Physics | 3D (Jolt or the engine's own impulse solver): bodies, joints, triggers, ray casts. 2D (Box2D or Chipmunk). |
 | Audio | WAV, MP3 and FLAC; streamed music; buses with volumes; sounds placed in 3D. |
 | Interface | Menus and HUDs written in RML and RCSS (RmlUi or the engine's own `markup`); Dear ImGui for debug tools. |
-| Input | Keyboard, mouse and touch, bound to named actions in the config. |
+| Input | Keyboard, mouse, touch and gamepads, bound to named actions in the config, with analog values for sticks and triggers. |
 | Data | Scenes as TOML; saves and settings written to the user folder. |
 | Workflow | Hot reload of shaders, models and textures; profiling; memory budgets; crash reports with stack traces and minidumps; screenshot tests. |
 | Shipping | A PC folder with the executable and `assets.pak`; an Android APK signed with the debug key. |
@@ -144,7 +144,7 @@ Not yet possible without writing engine code first:
 - **Rendering:** environment lighting (materials are PBR, but reflect only the sun and a flat
   ambient), bloom, more than one light, visual effects (no particles), very large worlds (culling, instancing and LODs exist, but no streaming
   or spatial structures), 2D sprite games (no sprite renderer).
-- **Input:** gamepads.
+- **Input:** menus driven by a gamepad (no focus navigation in `ui`), and rebinding while the game runs.
 - **Online:** any online play.
 
 ## 3. What is missing for a professional, published game
@@ -153,7 +153,6 @@ Not yet possible without writing engine code first:
 
 | Need | Why it matters | As a module |
 |---|---|---|
-| Gamepad input | Required on Steam Deck and expected on PC and TV; common on phones | `input_device`: `sdl3_gamepad`, `null` |
 | Skeletal animation | Characters, creatures, anything that moves by itself | `animation`: `ozz` (MIT), `null` |
 | Point and spot lights, many lights | Interiors, night scenes, effects | `renderer`: `forward_plus` |
 | Particles | Fire, smoke, impacts, magic | `particles`: GPU or CPU backend, `null` |
@@ -170,7 +169,7 @@ Not yet possible without writing engine code first:
 Already done in Phase 12, and no longer missing: PBR materials with normal, occlusion and emissive
 maps, tangents from `tangent_generator` (ADR 0033); transparent, cut-out and double-sided materials
 (ADR 0034); frustum culling (ADR 0031); instancing and levels of detail from `mesh_simplifier`
-(ADR 0032).
+(ADR 0032); gamepads through `input_device` (ADR 0035).
 
 ### 3.2 Tools
 
@@ -190,7 +189,8 @@ maps, tangents from `tangent_generator` (ADR 0033); transparent, cut-out and dou
   repository. It has to be a **private, out-of-tree module** (`store_services: steam`), as the plan
   already intends for consoles.
 - Steam Deck Verified expects:
-  - full gamepad support;
+  - full gamepad support: gamepads drive actions (ADR 0035), but menus need gamepad focus
+    navigation;
   - legible text at 1280×800;
   - an on-screen keyboard for text input;
   - running on Linux natively or under Proton.
@@ -233,14 +233,16 @@ and the remaining platforms.
 - **Done:** render targets (ADR 0027), HDR and tone mapping (ADR 0028), cascaded shadows
   (ADR 0029), the OpenGL backends (ADR 0026), the renderer as a module (ADR 0030), frustum
   culling (ADR 0031), instancing and levels of detail (ADR 0032), and PBR materials with normal
-  maps (ADR 0033, with a [guide](guides/materials.md)), and transparent, cut-out and double-sided
-  materials (ADR 0034).
+  maps (ADR 0033, with a [guide](guides/materials.md)), transparent, cut-out and double-sided
+  materials (ADR 0034), and gamepads (ADR 0035, with a [guide](guides/input.md)).
 - **Next, in order:**
   1. Point and spot lights, with `forward_plus` for many lights.
   2. Skeletal animation (`animation: ozz`).
   3. Particles (`particles`).
-  4. Gamepads (`input_device: sdl3_gamepad`).
-  5. 2D sprites (`sprite_renderer`).
+  4. 2D sprites (`sprite_renderer`).
+  5. Gamepads, after ADR 0035: focus navigation in `ui` menus, an on-screen aiming cursor for
+     pointer-aimed games such as Toppler, rebinding in a settings menu, and a check with a real
+     gamepad on a phone.
   6. Materials, after ADR 0033 and 0034: environment lighting (image-based, with reflection
      probes), bloom, order-independent transparency, antialiased cut-outs, reading `.gltf` files
      so Blender's images are cooked, and half-precision lighting math for phones (PBR costs 1.4 ms
@@ -363,7 +365,7 @@ of simulated latency and 5% packet loss, and the match stays in sync.
 The engine can already ship small, polished 3D games on Windows and Android phones, built from
 modules that swap through configuration, and with the testing, profiling and crash tooling
 professional work needs. Before a commercial release on Steam or Google Play, it most needs:
-- gamepads, animation, more lights, and environment lighting and bloom;
+- animation, more lights, environment lighting and bloom, and gamepad navigation in menus;
 - a settings menu, localization and store services;
 - release packaging: AAB and real signing on Android, depots on Steam;
 - an installable SDK and an editor.

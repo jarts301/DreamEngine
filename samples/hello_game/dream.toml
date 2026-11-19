@@ -6,14 +6,17 @@ width = 1280
 height = 720
 
 [input.actions]
-confirm = ["key:space", "key:enter", "mouse:left", "touch"]
-quit = ["key:escape"]
+confirm = ["key:space", "key:enter", "mouse:left", "touch", "gamepad:south"]
+quit = ["key:escape", "gamepad:back"]
 
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
 
 [modules.android]
 platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
 
 [modules.linux]
 platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]

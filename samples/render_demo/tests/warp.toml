@@ -13,6 +13,10 @@ spin = false
 [input.actions]
 toggle_spin = ["key:space"]
 quit = ["key:escape"]
+orbit_left = ["key:a", "key:left"]
+orbit_right = ["key:d", "key:right"]
+zoom_in = ["key:w", "key:up"]
+zoom_out = ["key:s", "key:down"]
 
 
 [rhi.directx]
@@ -31,6 +35,7 @@ quit = true
 # Only built on Windows, so only its table is listed.
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["directx"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]

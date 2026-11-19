@@ -14,6 +14,10 @@ debug = true
 [input.actions]
 toggle_spin = ["key:space"]
 quit = ["key:escape"]
+orbit_left = ["key:a", "key:left"]
+orbit_right = ["key:d", "key:right"]
+zoom_in = ["key:w", "key:up"]
+zoom_out = ["key:s", "key:down"]
 
 # Compares frame 60 with the reference image, within a tolerance. See docs/adr/0021.
 [screenshot]
@@ -27,6 +31,7 @@ quit = false
 # Only built on Windows, so only its table is listed.
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["opengl"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]

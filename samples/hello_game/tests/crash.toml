@@ -21,9 +21,11 @@ simulate_after_frames = 2
 # Crash reports are for PC for now, so this test is not built for Android.
 [modules.windows]
 platform = ["null"]
+input_device = ["null"]
 
 [modules.linux]
 platform = ["null"]
+input_device = ["null"]
 
 [audio]
 muted = true

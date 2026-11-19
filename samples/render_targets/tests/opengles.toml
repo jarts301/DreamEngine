@@ -26,14 +26,17 @@ quit = true
 
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["opengles"]
 
 [modules.android]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["opengles"]
 
 [modules.linux]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["opengles"]
 
 [audio]

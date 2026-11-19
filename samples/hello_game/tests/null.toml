@@ -11,13 +11,16 @@ quit = ["key:escape"]
 
 [modules.windows]
 platform = ["null"]
+input_device = ["null"]
 profiler = ["null"]
 
 [modules.android]
 platform = ["null"]
+input_device = ["null"]
 
 [modules.linux]
 platform = ["null"]
+input_device = ["null"]
 profiler = ["null"]
 
 [audio]

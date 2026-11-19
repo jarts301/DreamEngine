@@ -19,6 +19,7 @@ menu = ["key:escape"]
 
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["null"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]

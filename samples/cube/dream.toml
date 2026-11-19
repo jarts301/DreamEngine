@@ -6,19 +6,22 @@ width = 1280
 height = 720
 
 [input.actions]
-toggle_spin = ["key:space", "mouse:left", "touch"]
-quit = ["key:escape"]
+toggle_spin = ["key:space", "mouse:left", "touch", "gamepad:south"]
+quit = ["key:escape", "gamepad:back"]
 
 # Each list is a priority order: use Vulkan, or on a PC without it Direct3D 12, then Direct3D 11,
 # or fall back to drawing nothing.
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
 
 [modules.android]
 platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "opengles", "null"]
 
 [modules.linux]
 platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "null"]

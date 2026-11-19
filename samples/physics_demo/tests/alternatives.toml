@@ -17,6 +17,7 @@ quit = ["key:escape"]
 # Only built on Windows, so only its table is listed.
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["null"]
 rhi = ["null"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]

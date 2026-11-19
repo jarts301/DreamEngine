@@ -40,7 +40,7 @@ target_link_libraries(dream_runtime PUBLIC
     dream::interface_physics3d dream::interface_audio dream::interface_ui
     dream::interface_debug_ui dream::interface_profiler dream::interface_renderer
     dream::interface_mesh_simplifier dream::interface_tangent_generator
-    EnTT::EnTT)
+    dream::interface_input_device EnTT::EnTT)
 target_link_libraries(dream_runtime PRIVATE KTX::ktx)
 dream_configure_target(dream_runtime)
 
@@ -53,6 +53,7 @@ if(DREAM_BUILD_TESTS)
             tests/audio_test.cpp
             tests/crash_reports_test.cpp
             tests/event_bus_test.cpp
+            tests/gamepad_test.cpp
             tests/heap_counting_test.cpp
             tests/input_actions_test.cpp
             tests/memory_budget_test.cpp

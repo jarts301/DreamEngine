@@ -6,17 +6,20 @@ width = 1280
 height = 720
 
 [input.actions]
-switch_scene = ["key:space", "mouse:left", "touch"]
-quit = ["key:escape"]
+switch_scene = ["key:space", "mouse:left", "touch", "gamepad:south"]
+quit = ["key:escape", "gamepad:back"]
 
 [modules.windows]
 platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
 
 [modules.android]
 platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "opengles", "null"]
 
 [modules.linux]
 platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "null"]
