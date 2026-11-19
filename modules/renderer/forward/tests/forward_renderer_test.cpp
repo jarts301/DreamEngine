@@ -490,6 +490,28 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer draws parts that share a mesh a
     CHECK(factors == std::array{0.0f, 0.5f, 1.0f, 1.0f});
 }
 
+TEST_CASE_FIXTURE(Fixture, "The forward renderer tells the shader which textures a part has") {
+    start();
+    const auto features_of = [&](const MeshMaterial& material) {
+        std::array meshes{mesh(0)};
+        meshes[0].material = material;
+        draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes});
+        REQUIRE(state.last_instances.size() == 160);
+        float features = 0.0f;
+        std::memcpy(&features, state.last_instances.data() + 156, sizeof(features));
+        return features;
+    };
+    const rhi::TextureHandle texture{.index = 40, .generation = 1};
+
+    CHECK(features_of(MeshMaterial{}) == 0.0f);
+    CHECK(features_of(MeshMaterial{.normal_texture = texture}) == 1.0f);
+    CHECK(features_of(MeshMaterial{.metallic_roughness_texture = texture,
+                                   .occlusion_texture = texture}) == 6.0f);
+    CHECK(features_of(MeshMaterial{.emissive = Vec3{1.0f, 0.0f, 0.0f}}) == 8.0f);
+    // A texture with nothing to show is skipped too.
+    CHECK(features_of(MeshMaterial{.normal_scale = 0.0f, .normal_texture = texture}) == 0.0f);
+}
+
 TEST_CASE_FIXTURE(Fixture, "The forward renderer binds a material's textures, or a flat normal map") {
     start();
     std::array meshes{mesh(0), mesh(0)};

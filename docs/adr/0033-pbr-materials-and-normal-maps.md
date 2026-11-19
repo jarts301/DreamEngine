@@ -32,7 +32,7 @@ zero when unknown. Vertices are 48 bytes.
 ### Shading in `forward`
 
 `forward.slang` lights the sun with a Cook-Torrance BRDF: GGX distribution, Smith's
-height-correlated visibility and Schlick's Fresnel, over Lambert diffuse, with dielectrics
+height-correlated visibility in Hammon's approximation and Schlick's Fresnel, over Lambert diffuse, with dielectrics
 reflecting 4%. Ambient light keeps its single value, now split into diffuse and an analytic
 specular fit (Karis's mobile approximation), darkened by occlusion. Emission is added last. The
 sun's units are unchanged: a white, fully rough dielectric facing it shows its color times its
@@ -42,6 +42,10 @@ Each part's factors are per-instance data, which grows from 128 to 160 bytes, so
 same mesh and textures are still one instanced draw, whatever their factors (ADR 0032). Textures
 are part of the grouping key. A part without a normal map reads a flat one the renderer makes,
 and the shader keeps the mesh's normal where a vertex has no tangent.
+
+The emissive color's `w` carries feature bits: whether the part has a normal map, a
+metallic-roughness map, an occlusion map and emission. The shader skips the texture reads and math
+of what a part doesn't have. Every pixel of one draw takes the same branches.
 
 ### Seven texture slots
 
@@ -90,8 +94,12 @@ glTF says, and so is a primitive without a material. The samples' models now sta
   its own, and its reference picture was redone. The other samples' pictures stayed within their
   tolerance once their models stated non-metallic materials.
 - Every model's vertices are 16 bytes larger, and every part's instance data 32 bytes larger.
-- The shader does more work per pixel. On the phones checked for ADR 0029 this has yet to be
-  measured.
+- The shader does more work per pixel. On the Galaxy A52s (Adreno 642L, Vulkan), the render demo's
+  GPU time went from 3.87 to 5.31 ms per frame at 1080 x 2400, still within a 120 Hz frame. Most of
+  it is the lighting itself; [android-performance.md](../reports/android-performance.md#pbr-materials-2026-11-19)
+  has the measurements. Vulkan and OpenGL ES draw the same picture there. Mali and Xclipse phones
+  haven't been checked.
+- Every sample's Vulkan check runs clean under the Khronos validation layers.
 - There is no environment lighting, so smooth metals reflect only the sun and a flat ambient
   color. Image-based lighting would fill `MeshMaterial`'s reflections without changing it.
 - Transparency, alpha testing, double-sided materials, a second UV set, `KHR_texture_transform`

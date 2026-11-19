@@ -61,9 +61,36 @@ struct InstanceData {
     Vec4 base_color;
     // Metallic, roughness, normal scale and occlusion strength.
     Vec4 material;
-    // Emissive color; w is unused.
+    // Emissive color, and in w which of the material's textures and emission the shader reads,
+    // as MaterialFeature bits.
     Vec4 emissive;
 };
+
+// What forward.slang reads for a part. Leaving out what a material doesn't have skips texture
+// reads, which the ground and plain props would otherwise pay for on every pixel (ADR 0033).
+enum MaterialFeature : std::uint32_t {
+    k_feature_normal_map = 1,
+    k_feature_metallic_roughness_map = 2,
+    k_feature_occlusion_map = 4,
+    k_feature_emission = 8,
+};
+
+float material_features(const MeshMaterial& material) {
+    std::uint32_t features = 0;
+    if (material.normal_texture.is_valid() && material.normal_scale != 0.0f) {
+        features |= k_feature_normal_map;
+    }
+    if (material.metallic_roughness_texture.is_valid()) {
+        features |= k_feature_metallic_roughness_map;
+    }
+    if (material.occlusion_texture.is_valid() && material.occlusion_strength != 0.0f) {
+        features |= k_feature_occlusion_map;
+    }
+    if (material.emissive.x > 0.0f || material.emissive.y > 0.0f || material.emissive.z > 0.0f) {
+        features |= k_feature_emission;
+    }
+    return static_cast<float>(features);
+}
 
 // Where forward.slang reads a material's textures, besides the base color at slot 0.
 constexpr std::uint32_t k_normal_slot = 3;
@@ -874,7 +901,7 @@ void ForwardRenderer::prepare_meshes(const Frame& frame, bool boxes) {
             .base_color = mesh.material.base_color,
             .material = Vec4{mesh.material.metallic, mesh.material.roughness,
                              mesh.material.normal_scale, mesh.material.occlusion_strength},
-            .emissive = extend(mesh.material.emissive, 0.0f),
+            .emissive = extend(mesh.material.emissive, material_features(mesh.material)),
         };
 
         // The simplest version whose error stays under the limit on screen, at the part's nearest

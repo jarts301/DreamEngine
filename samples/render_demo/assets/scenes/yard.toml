@@ -63,8 +63,8 @@ scale = [0.5, 0.5, 0.5]
 model = "assets:/models/gold_ball.glb"
 
 [entities.wall.transform]
-position = [-3.9, 0.75, -1.2]
-rotation = [0.0, 40.0, 0.0]
+position = [0.85, 0.75, -5.0]
+rotation = [0.0, -10.0, 0.0]
 
 [entities.wall.mesh]
 model = "assets:/models/brick_wall.glb"

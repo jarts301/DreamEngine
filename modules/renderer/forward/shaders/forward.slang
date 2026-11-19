@@ -51,6 +51,14 @@ Sampler2D emissive_texture : register(t6) : register(s6);
 
 static const float k_pi = 3.14159265;
 
+// Which of a material's textures and emission a part has, as forward_renderer.cpp's
+// MaterialFeature bits. What a part doesn't have isn't read, which saves texture reads on phones.
+// Every pixel of one draw takes the same branches.
+static const uint k_feature_normal_map = 1;
+static const uint k_feature_metallic_roughness_map = 2;
+static const uint k_feature_occlusion_map = 4;
+static const uint k_feature_emission = 8;
+
 struct VertexInput {
     [[vk::location(0)]] float3 position : POSITION;
     [[vk::location(1)]] float3 normal : NORMAL;
@@ -69,6 +77,7 @@ struct VertexInput {
     [[vk::location(11)]] float4 base_color : COLOR0;
     // Metallic, roughness, normal scale, occlusion strength.
     [[vk::location(12)]] float4 material : MATERIAL0;
+    // The emissive color, and in w which textures and emission to read, as k_feature_ bits.
     [[vk::location(13)]] float4 emissive : EMISSIVE0;
 };
 
@@ -160,11 +169,15 @@ float sunlight(float3 world_position, float3 normal) {
     return lit / 9.0;
 }
 
+bool has_feature(VertexOutput input, uint feature) {
+    return (uint(input.emissive.w + 0.5) & feature) != 0;
+}
+
 // The surface's normal: the normal map's, turned from the tangent space at this point into the
 // world. Without a tangent there, the normal map can't be placed, and the mesh's normal is kept.
 float3 surface_normal(VertexOutput input, float3 geometric) {
     const float4 tangent = input.world_tangent;
-    if (dot(tangent.xyz, tangent.xyz) < 1e-12) {
+    if (!has_feature(input, k_feature_normal_map) || dot(tangent.xyz, tangent.xyz) < 1e-12) {
         return geometric;
     }
     // Made square to the normal again, since both were blended across the triangle.
@@ -182,18 +195,16 @@ float distribution(float n_dot_h, float alpha) {
     return alpha2 / (k_pi * d * d);
 }
 
-// How much of the facets the light and the eye both see, with Smith's height-correlated GGX term,
-// already divided by 4 n.l n.v.
+// How much of the facets the light and the eye both see: Smith's height-correlated GGX term,
+// already divided by 4 n.l n.v, in Hammon's approximation, which needs no square roots.
 float visibility(float n_dot_v, float n_dot_l, float alpha) {
-    const float alpha2 = alpha * alpha;
-    const float from_view = n_dot_l * sqrt(n_dot_v * n_dot_v * (1.0 - alpha2) + alpha2);
-    const float from_light = n_dot_v * sqrt(n_dot_l * n_dot_l * (1.0 - alpha2) + alpha2);
-    return 0.5 / max(from_view + from_light, 1e-5);
+    return 0.5 / max(lerp(2.0 * n_dot_l * n_dot_v, n_dot_l + n_dot_v, alpha), 1e-5);
 }
 
 float3 fresnel(float3 f0, float cosine) {
-    const float f = pow(1.0 - cosine, 5.0);
-    return f0 + (1.0 - f0) * f;
+    const float x = 1.0 - cosine;
+    const float x2 = x * x;
+    return f0 + (1.0 - f0) * (x2 * x2 * x);
 }
 
 // How much ambient light a surface reflects as specular, averaged over every direction it comes
@@ -212,13 +223,23 @@ float3 ambient_specular(float3 f0, float roughness, float n_dot_v) {
 [shader("fragment")]
 float4 fragment_main(VertexOutput input) : SV_Target {
     const float4 base_color = base_color_texture.Sample(input.uv) * input.base_color;
-    const float4 metallic_roughness = metallic_roughness_texture.Sample(input.uv);
+    // Real branches, not ?:, which may read both sides.
+    float4 metallic_roughness = float4(1.0, 1.0, 1.0, 1.0);
+    if (has_feature(input, k_feature_metallic_roughness_map)) {
+        metallic_roughness = metallic_roughness_texture.Sample(input.uv);
+    }
     const float metallic = saturate(input.material.x * metallic_roughness.b);
     // Kept above zero, where the highlight would be a single point.
     const float roughness = clamp(input.material.y * metallic_roughness.g, 0.045, 1.0);
     const float alpha = roughness * roughness;
-    const float occlusion = 1.0 + input.material.w * (occlusion_texture.Sample(input.uv).r - 1.0);
-    const float3 emissive = emissive_texture.Sample(input.uv).rgb * input.emissive.rgb;
+    float occlusion = 1.0;
+    if (has_feature(input, k_feature_occlusion_map)) {
+        occlusion += input.material.w * (occlusion_texture.Sample(input.uv).r - 1.0);
+    }
+    float3 emissive = float3(0.0, 0.0, 0.0);
+    if (has_feature(input, k_feature_emission)) {
+        emissive = emissive_texture.Sample(input.uv).rgb * input.emissive.rgb;
+    }
 
     const float3 geometric = normalize(input.world_normal);
     const float3 normal = surface_normal(input, geometric);

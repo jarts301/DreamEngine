@@ -55,6 +55,34 @@ in all:
   the low clock looks like the scheduler leaving it idle for a light load rather than a heat limit.
 - **No crashes,** no errors in the log, and every run cleared all ten levels with 28 stars.
 
+## PBR materials (2026-11-19)
+
+The PBR materials of [ADR 0033](../adr/0033-pbr-materials-and-normal-maps.md) were timed on the
+same phone, against the commit before them (3bd7b36), both built from the same scene and models:
+the render demo's yard with its gold ball and brick wall, 3600 frames, Vulkan, release, with the
+profiler. The old build draws the same parts with its base color and fixed highlight. Each build
+ran twice, alternating, and the two runs of each agreed within 0.01 ms.
+
+| Build | GPU time median / p90 / p99 (ms) |
+|---|---|
+| Before PBR | 3.87 / 3.95 / 3.98 |
+| PBR, first version | 5.45 / 5.54 / 5.57 |
+| PBR, the PBR inputs with the old lighting | 4.00 / 4.11 / 4.15 |
+| PBR, skipping textures a material doesn't have | 5.34 / 5.43 / 5.47 |
+| PBR as committed: also cheaper visibility and Fresnel | 5.31 / 5.41 / 5.44 |
+
+- **The cost is the lighting itself,** about 1.3 ms of the 1.45 ms at full screen, 1080 × 2400.
+  The larger vertices and per-instance data cost 0.13 ms. Skipping the normal, metallic-roughness,
+  occlusion and emissive textures of parts that have none saved 0.1 ms, and the square-root-free
+  visibility term 0.03 ms. Moving the shadow lookup outside the lighting's branch made it slower,
+  by 0.1 to 0.2 ms, and was dropped.
+- **It still fits:** 5.3 ms of GPU time in an 8.3 ms frame at 120 Hz. CPU work grew from 0.40 to
+  0.47 ms per frame. The render demo covers the whole screen with lit surfaces; scenes with more sky
+  or interface cost less.
+- **The pictures match** between Vulkan and OpenGL ES on the A52s's Adreno 642L, and with the PC.
+- Half-precision math, which Adreno runs at twice the rate, is the next thing to try if a game
+  needs the time back.
+
 ## What it found
 
 - **About 13 heap allocations every frame** in Toppler and the arcade, and 6 in the render demo,

@@ -237,13 +237,16 @@ and the remaining platforms.
   5. 2D sprites (`sprite_renderer`).
   6. Materials, after ADR 0033: environment lighting (image-based, with reflection probes),
      alpha-tested and blended materials, double-sided materials, reading `.gltf` files so
-     Blender's images are cooked, and measuring the PBR shader's cost on phones.
+     Blender's images are cooked, and half-precision lighting math for phones (PBR costs 1.4 ms
+     of GPU time per frame on the A52s at full screen; see the Android performance report).
   7. Smaller items: blending between shadow cascades, a frame-rate cap, removing the ~13
      allocations per frame found on the A52s, and cooking levels of detail at build time instead of
      when models load.
   8. A phone check per GPU family: run the render samples' pictures on Adreno, Mali and Xclipse
      phones before a rendering feature is called done. The cascaded shadows went unseen on Adreno
-     for a day, because only the A57's Xclipse GPU had been checked (ADR 0029).
+     for a day, because only the A57's Xclipse GPU had been checked (ADR 0029). The PBR materials
+     (ADR 0033) were checked on the A52s's Adreno, with Vulkan and OpenGL ES; the A57's Xclipse and
+     a Mali phone are still to do.
 
 ### Phase 13: tools for making games
 

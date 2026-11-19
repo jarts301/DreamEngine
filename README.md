@@ -48,9 +48,19 @@ It draws with Vulkan, or on a PC without a Vulkan driver with Direct3D 12, then 
 `dream.toml` lists. To see the same fixed view on each API, run `dream_cube_vulkan_check`,
 `dream_cube_directx12_check` and `dream_cube_directx_check` from their own folders next to it.
 
-To check the Vulkan backend with the Khronos validation layers, configure with
-`-DVCPKG_MANIFEST_FEATURES=vulkan-validation` and set `VK_LAYER_PATH` to the folder containing
-`VkLayer_khronos_validation.json` under `vcpkg_installed/`. Debug builds then turn validation on.
+To check the Vulkan backend with the Khronos validation layers, configure a build folder of its own
+with `-DVCPKG_MANIFEST_FEATURES=vulkan-validation`, and set `VK_LAYER_PATH` to the folder that holds
+`VkLayer_khronos_validation.json`, which is `vcpkg_installed/x64-windows/bin` in that build folder:
+
+```powershell
+cmake --preset windows-debug -B build/check-validation -DVCPKG_MANIFEST_FEATURES=vulkan-validation
+cmake --build build/check-validation
+$env:VK_LAYER_PATH = "$PWD\build\check-validation\vcpkg_installed\x64-windows\bin"
+```
+
+Debug builds then turn validation on, and log "Vulkan validation is on". Its messages appear in
+the engine log as warnings and errors starting with `Vulkan:`. The samples' `_vulkan_check`
+programs run clean under it.
 
 There are two DirectX backends, `directx` on Direct3D 11 and `directx12` on Direct3D 12. They load
 the same compiled shaders and need nothing installed. Debug builds turn their debug layers on when

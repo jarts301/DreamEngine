@@ -205,6 +205,26 @@ Hot reload picks up a re-exported model while the game runs.
 | Glowing parts don't light their surroundings | Emissive is only the surface's own color | Expected: there is no bloom or emissive lighting yet |
 | A material looks right in Blender's viewport but not here | Blender lights it with an environment | Compare in Blender with one sun and the World's strength at 0, plus a little ambient |
 
+## Performance
+
+Materials cost GPU time on every pixel they cover. On a Galaxy A52s, a 2021 mid-range phone, the
+render demo's lit yard takes 5.3 ms of GPU time per frame at 1080 x 2400, against 3.9 ms with the
+old fixed lighting: comfortably inside a 120 Hz frame of 8.3 ms
+([measurements](../reports/android-performance.md#pbr-materials-2026-11-19)). To keep it low:
+
+- **Leave out textures a material doesn't need.** The renderer skips the normal,
+  metallic-roughness, occlusion and emissive reads of parts that have none, so a prop with only a
+  base color costs less than one with a full set. A factor alone, such as `roughnessFactor: 0.6`,
+  is free.
+- **Pack occlusion, roughness and metallic into one ORM texture.** It is one image in memory and
+  one draw group instead of three textures.
+- **Share textures between props.** Parts with the same mesh and textures are drawn as one
+  instanced draw, whatever their factors and tint.
+- **Size textures for the screen.** 1024 x 1024 is plenty for most props on a phone, and cooked
+  textures are compressed and mipmapped, so distant parts read small levels.
+- **Mind what covers the screen.** The cost is per pixel: a floor, a wall or a terrain that fills
+  the view matters far more than a small detailed prop.
+
 ## Limits
 
 These are not supported yet. Each is a later step on the roadmap.
