@@ -6,7 +6,7 @@ This document has three parts:
   Store and similar stores;
 - the plan to close those gaps, including macOS, iOS and online play.
 
-It reflects the repository on 2026-11-18. The plan is a proposal: each phase gets its own decisions
+It reflects the repository on 2026-11-19. The plan is a proposal: each phase gets its own decisions
 and ADRs when it starts.
 
 ## 1. The rule every plan follows: everything is a module
@@ -155,10 +155,10 @@ Not yet possible without writing engine code first:
 |---|---|---|
 | Gamepad input | Required on Steam Deck and expected on PC and TV; common on phones | `input_device`: `sdl3_gamepad`, `null` |
 | Skeletal animation | Characters, creatures, anything that moves by itself | `animation`: `ozz` (MIT), `null` |
-| PBR materials and normal maps | glTF assets look as their artists made them | Done in `forward`, with tangents from `tangent_generator`: `mikktspace`, `null` (ADR 0033) |
 | Point and spot lights, many lights | Interiors, night scenes, effects | `renderer`: `forward_plus` |
 | Particles | Fire, smoke, impacts, magic | `particles`: GPU or CPU backend, `null` |
-| Culling, instancing, LOD | Scenes with thousands of objects | Done in `forward` and `mesh_simplifier` (ADR 0031, 0032); a `visibility` interface later for spatial structures |
+| Environment lighting and bloom | Shiny metals and glass reflect their surroundings, and glowing surfaces glow | In `forward`: image-based lighting, reflection probes and a bloom pass |
+| Spatial structures and streaming | Very large worlds | A `visibility` interface, with `asset_source` streaming below |
 | 2D sprites and tile maps | 2D games, which the 2D physics already supports | `sprite_renderer`: `batch`, `null` |
 | Localization | Stores expect several languages; Play and the App Store list them | `localization`: `fluent` or `gettext`-style files, `null` |
 | Accessibility | Platform reviews and players ask for it: text size, colour-blind modes, subtitles, remapping | Settings over existing modules |
@@ -166,6 +166,11 @@ Not yet possible without writing engine code first:
 | Save system | Versioned saves, migration, corruption safety, cloud sync hook | `save_storage`: `local_files`, `steam_cloud`, `play_saved_games`, `icloud` |
 | Asset streaming | Big games can't load everything at start | `asset_source`: `loose_files`, `pak`, `bundles` |
 | Scripting (optional) | Designers iterate without recompiling | `scripting`: `lua` (MIT) or `wasm`, `null` |
+
+Already done in Phase 12, and no longer missing: PBR materials with normal, occlusion and emissive
+maps, tangents from `tangent_generator` (ADR 0033); transparent, cut-out and double-sided materials
+(ADR 0034); frustum culling (ADR 0031); instancing and levels of detail from `mesh_simplifier`
+(ADR 0032).
 
 ### 3.2 Tools
 
@@ -358,7 +363,7 @@ of simulated latency and 5% packet loss, and the match stays in sync.
 The engine can already ship small, polished 3D games on Windows and Android phones, built from
 modules that swap through configuration, and with the testing, profiling and crash tooling
 professional work needs. Before a commercial release on Steam or Google Play, it most needs:
-- gamepads, animation, richer materials and more lights;
+- gamepads, animation, more lights, and environment lighting and bloom;
 - a settings menu, localization and store services;
 - release packaging: AAB and real signing on Android, depots on Steam;
 - an installable SDK and an editor.
