@@ -79,6 +79,7 @@ and `null` modules ([ADR 0030](adr/0030-renderer-module.md)).
    platform = ["sdl3"]
    rhi = ["vulkan", "directx12", "directx", "opengl", "null"]
    renderer = ["forward", "null"]
+   mesh_simplifier = ["meshoptimizer", "null"]
    physics3d = ["jolt"]
    audio = ["miniaudio", "null"]
    ui = ["rmlui"]
@@ -87,6 +88,7 @@ and `null` modules ([ADR 0030](adr/0030-renderer-module.md)).
    platform = ["sdl3"]
    rhi = ["vulkan", "opengles", "null"]
    renderer = ["forward", "null"]
+   mesh_simplifier = ["meshoptimizer", "null"]
    physics3d = ["jolt"]
    audio = ["miniaudio", "null"]
    ui = ["rmlui"]
@@ -122,7 +124,7 @@ saved progress, music and settings, built this way and played on PC and phones.
 | Area | Available now |
 |---|---|
 | Platforms | Windows, and Android phones (arm64, Android 10 and up). Linux builds but is untested. |
-| Graphics | Five graphics APIs; the same picture on each. Static glTF models with base-color textures; one directional light with soft cascaded shadows; HDR with PBR Neutral tone mapping; debug lines. |
+| Graphics | Five graphics APIs; the same picture on each. Static glTF models with base-color textures; one directional light with soft cascaded shadows; HDR with PBR Neutral tone mapping; frustum culling, instancing and levels of detail made as models load; debug lines. |
 | Textures | PNG cooked to KTX2, sent to the GPU as BC7 on PC and ASTC on phones. |
 | Physics | 3D (Jolt or the engine's own impulse solver): bodies, joints, triggers, ray casts. 2D (Box2D or Chipmunk). |
 | Audio | WAV, MP3 and FLAC; streamed music; buses with volumes; sounds placed in 3D. |
@@ -138,8 +140,8 @@ static props, prototypes and game jams.
 Not yet possible without writing engine code first:
 - **Characters:** animated characters (no skinning or animation).
 - **Rendering:** rich materials (no normal or roughness maps, no PBR), more than one light, visual
-  effects (no particles), large worlds (frustum culling only, no LOD or streaming), 2D sprite games (no sprite
-  renderer).
+  effects (no particles), very large worlds (culling, instancing and LODs exist, but no streaming
+  or spatial structures), 2D sprite games (no sprite renderer).
 - **Input:** gamepads.
 - **Online:** any online play.
 
@@ -154,7 +156,7 @@ Not yet possible without writing engine code first:
 | PBR materials and normal maps | glTF assets look as their artists made them | Part of the `renderer` module |
 | Point and spot lights, many lights | Interiors, night scenes, effects | `renderer`: `forward_plus` |
 | Particles | Fire, smoke, impacts, magic | `particles`: GPU or CPU backend, `null` |
-| Culling, instancing, LOD | Scenes with thousands of objects | `renderer` features, plus a `visibility` interface |
+| Culling, instancing, LOD | Scenes with thousands of objects | Done in `forward` and `mesh_simplifier` (ADR 0031, 0032); a `visibility` interface later for spatial structures |
 | 2D sprites and tile maps | 2D games, which the 2D physics already supports | `sprite_renderer`: `batch`, `null` |
 | Localization | Stores expect several languages; Play and the App Store list them | `localization`: `fluent` or `gettext`-style files, `null` |
 | Accessibility | Platform reviews and players ask for it: text size, colour-blind modes, subtitles, remapping | Settings over existing modules |
@@ -222,18 +224,21 @@ and the remaining platforms.
 ### Phase 12: features (in progress)
 
 - **Done:** render targets (ADR 0027), HDR and tone mapping (ADR 0028), cascaded shadows
-  (ADR 0029), the OpenGL backends (ADR 0026), the renderer as a module (ADR 0030), and frustum
-  culling (ADR 0031).
+  (ADR 0029), the OpenGL backends (ADR 0026), the renderer as a module (ADR 0030), frustum
+  culling (ADR 0031), and instancing and levels of detail (ADR 0032).
 - **Next, in order:**
   1. PBR materials from glTF: metallic, roughness, normal and emissive maps.
   2. Point and spot lights, with `forward_plus` for many lights.
-  3. Instancing.
-  4. Skeletal animation (`animation: ozz`).
-  5. Particles (`particles`).
-  6. Gamepads (`input_device: sdl3_gamepad`).
-  7. 2D sprites (`sprite_renderer`).
-  8. Smaller items: blending between shadow cascades, a frame-rate cap, and removing the ~13
-     allocations per frame found on the A52s.
+  3. Skeletal animation (`animation: ozz`).
+  4. Particles (`particles`).
+  5. Gamepads (`input_device: sdl3_gamepad`).
+  6. 2D sprites (`sprite_renderer`).
+  7. Smaller items: blending between shadow cascades, a frame-rate cap, removing the ~13
+     allocations per frame found on the A52s, and cooking levels of detail at build time instead of
+     when models load.
+  8. A phone check per GPU family: run the render samples' pictures on Adreno, Mali and Xclipse
+     phones before a rendering feature is called done. The cascaded shadows went unseen on Adreno
+     for a day, because only the A57's Xclipse GPU had been checked (ADR 0029).
 
 ### Phase 13: tools for making games
 

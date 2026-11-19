@@ -35,6 +35,14 @@ struct LineVertex {
     core::Vec4 color;
 };
 
+// A simpler version of a part, in the same buffers: another range of indices over its vertices.
+struct MeshLod {
+    std::uint32_t first_index = 0;
+    std::uint32_t index_count = 0;
+    // How far, at most, it strays from the full part, in model space.
+    float error = 0.0f;
+};
+
 // One part of one model: a range of its 32-bit indices, drawn with one material.
 struct MeshDraw {
     rhi::BufferHandle vertices;
@@ -51,6 +59,9 @@ struct MeshDraw {
     // Around the part, in model space, for skipping parts out of view. Empty when unknown, and then
     // the part is always drawn.
     core::Aabb bounds;
+    // Simpler versions, each simpler than the last, for when the part is small on screen. The
+    // renderer may draw one in place of the full range (ADR 0032).
+    std::span<const MeshLod> lods;
 };
 
 // The camera, as runtime::camera_view gives it.
@@ -102,6 +113,10 @@ struct FrameStats {
     std::uint32_t culled = 0;
     // Parts skipped in shadow cascades they were outside of, once for each cascade.
     std::uint32_t shadow_culled = 0;
+    // Draw commands recorded for the scene and its shadows, each drawing one or more parts.
+    std::uint32_t draw_calls = 0;
+    // Parts drawn with one of their simpler versions.
+    std::uint32_t simplified = 0;
 };
 
 // Reads one of the game's files, such as "assets:/shaders/forward.vert.spv".

@@ -245,6 +245,20 @@ private:
         return true;
     }
 
+    bool bind_instances(std::span<const std::byte> instances) override {
+        DREAM_VERIFY(m_in_pass, "Binding instances outside a render pass");
+        if (m_frame_vertex_bytes + instances.size() > k_max_frame_vertex_bytes) {
+            return false;
+        }
+        m_frame_vertex_bytes += instances.size();
+        return true;
+    }
+
+    void draw_indexed_instanced(std::uint32_t /*first_index*/, std::uint32_t /*index_count*/,
+                                std::uint32_t /*instance_count*/) override {
+        DREAM_VERIFY(m_in_pass && m_pipeline_bound, "Drawing without a pass and pipeline");
+    }
+
     void set_scissor(std::optional<ScissorRect> /*rect*/) override {
         DREAM_VERIFY(m_in_pass, "Setting a scissor outside a render pass");
     }

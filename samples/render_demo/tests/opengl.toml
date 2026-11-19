@@ -28,3 +28,4 @@ quit = false
 platform = ["sdl3"]
 rhi = ["opengl"]
 renderer = ["forward"]
+mesh_simplifier = ["meshoptimizer"]

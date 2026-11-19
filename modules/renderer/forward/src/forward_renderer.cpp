@@ -23,6 +23,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -34,8 +35,8 @@ using core::Vec3;
 using core::Vec4;
 using namespace renderer;
 
-// These match the blocks of the same names in the module's shaders: forward.slang and shadow.slang
-// share FrameUniforms and DrawConstants.
+// This matches the block of the same name in the module's shaders: forward.slang and shadow.slang
+// share it.
 struct FrameUniforms {
     Mat4 view_projection;
     Vec4 camera_position;
@@ -51,11 +52,12 @@ struct FrameUniforms {
     Vec4 camera_forward;
 };
 
-struct DrawConstants {
-    Mat4 model;
-    Vec4 normal_x;
-    Vec4 normal_y;
-    Vec4 normal_z;
+// One instance of a part, as forward.slang reads it per instance: the columns of its model
+// matrix and of its normals' matrix, and its color. shadow.slang reads the model matrix alone
+// (ADR 0032).
+struct InstanceData {
+    std::array<Vec4, 4> model;
+    std::array<Vec4, 3> normals;
     Vec4 base_color;
 };
 
@@ -71,7 +73,10 @@ struct UiConstants {
 
 static_assert(sizeof(FrameUniforms) <= rhi::k_max_uniform_size);
 static_assert(sizeof(FrameUniforms) == 496);
-static_assert(sizeof(DrawConstants) <= rhi::k_max_push_constant_size);
+static_assert(sizeof(InstanceData) == 128);
+
+// How many instances one draw takes at most, so each call's data stays small.
+constexpr std::size_t k_max_instances_per_draw = 1024;
 
 // Covers the window, with texture coordinates from the top left, for the tone-mapping pass.
 struct ScreenVertex {
@@ -164,6 +169,8 @@ struct Settings {
     std::uint32_t shadow_cascades = 0;
     float shadow_distance = 40.0f;
     bool culling = true;
+    // How many pixels a simpler version of a part may stray on screen; 0 always draws the full one.
+    float lod_error = 1.0f;
 };
 
 core::Result<Settings> read_settings(const core::Config& config, const rhi::Device& device) {
@@ -275,6 +282,14 @@ core::Result<Settings> read_settings(const core::Config& config, const rhi::Devi
                                          distance));
     }
     settings.shadow_distance = static_cast<float>(distance);
+
+    const double lod_error = config.get_float("renderer.lod_error").value_or(1.0);
+    if (!(lod_error >= 0.0 && lod_error <= 100.0)) {
+        return setting_error(std::format("Setting 'renderer.lod_error' must be from 0 to 100, "
+                                         "not {}",
+                                         lod_error));
+    }
+    settings.lod_error = static_cast<float>(lod_error);
 
     if (const std::optional<bool> culling = config.get_bool("renderer.culling")) {
         settings.culling = *culling;
@@ -503,6 +518,10 @@ public:
             description += "; shadows are off";
         }
         description += m_settings.culling ? "; parts out of view are skipped" : "; culling is off";
+        description += m_settings.lod_error > 0.0f
+                           ? std::format("; simpler versions of parts within {} pixels",
+                                         m_settings.lod_error)
+                           : std::string("; parts are always drawn in full");
         m_description = std::move(description);
         return {};
     }
@@ -543,7 +562,12 @@ private:
 
     core::Result<Pipelines> make_pipelines(const FileReader& read_file);
     void fit_hdr_targets(platform::SurfaceSize size);
-    // Skips the parts outside `view`, when one is given, by their boxes in m_world_bounds.
+    // Works out what every part draws this frame: its box in the world, the version of it for its
+    // size on screen, and its instance data.
+    void prepare_meshes(const Frame& frame, bool boxes);
+
+    // Draws the parts, or the shadow casters among them, that `view` sees, when one is given,
+    // with one instanced draw for the parts that share a range of indices and a texture.
     void draw_meshes(rhi::CommandList& commands, std::span<const MeshDraw> meshes, bool casters,
                      const core::Frustum* view, FrameStats& stats);
     void draw_lines(rhi::CommandList& commands, std::span<const LineVertex> lines,
@@ -559,8 +583,19 @@ private:
     OwnedTexture m_hdr_color;
     OwnedTexture m_hdr_depth;
     platform::SurfaceSize m_hdr_size;
-    // Each part's box in world space this frame, reused between frames.
+    // What prepare_meshes works out for each part this frame, reused between frames.
+    struct Chosen {
+        std::uint32_t first_index = 0;
+        std::uint32_t index_count = 0;
+        bool simplified = false;
+    };
     std::vector<core::Aabb> m_world_bounds;
+    std::vector<Chosen> m_chosen;
+    std::vector<InstanceData> m_instances;
+    // The parts one pass draws, in draw order, and the instance data of one draw.
+    std::vector<std::uint32_t> m_order;
+    std::vector<InstanceData> m_batch;
+    bool m_warned_instances = false;
 };
 
 core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_file) {
@@ -598,11 +633,25 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
         rhi::VertexAttribute{1, rhi::VertexFormat::Float3, offsetof(MeshVertex, normal)},
         rhi::VertexAttribute{2, rhi::VertexFormat::Float2, offsetof(MeshVertex, uv)},
     };
+    // Each instance's model matrix, normals' matrix and color, after the vertex's own inputs.
+    constexpr auto instance_attributes = [](std::uint32_t first_location, std::size_t count) {
+        std::array<rhi::VertexAttribute, 8> attributes{};
+        for (std::size_t index = 0; index < count; ++index) {
+            attributes[index] = rhi::VertexAttribute{
+                first_location + static_cast<std::uint32_t>(index), rhi::VertexFormat::Float4,
+                static_cast<std::uint32_t>(index * sizeof(Vec4))};
+        }
+        return attributes;
+    };
+    static constexpr std::array k_instance_attributes = instance_attributes(3, 8);
+    static constexpr std::array k_shadow_instance_attributes = instance_attributes(1, 4);
     core::Result<OwnedPipeline> forward = pipeline(rhi::PipelineDesc{
         .vertex_shader = vertex.value(),
         .fragment_shader = fragment.value(),
         .vertex_stride = sizeof(MeshVertex),
         .attributes = k_attributes,
+        .instance_stride = sizeof(InstanceData),
+        .instance_attributes = k_instance_attributes,
         .color_target = hdr,
         .depth_target = hdr.has_value() ? std::optional(k_depth_format) : std::nullopt,
     });
@@ -686,6 +735,8 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
             .vertex_shader = shadow_vertex.value(),
             .vertex_stride = sizeof(MeshVertex),
             .attributes = std::span(k_attributes).first(1),
+            .instance_stride = sizeof(InstanceData),
+            .instance_attributes = std::span(k_shadow_instance_attributes).first(4),
             .cull = rhi::CullMode::None,
             .depth_bias = 1.0f,
             .slope_depth_bias = 1.5f,
@@ -761,21 +812,111 @@ void ForwardRenderer::fit_hdr_targets(platform::SurfaceSize size) {
     m_hdr_size = size;
 }
 
-void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const MeshDraw> meshes,
-                                  bool casters, const core::Frustum* view, FrameStats& stats) {
-    rhi::BufferHandle bound_vertices;
-    rhi::BufferHandle bound_indices;
+void ForwardRenderer::prepare_meshes(const Frame& frame, bool boxes) {
+    const std::span<const MeshDraw> meshes = frame.meshes;
+    m_chosen.resize(meshes.size());
+    m_instances.resize(meshes.size());
+    m_world_bounds.resize(boxes ? meshes.size() : 0);
+
+    // For a part's size on screen: the projection's vertical scale, which is the length of the
+    // view-projection matrix's second row, as look_at's rows are unit length.
+    const bool lods = m_settings.lod_error > 0.0f && frame.view.has_value() && boxes;
+    float pixels_per_unit = 0.0f;
+    if (lods) {
+        const Mat4& matrix = frame.view->view_projection;
+        const Vec3 row{matrix.columns[0].y, matrix.columns[1].y, matrix.columns[2].y};
+        pixels_per_unit = core::length(row) * static_cast<float>(frame.size.height) * 0.5f;
+    }
+
     std::optional<Mat4> normals_for;
     Mat4 normals;
     for (std::size_t index = 0; index < meshes.size(); ++index) {
         const MeshDraw& mesh = meshes[index];
-        if (casters && !mesh.casts_shadows) {
+        if (boxes) {
+            m_world_bounds[index] = core::transformed(mesh.model, mesh.bounds);
+        }
+
+        // The parts of one model share its matrix, so its normals are worked out once.
+        if (!normals_for.has_value() || std::memcmp(&*normals_for, &mesh.model, sizeof(Mat4)) != 0) {
+            const std::optional<Mat4> inverted = core::inverse(mesh.model);
+            normals = inverted.has_value() ? core::transpose(*inverted) : mesh.model;
+            normals_for = mesh.model;
+        }
+        m_instances[index] = InstanceData{
+            .model = mesh.model.columns,
+            .normals = {normals.columns[0], normals.columns[1], normals.columns[2]},
+            .base_color = mesh.base_color,
+        };
+
+        // The simplest version whose error stays under the limit on screen, at the part's nearest
+        // point to the camera.
+        Chosen chosen{mesh.first_index, mesh.index_count, false};
+        const core::Aabb& box = boxes ? m_world_bounds[index] : mesh.bounds;
+        if (lods && !mesh.lods.empty() && !box.empty()) {
+            const Vec3 eye = frame.view->eye;
+            const Vec3 nearest{std::clamp(eye.x, box.min.x, box.max.x),
+                               std::clamp(eye.y, box.min.y, box.max.y),
+                               std::clamp(eye.z, box.min.z, box.max.z)};
+            const float distance = core::length(nearest - eye);
+            if (distance > 0.0f) {
+                float scale = 0.0f;
+                for (std::size_t axis = 0; axis < 3; ++axis) {
+                    const Vec4& column = mesh.model.columns[axis];
+                    scale = std::max(scale, core::length(Vec3{column.x, column.y, column.z}));
+                }
+                for (const MeshLod& lod : mesh.lods) {
+                    if (lod.error * scale * pixels_per_unit / distance > m_settings.lod_error) {
+                        break;
+                    }
+                    chosen = Chosen{lod.first_index, lod.index_count, true};
+                }
+            }
+        }
+        m_chosen[index] = chosen;
+    }
+}
+
+void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const MeshDraw> meshes,
+                                  bool casters, const core::Frustum* view, FrameStats& stats) {
+    m_order.clear();
+    for (std::size_t index = 0; index < meshes.size(); ++index) {
+        if (casters && !meshes[index].casts_shadows) {
             continue;
         }
         if (view != nullptr && !core::intersects(*view, m_world_bounds[index])) {
             ++(casters ? stats.shadow_culled : stats.culled);
             continue;
         }
+        m_order.push_back(static_cast<std::uint32_t>(index));
+    }
+
+    // Parts that draw the same indices with the same texture become one draw. Shadows ignore
+    // textures.
+    const auto key = [&](std::uint32_t index) {
+        const MeshDraw& mesh = meshes[index];
+        const Chosen& chosen = m_chosen[index];
+        return std::make_tuple(mesh.vertices, mesh.indices, chosen.first_index, chosen.index_count,
+                               casters ? rhi::TextureHandle{} : mesh.texture);
+    };
+    std::ranges::stable_sort(m_order, [&](std::uint32_t a, std::uint32_t b) { return key(a) < key(b); });
+
+    rhi::BufferHandle bound_vertices;
+    rhi::BufferHandle bound_indices;
+    for (std::size_t first = 0; first < m_order.size();) {
+        std::size_t last = first + 1;
+        while (last < m_order.size() && last - first < k_max_instances_per_draw &&
+               key(m_order[last]) == key(m_order[first])) {
+            ++last;
+        }
+        const MeshDraw& mesh = meshes[m_order[first]];
+        const Chosen& chosen = m_chosen[m_order[first]];
+        m_batch.clear();
+        for (std::size_t at = first; at < last; ++at) {
+            m_batch.push_back(m_instances[m_order[at]]);
+        }
+        const auto count = static_cast<std::uint32_t>(last - first);
+        first = last;
+
         if (mesh.vertices != bound_vertices) {
             commands.bind_vertex_buffer(mesh.vertices);
             bound_vertices = mesh.vertices;
@@ -784,28 +925,26 @@ void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const Me
             commands.bind_index_buffer(mesh.indices, rhi::IndexFormat::UInt32);
             bound_indices = mesh.indices;
         }
-        // The parts of one model share its matrix, so its normals are worked out once.
-        if (!normals_for.has_value() || std::memcmp(&*normals_for, &mesh.model, sizeof(Mat4)) != 0) {
-            const std::optional<Mat4> inverted = core::inverse(mesh.model);
-            normals = inverted.has_value() ? core::transpose(*inverted) : mesh.model;
-            normals_for = mesh.model;
-        }
-        const DrawConstants constants{
-            .model = mesh.model,
-            .normal_x = normals.columns[0],
-            .normal_y = normals.columns[1],
-            .normal_z = normals.columns[2],
-            .base_color = mesh.base_color,
-        };
         if (!casters) {
             commands.bind_texture(mesh.texture);
         }
-        commands.push_constants(std::as_bytes(std::span(&constants, 1)));
-        commands.draw_indexed_range(mesh.first_index, mesh.index_count);
+        if (!commands.bind_instances(std::as_bytes(std::span(m_batch)))) {
+            if (!m_warned_instances) {
+                DREAM_LOG_WARNING("The frame's vertex memory is used up, so some parts aren't "
+                                  "drawn");
+                m_warned_instances = true;
+            }
+            break;
+        }
+        commands.draw_indexed_instanced(chosen.first_index, chosen.index_count, count);
+        ++stats.draw_calls;
         if (casters) {
-            ++stats.shadow_casters;
+            stats.shadow_casters += count;
         } else {
-            ++stats.draws;
+            stats.draws += count;
+            if (chosen.simplified) {
+                stats.simplified += count;
+            }
         }
     }
 }
@@ -922,17 +1061,16 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
     }
     const auto uniform_bytes = [&] { return std::as_bytes(std::span(&*uniforms, 1)); };
 
-    // Each part's box moved into the world once, for the camera and every cascade.
+    // Each part's box moved into the world once, for culling against the camera and every
+    // cascade, and for choosing its version.
     const bool culling = m_settings.culling && frame.view.has_value();
     std::optional<core::Frustum> camera_bounds;
-    if (culling) {
-        DREAM_PROFILE_ZONE("Culling");
-        m_world_bounds.resize(frame.meshes.size());
-        for (std::size_t index = 0; index < frame.meshes.size(); ++index) {
-            m_world_bounds[index] =
-                core::transformed(frame.meshes[index].model, frame.meshes[index].bounds);
+    if (frame.view.has_value()) {
+        DREAM_PROFILE_ZONE("Prepare parts");
+        prepare_meshes(frame, culling || m_settings.lod_error > 0.0f);
+        if (culling) {
+            camera_bounds = core::frustum_from(frame.view->view_projection);
         }
-        camera_bounds = core::frustum_from(frame.view->view_projection);
     }
 
     if (shadows) {
@@ -1010,6 +1148,8 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
     DREAM_PROFILE_VALUE("Shadow casters", stats.shadow_casters);
     DREAM_PROFILE_VALUE("Culled parts", stats.culled);
     DREAM_PROFILE_VALUE("Culled shadow casters", stats.shadow_culled);
+    DREAM_PROFILE_VALUE("Instanced draw calls", stats.draw_calls);
+    DREAM_PROFILE_VALUE("Simplified parts", stats.simplified);
     DREAM_PROFILE_VALUE("Debug lines", stats.lines);
     DREAM_PROFILE_VALUE("UI draw commands", stats.ui_commands);
     return stats;

@@ -94,6 +94,12 @@ Parts of models out of the camera's view are skipped, and so are shadow casters 
 cascade, by boxes worked out when a model loads. `culling = false` under `[renderer]` turns it off.
 See [ADR 0031](docs/adr/0031-frustum-culling.md).
 
+Parts that draw the same mesh with the same texture are drawn together, as instances of one draw,
+in the scene and in each shadow cascade. When a project lists a `mesh_simplifier`, models get
+simpler versions as they load, and the renderer draws the simplest one whose error stays within
+`lod_error` pixels on screen (1 by default). `[lods]` sets how many versions are made. See
+[ADR 0032](docs/adr/0032-instancing-and-lods.md).
+
 ## Screenshot tests
 
 A `[screenshot]` table in a game's `dream.toml` captures one frame, saves it next to the program,
@@ -190,6 +196,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 |---|---|---|---|---|
 | `rhi` | `vulkan`, `directx12`, `directx`, `opengl`, `opengles`, `null` | all | `vulkan`, `opengles`, `null` | `directx` is Direct3D 11. A game's shaders are compiled for whichever its list names. |
 | `renderer` | `forward`, `null` | all | all | `forward` brings its shaders; `null` only clears the window. |
+| `mesh_simplifier` | `meshoptimizer`, `null` | all | all | Makes the simpler versions of models that the renderer draws far away. Optional. |
 | `physics3d` | `jolt`, `impulse`, `null` | all | all | `impulse` is the engine's own library. |
 | `physics2d` | `box2d`, `chipmunk`, `null` | all | all | `chipmunk` has no continuous collision. |
 | `audio` | `miniaudio`, `portaudio`, `null` | all | `miniaudio`, `null` | PortAudio has no Android output. |

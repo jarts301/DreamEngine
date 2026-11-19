@@ -1,6 +1,7 @@
 // Draws shadow casters into the shadow map, as the sun sees them: depth only (ADR 0029).
 //
-// The frame block and push constants are forward.slang's, with the same bindings.
+// The frame block is forward.slang's, with the same binding, and each instance's model matrix is
+// read as forward.slang reads it (ADR 0032).
 
 struct FrameUniforms {
     float4x4 view_projection;
@@ -15,27 +16,24 @@ struct FrameUniforms {
     float4 camera_forward;
 };
 
-struct DrawConstants {
-    float4x4 model;
-    float4 normal_x;
-    float4 normal_y;
-    float4 normal_z;
-    float4 base_color;
-};
-
 [[vk::binding(0, 0)]]
 ConstantBuffer<FrameUniforms> frame : register(b0);
 
-[[vk::push_constant]]
-ConstantBuffer<DrawConstants> draw : register(b1);
-
 struct VertexInput {
     [[vk::location(0)]] float3 position : POSITION;
+    // The columns of each instance's model matrix.
+    [[vk::location(1)]] float4 model_x : MODEL0;
+    [[vk::location(2)]] float4 model_y : MODEL1;
+    [[vk::location(3)]] float4 model_z : MODEL2;
+    [[vk::location(4)]] float4 model_w : MODEL3;
 };
 
 [shader("vertex")]
 float4 vertex_main(VertexInput input) : SV_Position {
-    return mul(frame.light_view_projection, mul(draw.model, float4(input.position, 1.0)));
+    const float3 p = input.position;
+    const float4 world = input.model_x * p.x + input.model_y * p.y + input.model_z * p.z +
+                         input.model_w;
+    return mul(frame.light_view_projection, world);
 }
 
 // Never used: the shadow pipeline has no fragment shader. Every shader file has both stages.

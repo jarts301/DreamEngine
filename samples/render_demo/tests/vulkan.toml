@@ -27,13 +27,16 @@ quit = false
 platform = ["sdl3"]
 rhi = ["vulkan"]
 renderer = ["forward"]
+mesh_simplifier = ["meshoptimizer"]
 
 [modules.android]
 platform = ["sdl3"]
 rhi = ["vulkan"]
 renderer = ["forward"]
+mesh_simplifier = ["meshoptimizer"]
 
 [modules.linux]
 platform = ["sdl3"]
 rhi = ["vulkan"]
 renderer = ["forward"]
+mesh_simplifier = ["meshoptimizer"]

@@ -551,13 +551,21 @@ public:
         };
         const auto stage_count = static_cast<std::uint32_t>(fragment != nullptr ? 2 : 1);
 
-        const VkVertexInputBindingDescription binding{
-            .binding = 0,
-            .stride = desc.vertex_stride,
-            .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        // Binding 1 holds per-instance data, for instanced pipelines.
+        const std::array<VkVertexInputBindingDescription, 2> bindings{
+            VkVertexInputBindingDescription{
+                .binding = 0,
+                .stride = desc.vertex_stride,
+                .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+            },
+            VkVertexInputBindingDescription{
+                .binding = 1,
+                .stride = desc.instance_stride,
+                .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE,
+            },
         };
         std::vector<VkVertexInputAttributeDescription> attributes;
-        attributes.reserve(desc.attributes.size());
+        attributes.reserve(desc.attributes.size() + desc.instance_attributes.size());
         for (const VertexAttribute& attribute : desc.attributes) {
             attributes.push_back(VkVertexInputAttributeDescription{
                 .location = attribute.location,
@@ -566,11 +574,19 @@ public:
                 .offset = attribute.offset,
             });
         }
+        for (const VertexAttribute& attribute : desc.instance_attributes) {
+            attributes.push_back(VkVertexInputAttributeDescription{
+                .location = attribute.location,
+                .binding = 1,
+                .format = to_vulkan(attribute.format),
+                .offset = attribute.offset,
+            });
+        }
 
         const VkPipelineVertexInputStateCreateInfo vertex_input{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-            .vertexBindingDescriptionCount = 1,
-            .pVertexBindingDescriptions = &binding,
+            .vertexBindingDescriptionCount = desc.instance_stride > 0 ? 2u : 1u,
+            .pVertexBindingDescriptions = bindings.data(),
             .vertexAttributeDescriptionCount = static_cast<std::uint32_t>(attributes.size()),
             .pVertexAttributeDescriptions = attributes.data(),
         };
@@ -2468,6 +2484,21 @@ private:
         vkCmdBindVertexBuffers(m_recording, 0, 1, &frame.vertex_buffer, &*vertex_offset);
         vkCmdBindIndexBuffer(m_recording, frame.vertex_buffer, *index_offset, VK_INDEX_TYPE_UINT32);
         return true;
+    }
+
+    bool bind_instances(std::span<const std::byte> instances) override {
+        const std::optional<VkDeviceSize> offset = copy_to_frame(instances);
+        if (!offset.has_value()) {
+            return false;
+        }
+        vkCmdBindVertexBuffers(m_recording, 1, 1, &m_frames[m_frame_index].vertex_buffer, &*offset);
+        return true;
+    }
+
+    void draw_indexed_instanced(std::uint32_t first_index, std::uint32_t index_count,
+                                std::uint32_t instance_count) override {
+        flush_descriptors();
+        vkCmdDrawIndexed(m_recording, index_count, instance_count, first_index, 0, 0);
     }
 
     void set_scissor(std::optional<ScissorRect> rect) override {

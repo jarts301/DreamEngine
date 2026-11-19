@@ -1,0 +1,1 @@
+dream_add_interface(mesh_simplifier)

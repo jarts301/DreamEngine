@@ -28,3 +28,4 @@ quit = false
 platform = ["sdl3"]
 rhi = ["opengles"]
 renderer = ["forward"]
+mesh_simplifier = ["meshoptimizer"]

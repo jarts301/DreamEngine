@@ -158,6 +158,7 @@ struct PipelineResource {
     ComPtr<ID3D11BlendState> blend;
     D3D11_PRIMITIVE_TOPOLOGY topology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     UINT vertex_stride = 0;
+    UINT instance_stride = 0;
     std::optional<TextureFormat> color_target;
     std::optional<TextureFormat> depth_target;
 };
@@ -441,12 +442,13 @@ public:
         resource.color_target = desc.color_target;
         resource.depth_target = desc.depth_target;
         resource.vertex_stride = desc.vertex_stride;
+        resource.instance_stride = desc.instance_stride;
         resource.topology = desc.topology == PrimitiveTopology::Lines
                                 ? D3D11_PRIMITIVE_TOPOLOGY_LINELIST
                                 : D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 
         core::Result<ComPtr<ID3D11InputLayout>> layout =
-            create_input_layout(desc.attributes, vertex->code);
+            create_input_layout(desc.attributes, desc.instance_attributes, vertex->code);
         if (!layout.has_value()) {
             return layout.error();
         }
@@ -853,9 +855,11 @@ private:
 
     // DirectX matches vertex attributes to shader inputs by semantic name, which the interface
     // doesn't have. The vertex shader's inputs are declared in location order (ADR 0013), so the
-    // n-th input that isn't a system value takes the attribute at location n.
+    // n-th input that isn't a system value takes the attribute at location n. Per-instance
+    // attributes are read from input slot 1.
     core::Result<ComPtr<ID3D11InputLayout>>
     create_input_layout(std::span<const VertexAttribute> attributes,
+                        std::span<const VertexAttribute> instance_attributes,
                         std::span<const std::byte> vertex_code) {
         core::Result<ComPtr<ID3D11ShaderReflection>> reflected = reflect(vertex_code);
         if (!reflected.has_value()) {
@@ -882,27 +886,33 @@ private:
         }
 
         std::vector<D3D11_INPUT_ELEMENT_DESC> elements;
-        elements.reserve(attributes.size());
-        for (const VertexAttribute& attribute : attributes) {
-            // An attribute the shader doesn't read is left out, as Vulkan would ignore it.
-            if (attribute.location >= inputs.size()) {
-                continue;
-            }
-            const D3D11_SIGNATURE_PARAMETER_DESC& input = inputs[attribute.location];
+        elements.reserve(attributes.size() + instance_attributes.size());
+        const auto add = [&](std::span<const VertexAttribute> from, bool per_instance) {
+            for (const VertexAttribute& attribute : from) {
+                // An attribute the shader doesn't read is left out, as Vulkan would ignore it.
+                if (attribute.location >= inputs.size()) {
+                    continue;
+                }
+                const D3D11_SIGNATURE_PARAMETER_DESC& input = inputs[attribute.location];
 
-            D3D11_INPUT_ELEMENT_DESC element{};
-            element.SemanticName = input.SemanticName;
-            element.SemanticIndex = input.SemanticIndex;
-            element.Format = to_directx(attribute.format);
-            element.InputSlot = 0;
-            element.AlignedByteOffset = attribute.offset;
-            element.InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
-            element.InstanceDataStepRate = 0;
-            elements.push_back(element);
-        }
+                D3D11_INPUT_ELEMENT_DESC element{};
+                element.SemanticName = input.SemanticName;
+                element.SemanticIndex = input.SemanticIndex;
+                element.Format = to_directx(attribute.format);
+                element.InputSlot = per_instance ? 1 : 0;
+                element.AlignedByteOffset = attribute.offset;
+                element.InputSlotClass =
+                    per_instance ? D3D11_INPUT_PER_INSTANCE_DATA : D3D11_INPUT_PER_VERTEX_DATA;
+                element.InstanceDataStepRate = per_instance ? 1 : 0;
+                elements.push_back(element);
+            }
+        };
+        add(attributes, false);
+        add(instance_attributes, true);
         for (std::size_t location = 0; location < inputs.size(); ++location) {
-            const bool provided = std::ranges::any_of(
-                attributes, [&](const VertexAttribute& a) { return a.location == location; });
+            const auto at = [&](const VertexAttribute& a) { return a.location == location; };
+            const bool provided = std::ranges::any_of(attributes, at) ||
+                                  std::ranges::any_of(instance_attributes, at);
             if (!provided) {
                 return invalid(std::format("The vertex shader reads input {} ({}{}), which the "
                                            "pipeline has no attribute for",
@@ -1375,6 +1385,7 @@ private:
             m_bound_stride = resource->vertex_stride;
             m_vertex_buffer_dirty = true;
         }
+        m_bound_instance_stride = resource->instance_stride;
     }
 
     void bind_vertex_buffer(BufferHandle handle) override {
@@ -1470,6 +1481,27 @@ private:
         return true;
     }
 
+    bool bind_instances(std::span<const std::byte> instances) override {
+        DREAM_VERIFY(m_in_pass, "Binding instances outside a render pass");
+        const std::optional<UINT> offset = copy_to_frame(instances);
+        if (!offset.has_value()) {
+            return false;
+        }
+        m_instance_offset = *offset;
+        return true;
+    }
+
+    void draw_indexed_instanced(std::uint32_t first_index, std::uint32_t index_count,
+                                std::uint32_t instance_count) override {
+        DREAM_VERIFY(m_in_pass, "Drawing outside a render pass");
+        DREAM_VERIFY(m_bound_instance_stride > 0, "Drawing instances with a pipeline that has none");
+        flush_vertex_buffer();
+        // Set with each draw, since the stride comes from the pipeline bound now.
+        ID3D11Buffer* const buffer = m_frame_buffer.Get();
+        m_context->IASetVertexBuffers(1, 1, &buffer, &m_bound_instance_stride, &m_instance_offset);
+        m_context->DrawIndexedInstanced(index_count, instance_count, first_index, 0, 0);
+    }
+
     void set_scissor(std::optional<ScissorRect> rect) override {
         DREAM_VERIFY(m_in_pass, "Setting a scissor outside a render pass");
         const auto width = static_cast<std::int64_t>(m_pass_size.width);
@@ -1527,6 +1559,8 @@ private:
     ComPtr<ID3D11Buffer> m_vertex_buffer;
     UINT m_vertex_buffer_offset = 0;
     UINT m_bound_stride = 0;
+    UINT m_bound_instance_stride = 0;
+    UINT m_instance_offset = 0;
     bool m_vertex_buffer_dirty = true;
 
     core::HandlePool<TextureResource> m_textures;

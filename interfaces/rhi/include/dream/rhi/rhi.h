@@ -39,8 +39,9 @@ inline constexpr std::size_t k_max_push_constant_size = 128;
 // The largest block accepted by CommandList::set_uniforms.
 inline constexpr std::size_t k_max_uniform_size = 512;
 
-// How many bytes CommandList::draw_vertices can take in one frame, over all its calls.
-inline constexpr std::size_t k_max_frame_vertex_bytes = 2 * 1024 * 1024;
+// How many bytes CommandList::draw_vertices, bind_frame_geometry and bind_instances can take in one
+// frame, over all their calls.
+inline constexpr std::size_t k_max_frame_vertex_bytes = 4 * 1024 * 1024;
 
 enum class BufferUsage : std::uint8_t { Vertex, Index };
 
@@ -218,7 +219,8 @@ struct ScissorRect {
 };
 
 // Matched to the vertex shader's inputs by location. DirectX has no locations, so there the n-th
-// input the shader declares is location n (ADR 0013).
+// input the shader declares is location n (ADR 0013). Per-instance attributes come after the
+// per-vertex ones, in locations of their own.
 struct VertexAttribute {
     std::uint32_t location = 0;
     VertexFormat format = VertexFormat::Float3;
@@ -239,6 +241,12 @@ struct PipelineDesc {
     ShaderHandle fragment_shader;
     std::uint32_t vertex_stride = 0;
     std::span<const VertexAttribute> attributes;
+
+    // Attributes read once per instance, from the data CommandList::bind_instances binds, for
+    // draw_indexed_instanced (ADR 0032). None for a pipeline that isn't instanced.
+    std::uint32_t instance_stride = 0;
+    std::span<const VertexAttribute> instance_attributes;
+
     PrimitiveTopology topology = PrimitiveTopology::Triangles;
     BlendMode blend = BlendMode::Opaque;
     bool depth_test = true;
@@ -272,6 +280,9 @@ pipeline_problem(const PipelineDesc& desc) noexcept {
     }
     if (desc.depth_target.has_value() && !is_depth(*desc.depth_target)) {
         return "A pipeline's depth target must be a depth format";
+    }
+    if (desc.instance_attributes.empty() != (desc.instance_stride == 0)) {
+        return "A pipeline's per-instance attributes and their stride go together";
     }
     if (!desc.fragment_shader.is_valid() &&
         (desc.color_target.has_value() || !desc.depth_target.has_value())) {
@@ -345,6 +356,16 @@ public:
     // nothing, if they don't fit.
     virtual bool bind_frame_geometry(std::span<const std::byte> vertices,
                                      std::span<const std::uint32_t> indices) = 0;
+
+    // Copies one block of per-instance data for each instance into the same per-frame memory as
+    // draw_vertices, and binds it for the instanced pipeline's per-instance attributes. Returns
+    // false, binding nothing, if it doesn't fit.
+    virtual bool bind_instances(std::span<const std::byte> instances) = 0;
+
+    // Draws part of the bound index buffer once for each of `instance_count` instances, which read
+    // their attributes from the data bind_instances bound last.
+    virtual void draw_indexed_instanced(std::uint32_t first_index, std::uint32_t index_count,
+                                        std::uint32_t instance_count) = 0;
 
     // Limits drawing to a rectangle, or with nullopt to the whole surface, which is also how each
     // render pass starts.

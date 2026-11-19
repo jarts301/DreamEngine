@@ -127,6 +127,12 @@ public:
         return m_fixed_steps.alpha();
     }
 
+    // Whether the project configuration lists backends for `Interface` on this platform, for
+    // subsystems a project may leave out.
+    template <core::ModuleInterface Interface> [[nodiscard]] bool has_module() const {
+        return m_modules != nullptr && m_modules->is_configured<Interface>();
+    }
+
     // Creates the backend for `Interface` that the project configuration selects for this platform.
     template <core::ModuleInterface Interface>
     [[nodiscard]] core::Result<std::unique_ptr<Interface>> create_module() const {

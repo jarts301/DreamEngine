@@ -35,6 +35,7 @@ quit = true
 platform = ["sdl3"]
 rhi = ["directx12"]
 renderer = ["forward"]
+mesh_simplifier = ["meshoptimizer"]
 physics3d = ["jolt"]
 audio = ["miniaudio"]
 ui = ["rmlui"]

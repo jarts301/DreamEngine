@@ -10,6 +10,7 @@
 #include <array>
 #include <cstring>
 #include <format>
+#include <iterator>
 #include <memory>
 #include <ostream> // Needed for doctest to print std::string.
 #include <set>
@@ -219,7 +220,7 @@ TEST_CASE("The forward renderer explains what's wrong when its shaders are missi
     const std::array meshes{mesh(0)};
     const Calls calls = fixture.draw(Frame{.size = k_size, .view = view_from({0, 0, 5}),
                                            .meshes = meshes});
-    CHECK(std::ranges::count(calls, "draw 0+3") == 1);
+    CHECK(std::ranges::count(calls, "draw 0+3 x1") == 1);
 }
 
 TEST_CASE_FIXTURE(Fixture, "The forward renderer draws each part, with its texture") {
@@ -230,9 +231,12 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer draws each part, with its textu
         draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes}, &stats);
 
     CHECK(stats.draws == 3);
-    // Uniforms are set once for the frame, and white is bound for untextured parts.
-    CHECK(only_drawing(calls) == Calls{"uniforms", "bind_texture 0", "draw 0+3", "bind_texture 0",
-                                       "draw 3+3", "bind_texture 7", "draw 0+3"});
+    CHECK(stats.draw_calls == 3);
+    // Uniforms are set once for the frame, and white is bound for untextured parts. Parts are
+    // drawn grouped by what they draw, not in the order given.
+    CHECK(only_drawing(calls) == Calls{"uniforms", "bind_texture 0", "draw 0+3 x1",
+                                       "bind_texture 7", "draw 0+3 x1", "bind_texture 0",
+                                       "draw 3+3 x1"});
 }
 
 TEST_CASE_FIXTURE(Fixture, "The forward renderer only clears the screen without a view") {
@@ -419,8 +423,8 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer skips parts out of the camera's
     // The part without bounds is always drawn.
     CHECK(stats.draws == 2);
     CHECK(stats.culled == 2);
-    CHECK(std::ranges::count(calls, "draw 0+3") == 1);
-    CHECK(std::ranges::count(calls, "draw 3+3") == 1);
+    CHECK(std::ranges::count(calls, "draw 0+3 x1") == 1);
+    CHECK(std::ranges::count(calls, "draw 3+3 x1") == 1);
     CHECK(contains(std::string(renderer->describe()), "parts out of view are skipped"));
 }
 
@@ -451,4 +455,65 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer skips casters outside each shad
     CHECK(stats.shadow_culled >= 4);
     CHECK(stats.shadow_casters + stats.shadow_culled == 2 * 4);
     CHECK(stats.culled == 1);
+}
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer draws parts that share a mesh as instances of one draw") {
+    start();
+    std::array meshes{box_part(Vec3{-1.0f, 0.0f, 0.0f}), mesh(3), box_part(Vec3{1.0f, 0.0f, 0.0f})};
+    meshes[2].base_color = Vec4{1.0f, 0.0f, 0.0f, 1.0f};
+    FrameStats stats;
+    const Calls calls =
+        draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes}, &stats);
+
+    CHECK(stats.draws == 3);
+    CHECK(stats.draw_calls == 2);
+    CHECK(std::ranges::count(calls, "draw 0+3 x2") == 1);
+    CHECK(std::ranges::count(calls, "draw 3+3 x1") == 1);
+
+    // Each instance's model matrix, normals and color, 128 bytes, in the order given. The last
+    // instances bound are the one part drawn alone.
+    const auto group = std::ranges::find(calls, "draw 0+3 x2");
+    REQUIRE(group != calls.begin());
+    CHECK(*std::prev(group) == "instances 256");
+}
+
+namespace {
+
+// A part with two simpler versions, after its full range: one barely different, one coarse.
+MeshDraw part_with_versions(Vec3 position) {
+    MeshDraw part = box_part(position);
+    static const std::array<MeshLod, 2> versions{
+        MeshLod{.first_index = 3, .index_count = 3, .error = 0.001f},
+        MeshLod{.first_index = 6, .index_count = 3, .error = 0.1f}};
+    part.lods = versions;
+    return part;
+}
+
+} // namespace
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer draws simpler versions of parts small on screen") {
+    start();
+    // Near the camera, the coarse version would stray by pixels, and far away by less than one.
+    const std::array meshes{part_with_versions(Vec3{0.0f, 0.0f, 0.0f}),
+                            part_with_versions(Vec3{0.0f, 0.0f, -80.0f})};
+    FrameStats stats;
+    const Calls calls =
+        draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes}, &stats);
+
+    CHECK(stats.simplified == 2);
+    CHECK(std::ranges::count(calls, "draw 3+3 x1") == 1);
+    CHECK(std::ranges::count(calls, "draw 6+3 x1") == 1);
+    CHECK(contains(std::string(renderer->describe()), "simpler versions of parts within 1 pixels"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer draws parts in full with lod_error 0") {
+    start("[renderer]\nlod_error = 0.0");
+    const std::array meshes{part_with_versions(Vec3{0.0f, 0.0f, -80.0f})};
+    FrameStats stats;
+    const Calls calls =
+        draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes}, &stats);
+
+    CHECK(stats.simplified == 0);
+    CHECK(std::ranges::count(calls, "draw 0+3 x1") == 1);
+    CHECK(contains(described(state, "[renderer]\nlod_error = -1.0"), "error:"));
 }

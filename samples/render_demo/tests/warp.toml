@@ -32,3 +32,4 @@ quit = true
 platform = ["sdl3"]
 rhi = ["directx"]
 renderer = ["forward"]
+mesh_simplifier = ["meshoptimizer"]

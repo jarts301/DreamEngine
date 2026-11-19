@@ -3,6 +3,7 @@
 #include "dream/core/math/bounds.h"
 #include "dream/core/math/vector.h"
 #include "dream/core/result.h"
+#include "dream/mesh_simplifier/mesh_simplifier.h"
 #include "dream/renderer/scene_renderer.h"
 #include "dream/rhi/rhi.h"
 
@@ -72,6 +73,8 @@ struct ModelPart {
     std::uint32_t material = 0;
     // Around the part's vertices, in model space. create_model_asset works it out.
     core::Aabb bounds;
+    // Simpler versions of the part, each simpler than the last, from generate_lods.
+    std::vector<renderer::MeshLod> lods;
 };
 
 // A model in ordinary memory, before anything is sent to the GPU.
@@ -82,6 +85,25 @@ struct ModelData {
     std::vector<ModelMaterialData> materials;
     std::vector<ImageData> images;
 };
+
+// How generate_lods makes the simpler versions of a model.
+struct LodOptions {
+    // How many simpler versions each part gets, at most.
+    std::uint32_t levels = 3;
+    // Each version aims for this fraction of the last one's triangles.
+    float reduction = 0.5f;
+    // Parts with fewer triangles than this get none.
+    std::uint32_t min_triangles = 64;
+    // A version that keeps more than this fraction of the last one's triangles isn't worth having,
+    // and ends the list.
+    float min_saving = 0.8f;
+};
+
+// Adds simpler versions of each part to `data`, appending their indices after the others. Parts
+// whose simplifier can't make them simpler enough get fewer, or none.
+[[nodiscard]] core::Result<void> generate_lods(ModelData& data,
+                                               mesh_simplifier::MeshSimplifier& simplifier,
+                                               const LodOptions& options = {});
 
 // Reads a PNG or JPEG.
 [[nodiscard]] core::Result<ImageData> decode_image(std::span<const std::byte> file);

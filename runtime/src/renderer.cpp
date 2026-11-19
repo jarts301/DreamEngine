@@ -102,6 +102,34 @@ core::Result<void> read_directional_light(ComponentContext& context) {
     return {};
 }
 
+// The [lods] table, which says how simpler versions of models are made.
+core::Result<LodOptions> read_lod_options(const core::Config& config) {
+    LodOptions options;
+    const std::int64_t levels = config.get_int("lods.levels").value_or(options.levels);
+    if (levels < 0 || levels > 8) {
+        return core::Error{core::ErrorCode::InvalidArgument,
+                           std::format("Setting 'lods.levels' must be from 0 to 8, not {}", levels)};
+    }
+    options.levels = static_cast<std::uint32_t>(levels);
+    const double reduction = config.get_float("lods.reduction").value_or(options.reduction);
+    if (!(reduction >= 0.1 && reduction <= 0.9)) {
+        return core::Error{core::ErrorCode::InvalidArgument,
+                           std::format("Setting 'lods.reduction' must be from 0.1 to 0.9, not {}",
+                                       reduction)};
+    }
+    options.reduction = static_cast<float>(reduction);
+    const std::int64_t min_triangles =
+        config.get_int("lods.min_triangles").value_or(options.min_triangles);
+    if (min_triangles < 1 || min_triangles > 1'000'000) {
+        return core::Error{core::ErrorCode::InvalidArgument,
+                           std::format("Setting 'lods.min_triangles' must be from 1 to 1000000, "
+                                       "not {}",
+                                       min_triangles)};
+    }
+    options.min_triangles = static_cast<std::uint32_t>(min_triangles);
+    return options;
+}
+
 } // namespace
 
 // Owns the textures interfaces create, by the ids they were given.
@@ -330,8 +358,25 @@ core::Result<void> Renderer::initialize(App& app,
     DREAM_LOG_INFO("Cooked textures load as {}",
                    texture_format_name(cooked_color_format(*device)));
 
+    // Simpler versions of models, when the project lists a simplifier (ADR 0032).
+    core::Result<LodOptions> lod_options = read_lod_options(app.config());
+    if (!lod_options.has_value()) {
+        return lod_options.error();
+    }
+    m_simplifier.reset();
+    if (app.has_module<mesh_simplifier::MeshSimplifier>() && lod_options.value().levels > 0) {
+        core::Result<std::unique_ptr<mesh_simplifier::MeshSimplifier>> simplifier =
+            app.create_module<mesh_simplifier::MeshSimplifier>();
+        if (!simplifier.has_value()) {
+            return simplifier.error();
+        }
+        m_simplifier = std::move(simplifier).value();
+        DREAM_LOG_INFO("Models get up to {} simpler versions each", lod_options.value().levels);
+    }
+
     app.assets().register_loader<ModelAsset>(
-        [device](AssetLoadContext& context) -> core::Result<ModelAsset> {
+        [device, simplifier = m_simplifier.get(), options = lod_options.value()](
+            AssetLoadContext& context) -> core::Result<ModelAsset> {
             const auto file = context.files.read(context.path);
             if (!file.has_value()) {
                 return file.error();
@@ -351,9 +396,17 @@ core::Result<void> Renderer::initialize(App& app,
                 }
                 return context.files.read(path);
             };
-            const core::Result<ModelData> data = parse_glb(file.value(), read_file);
+            core::Result<ModelData> data = parse_glb(file.value(), read_file);
             if (!data.has_value()) {
                 return data.error();
+            }
+            if (simplifier != nullptr) {
+                if (const core::Result<void> made = generate_lods(data.value(), *simplifier, options);
+                    !made.has_value()) {
+                    return core::Error{made.error().code,
+                                       std::format("Making simpler versions of '{}': {}",
+                                                   context.path, made.error().message)};
+                }
             }
             return create_model_asset(*device, data.value());
         });
@@ -409,6 +462,7 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
                     .texture = material.texture,
                     .casts_shadows = mesh.casts_shadows,
                     .bounds = part.bounds,
+                    .lods = part.lods,
                 });
             }
         }

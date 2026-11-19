@@ -2,9 +2,9 @@
 // ambient light and a base color texture. Output is linear, into the HDR target or the window.
 //
 // Every shader uses the same bindings, for both graphics APIs (ADR 0013): the uniform block is
-// binding 0 / register b0, the texture is binding 1 / registers t0 and s0, and the push constants
-// are register b1. The shadow map is texture slot 2: binding 3 / registers t2 and s2 (ADR 0027).
-// Vertex inputs are declared in location order.
+// binding 0 / register b0, the texture is binding 1 / registers t0 and s0. The shadow map is
+// texture slot 2: binding 3 / registers t2 and s2 (ADR 0027). Vertex inputs are declared in location
+// order, the model's first, then each instance's (ADR 0032).
 
 struct FrameUniforms {
     float4x4 view_projection;
@@ -26,14 +26,6 @@ struct FrameUniforms {
     float4 camera_forward;
 };
 
-struct DrawConstants {
-    float4x4 model;
-    float4 normal_x;
-    float4 normal_y;
-    float4 normal_z;
-    float4 base_color;
-};
-
 [[vk::binding(0, 0)]]
 ConstantBuffer<FrameUniforms> frame : register(b0);
 
@@ -43,13 +35,19 @@ Sampler2D base_color_texture;
 [[vk::binding(3, 0)]]
 Sampler2DShadow shadow_map : register(t2) : register(s2);
 
-[[vk::push_constant]]
-ConstantBuffer<DrawConstants> draw : register(b1);
-
 struct VertexInput {
     [[vk::location(0)]] float3 position : POSITION;
     [[vk::location(1)]] float3 normal : NORMAL;
     [[vk::location(2)]] float2 uv : TEXCOORD0;
+    // Each instance's: the columns of its model matrix and of its normals' matrix, and its color.
+    [[vk::location(3)]] float4 model_x : MODEL0;
+    [[vk::location(4)]] float4 model_y : MODEL1;
+    [[vk::location(5)]] float4 model_z : MODEL2;
+    [[vk::location(6)]] float4 model_w : MODEL3;
+    [[vk::location(7)]] float4 normal_x : NORMALS0;
+    [[vk::location(8)]] float4 normal_y : NORMALS1;
+    [[vk::location(9)]] float4 normal_z : NORMALS2;
+    [[vk::location(10)]] float4 base_color : COLOR0;
 };
 
 struct VertexOutput {
@@ -57,18 +55,22 @@ struct VertexOutput {
     float3 world_position : POSITION;
     float3 world_normal : NORMAL;
     float2 uv : TEXCOORD0;
+    nointerpolation float4 base_color : COLOR0;
 };
 
 [shader("vertex")]
 VertexOutput vertex_main(VertexInput input) {
-    const float4 world = mul(draw.model, float4(input.position, 1.0));
+    const float3 p = input.position;
+    const float4 world = input.model_x * p.x + input.model_y * p.y + input.model_z * p.z +
+                         input.model_w;
 
     VertexOutput output;
     output.position = mul(frame.view_projection, world);
     output.world_position = world.xyz;
-    output.world_normal = draw.normal_x.xyz * input.normal.x + draw.normal_y.xyz * input.normal.y +
-                          draw.normal_z.xyz * input.normal.z;
+    output.world_normal = input.normal_x.xyz * input.normal.x + input.normal_y.xyz * input.normal.y +
+                          input.normal_z.xyz * input.normal.z;
     output.uv = input.uv;
+    output.base_color = input.base_color;
     return output;
 }
 
@@ -126,7 +128,7 @@ float sunlight(float3 world_position, float3 normal) {
 
 [shader("fragment")]
 float4 fragment_main(VertexOutput input) : SV_Target {
-    const float4 albedo = base_color_texture.Sample(input.uv) * draw.base_color;
+    const float4 albedo = base_color_texture.Sample(input.uv) * input.base_color;
 
     const float3 normal = normalize(input.world_normal);
     const float3 to_light = frame.direction_to_light.xyz;

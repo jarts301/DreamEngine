@@ -22,6 +22,7 @@ struct FakeDeviceState {
     platform::NativeWindow last_window;
     std::vector<std::byte> last_uniforms;
     std::vector<std::byte> last_vertices;
+    std::vector<std::byte> last_instances;
     // What memory_usage reports. Nothing, like a backend that can't tell, unless a test sets it.
     std::optional<rhi::MemoryUsage> memory;
     // What take_gpu_frame_seconds hands out, oldest first.
@@ -182,6 +183,17 @@ private:
                              std::span<const std::uint32_t> indices) override {
         m_state.calls.push_back(std::format("geometry {} {}", vertices.size(), indices.size()));
         return true;
+    }
+
+    bool bind_instances(std::span<const std::byte> instances) override {
+        m_state.calls.push_back(std::format("instances {}", instances.size()));
+        m_state.last_instances.assign(instances.begin(), instances.end());
+        return true;
+    }
+
+    void draw_indexed_instanced(std::uint32_t first, std::uint32_t count,
+                                std::uint32_t instances) override {
+        m_state.calls.push_back(std::format("draw {}+{} x{}", first, count, instances));
     }
 
     void set_scissor(std::optional<rhi::ScissorRect> rect) override {

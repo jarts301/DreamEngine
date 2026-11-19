@@ -160,6 +160,7 @@ core::Error failure(std::string message) {
     F(DisableVertexAttribArray, glDisableVertexAttribArray)                                        \
     F(DrawArrays, glDrawArrays)                                                                    \
     F(DrawElements, glDrawElements)                                                                \
+    F(DrawElementsInstanced, glDrawElementsInstanced)                                              \
     F(Enable, glEnable)                                                                            \
     F(EnableVertexAttribArray, glEnableVertexAttribArray)                                          \
     F(EndQuery, glEndQuery)                                                                        \
@@ -205,6 +206,7 @@ core::Error failure(std::string message) {
     F(UseProgram, glUseProgram)                                                                    \
     F(VertexAttribBinding, glVertexAttribBinding)                                                  \
     F(VertexAttribFormat, glVertexAttribFormat)                                                    \
+    F(VertexBindingDivisor, glVertexBindingDivisor)                                                \
     F(Viewport, glViewport)
 
 struct Functions {
@@ -696,6 +698,9 @@ struct PipelineResource {
     GLenum mode = GL_TRIANGLES;
     GLsizei vertex_stride = 0;
     std::vector<VertexAttribute> attributes;
+    // Read from vertex buffer binding 1, once per instance.
+    GLsizei instance_stride = 0;
+    std::vector<VertexAttribute> instance_attributes;
     BlendMode blend = BlendMode::Opaque;
     bool depth_test = true;
     bool depth_write = true;
@@ -1023,7 +1028,10 @@ public:
                 fragment_id = empty.value();
             }
         }
-        for (const VertexAttribute& attribute : desc.attributes) {
+        std::vector<VertexAttribute> every_attribute(desc.attributes.begin(), desc.attributes.end());
+        every_attribute.insert(every_attribute.end(), desc.instance_attributes.begin(),
+                               desc.instance_attributes.end());
+        for (const VertexAttribute& attribute : every_attribute) {
             if (attribute.location >= k_max_attributes) {
                 return invalid(std::format("Vertex attribute location {} is past the {} that "
                                            "every device has",
@@ -1046,7 +1054,7 @@ public:
             return invalid(std::format("Linking a pipeline's shaders failed: {}", log));
         }
         // A program that reads the wrong bindings or inputs would draw garbage, so it is refused.
-        if (auto checked = check_program(resource.program, desc.attributes);
+        if (auto checked = check_program(resource.program, every_attribute);
             !checked.has_value()) {
             m_gl.DeleteProgram(resource.program);
             return checked.error();
@@ -1066,6 +1074,9 @@ public:
         resource.mode = desc.topology == PrimitiveTopology::Lines ? GL_LINES : GL_TRIANGLES;
         resource.vertex_stride = static_cast<GLsizei>(desc.vertex_stride);
         resource.attributes.assign(desc.attributes.begin(), desc.attributes.end());
+        resource.instance_stride = static_cast<GLsizei>(desc.instance_stride);
+        resource.instance_attributes.assign(desc.instance_attributes.begin(),
+                                            desc.instance_attributes.end());
         resource.blend = desc.blend;
         resource.depth_test = desc.depth_test;
         resource.depth_write = desc.depth_test && desc.depth_write;
@@ -1266,6 +1277,8 @@ private:
     void create_shared_state() {
         m_gl.GenVertexArrays(1, &m_vertex_array);
         m_gl.BindVertexArray(m_vertex_array);
+        // Binding 1 holds per-instance data, which steps once per instance.
+        m_gl.VertexBindingDivisor(1, 1);
 
         // One sampler per slot, as ADR 0027 lists them.
         m_gl.GenSamplers(static_cast<GLsizei>(m_samplers.size()), m_samplers.data());
@@ -1989,6 +2002,14 @@ void main() {
             m_gl.VertexAttribBinding(attribute.location, 0);
             enabled |= 1u << attribute.location;
         }
+        for (const VertexAttribute& attribute : resource->instance_attributes) {
+            const VertexFormatInfo format = to_gl(attribute.format);
+            m_gl.VertexAttribFormat(attribute.location, format.size, format.type,
+                                    format.normalized, attribute.offset);
+            m_gl.VertexAttribBinding(attribute.location, 1);
+            enabled |= 1u << attribute.location;
+        }
+        m_bound_instance_stride = resource->instance_stride;
         for (GLuint location = 0; location < k_max_attributes; ++location) {
             const std::uint32_t bit = 1u << location;
             if ((enabled & bit) != 0 && (m_enabled_attributes & bit) == 0) {
@@ -2129,6 +2150,31 @@ void main() {
         return true;
     }
 
+    bool bind_instances(std::span<const std::byte> instances) override {
+        DREAM_VERIFY(m_in_pass, "Binding instances outside a render pass");
+        const std::optional<std::size_t> offset = copy_to_frame(instances);
+        if (!offset.has_value()) {
+            return false;
+        }
+        m_instance_offset = *offset;
+        return true;
+    }
+
+    void draw_indexed_instanced(std::uint32_t first_index, std::uint32_t index_count,
+                                std::uint32_t instance_count) override {
+        DREAM_VERIFY(m_in_pass, "Drawing outside a render pass");
+        DREAM_VERIFY(m_bound_instance_stride > 0, "Drawing instances with a pipeline that has none");
+        flush_vertex_buffer();
+        // Set with each draw, since the stride comes from the pipeline bound now.
+        m_gl.BindVertexBuffer(1, m_frame_buffer, static_cast<GLintptr>(m_instance_offset),
+                              m_bound_instance_stride);
+        const std::size_t index_size = m_index_type == GL_UNSIGNED_SHORT ? 2 : 4;
+        const std::uintptr_t start = m_index_offset + std::uintptr_t{first_index} * index_size;
+        m_gl.DrawElementsInstanced(m_mode, static_cast<GLsizei>(index_count), m_index_type,
+                                   reinterpret_cast<const void*>(start),
+                                   static_cast<GLsizei>(instance_count));
+    }
+
     // The interface's rectangles start at the top, and OpenGL's at the bottom, except in passes
     // into textures, which are drawn upside down.
     void set_scissor(std::optional<ScissorRect> rect) override {
@@ -2205,6 +2251,8 @@ void main() {
     GLenum m_index_type = GL_UNSIGNED_SHORT;
     std::size_t m_index_offset = 0;
     std::uint32_t m_enabled_attributes = 0;
+    GLsizei m_bound_instance_stride = 0;
+    std::size_t m_instance_offset = 0;
     bool m_depth_write = true;
 
     core::HandlePool<TextureResource> m_textures;

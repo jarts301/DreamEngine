@@ -284,3 +284,69 @@ TEST_CASE("parse_glb keeps a KTX2 image, preferring KHR_texture_basisu's") {
     CHECK(model.value().images[0].ktx2 == ktx2_lookalike());
     CHECK(model.value().images[0].pixels.empty());
 }
+
+namespace {
+
+// Keeps the first `keep` fraction of the triangles it is given, and says how far they stray.
+class HalvingSimplifier final : public mesh_simplifier::MeshSimplifier {
+public:
+    core::Result<mesh_simplifier::Simplified> simplify(
+        const mesh_simplifier::Request& request) override {
+        ++calls;
+        CHECK(request.stride == sizeof(ModelVertex));
+        CHECK(request.keep_borders);
+        const std::size_t count = request.target_index_count / 3 * 3;
+        mesh_simplifier::Simplified result;
+        result.indices.assign(request.indices.begin(),
+                              request.indices.begin() + static_cast<std::ptrdiff_t>(count));
+        result.error = 1.0f / static_cast<float>(count + 1);
+        return result;
+    }
+    int calls = 0;
+};
+
+ModelData triangles(std::uint32_t count) {
+    ModelData data;
+    data.vertices.resize(3);
+    for (std::uint32_t triangle = 0; triangle < count; ++triangle) {
+        data.indices.insert(data.indices.end(), {0, 1, 2});
+    }
+    data.parts.push_back(
+        ModelPart{.first_index = 0, .index_count = count * 3, .material = 0, .bounds = {}});
+    return data;
+}
+
+} // namespace
+
+TEST_CASE("generate_lods appends simpler versions of each part after its indices") {
+    ModelData data = triangles(400);
+    HalvingSimplifier simplifier;
+    REQUIRE(generate_lods(data, simplifier).has_value());
+
+    const ModelPart& part = data.parts[0];
+    REQUIRE(part.lods.size() == 3);
+    // Half, a quarter and an eighth of the triangles, each after the last.
+    CHECK(part.lods[0].first_index == 1200);
+    CHECK(part.lods[0].index_count == 600);
+    CHECK(part.lods[1].first_index == 1800);
+    CHECK(part.lods[1].index_count == 300);
+    CHECK(part.lods[2].index_count == 150);
+    CHECK(data.indices.size() == 1200 + 600 + 300 + 150);
+    // Each version strays further than the last.
+    CHECK(part.lods[0].error < part.lods[1].error);
+    CHECK(part.lods[1].error < part.lods[2].error);
+}
+
+TEST_CASE("generate_lods leaves small parts alone and stops when a version saves too little") {
+    HalvingSimplifier simplifier;
+    ModelData small = triangles(20);
+    REQUIRE(generate_lods(small, simplifier).has_value());
+    CHECK(small.parts[0].lods.empty());
+    CHECK(simplifier.calls == 0);
+
+    // Aiming for nine tenths saves too little to be worth a version.
+    ModelData data = triangles(400);
+    REQUIRE(generate_lods(data, simplifier, LodOptions{.reduction = 0.9f}).has_value());
+    CHECK(data.parts[0].lods.empty());
+    CHECK(data.indices.size() == 1200);
+}

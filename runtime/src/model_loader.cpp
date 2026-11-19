@@ -269,6 +269,54 @@ core::Result<ModelData> parse_glb(std::span<const std::byte> file,
     return model;
 }
 
+core::Result<void> generate_lods(ModelData& data, mesh_simplifier::MeshSimplifier& simplifier,
+                                 const LodOptions& options) {
+    const std::span<const std::byte> vertices = std::as_bytes(std::span(data.vertices));
+    for (ModelPart& part : data.parts) {
+        part.lods.clear();
+        if (part.index_count < options.min_triangles * 3 ||
+            std::size_t{part.first_index} + part.index_count > data.indices.size()) {
+            continue;
+        }
+        // Each version is made from the full part, aiming lower each time, which keeps errors from
+        // adding up.
+        const std::vector<std::uint32_t> full(
+            data.indices.begin() + part.first_index,
+            data.indices.begin() + part.first_index + part.index_count);
+        std::size_t last_count = full.size();
+        for (std::uint32_t level = 0; level < options.levels; ++level) {
+            const auto target = static_cast<std::size_t>(static_cast<float>(last_count) *
+                                                         options.reduction) /
+                                3 * 3;
+            const core::Result<mesh_simplifier::Simplified> simplified =
+                simplifier.simplify(mesh_simplifier::Request{
+                    .vertices = vertices,
+                    .stride = sizeof(ModelVertex),
+                    .indices = full,
+                    .target_index_count = target,
+                    .max_relative_error = 0.2f,
+                    .keep_borders = true,
+                });
+            if (!simplified.has_value()) {
+                return simplified.error();
+            }
+            const std::vector<std::uint32_t>& indices = simplified.value().indices;
+            if (indices.empty() ||
+                static_cast<float>(indices.size()) > static_cast<float>(last_count) * options.min_saving) {
+                break;
+            }
+            part.lods.push_back(renderer::MeshLod{
+                .first_index = static_cast<std::uint32_t>(data.indices.size()),
+                .index_count = static_cast<std::uint32_t>(indices.size()),
+                .error = simplified.value().error,
+            });
+            data.indices.insert(data.indices.end(), indices.begin(), indices.end());
+            last_count = indices.size();
+        }
+    }
+    return {};
+}
+
 core::Result<ModelAsset> create_model_asset(rhi::Device& device, const ModelData& data) {
     const auto vertices =
         device.create_buffer(rhi::BufferUsage::Vertex, std::as_bytes(std::span(data.vertices)));
