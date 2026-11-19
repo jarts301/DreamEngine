@@ -353,6 +353,34 @@ TEST_CASE("parse_glb keeps an image read both as colors and as data twice") {
     CHECK(model.value().images[0].color != model.value().images[1].color);
 }
 
+TEST_CASE("parse_glb reads alpha modes, cutoffs and double-sidedness") {
+    const auto material_with = [](const std::string& extra) {
+        std::string json = model_json(R"({"mesh":0})", k_attributes);
+        const std::string plain =
+            R"("pbrMetallicRoughness":{"baseColorFactor":[0.5,0.25,0.75,1]})";
+        json.replace(json.find(plain), plain.size(), plain + extra);
+        const core::Result<ModelData> model = parse_glb(make_glb(json, triangle_binary()));
+        REQUIRE_MESSAGE(model.has_value(), model.error().message);
+        return model.value().materials[0];
+    };
+
+    const ModelMaterialData opaque = material_with("");
+    CHECK(opaque.alpha_mode == renderer::AlphaMode::Opaque);
+    CHECK_FALSE(opaque.double_sided);
+
+    const ModelMaterialData mask = material_with(R"(,"alphaMode":"MASK")");
+    CHECK(mask.alpha_mode == renderer::AlphaMode::Mask);
+    CHECK(mask.alpha_cutoff == Approx(0.5f));
+
+    const ModelMaterialData leaf =
+        material_with(R"(,"alphaMode":"MASK","alphaCutoff":0.3,"doubleSided":true)");
+    CHECK(leaf.alpha_cutoff == Approx(0.3f));
+    CHECK(leaf.double_sided);
+
+    const ModelMaterialData glass = material_with(R"(,"alphaMode":"BLEND")");
+    CHECK(glass.alpha_mode == renderer::AlphaMode::Blend);
+}
+
 TEST_CASE("parse_glb follows glTF's defaults: metallic and rough") {
     std::string json = model_json(R"({"mesh":0})", k_attributes);
     const std::string plain = R"("pbrMetallicRoughness":{"baseColorFactor":[0.5,0.25,0.75,1]})";

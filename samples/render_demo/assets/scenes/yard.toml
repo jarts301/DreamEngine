@@ -1,5 +1,5 @@
 # A small yard: textured crates on a checkered ground, some spheres, a gold ball, a brick wall
-# with a normal map, and a low sun.
+# with a normal map, a glass pane, a cut-out fence, a glowing lamp, and a low sun.
 
 [entities.camera.transform]
 position = [0.0, 5.0, 11.0]
@@ -68,6 +68,28 @@ rotation = [0.0, -10.0, 0.0]
 
 [entities.wall.mesh]
 model = "assets:/models/brick_wall.glb"
+
+[entities.glass.transform]
+position = [1.8, 0.8, 3.4]
+rotation = [0.0, -30.0, 0.0]
+
+[entities.glass.mesh]
+model = "assets:/models/glass_pane.glb"
+
+[entities.fence.transform]
+position = [-2.0, 0.6, 3.8]
+rotation = [0.0, 20.0, 0.0]
+
+[entities.fence.mesh]
+model = "assets:/models/fence.glb"
+
+[entities.lamp.transform]
+position = [0.2, 0.25, 4.2]
+scale = [0.25, 0.25, 0.25]
+
+[entities.lamp.mesh]
+model = "assets:/models/lamp.glb"
+casts_shadows = false
 
 [entities.spinner.transform]
 position = [3.4, 0.7, -2.4]

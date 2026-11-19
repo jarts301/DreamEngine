@@ -14,12 +14,25 @@
 
 namespace dream::platform {
 
+// How a window shows itself on a desktop. Ignored where the window always fills the screen, such
+// as on Android.
+enum class WindowMode : std::uint8_t {
+    // Shown, and given the keyboard, as a game should be.
+    Normal,
+    // Shown, but never takes the keyboard or comes to the front, so an unattended run, such as a
+    // screenshot check, doesn't interrupt whoever is using the computer.
+    Background,
+    // Never shown. Drawing and screenshots still work where the graphics backend allows it.
+    Hidden,
+};
+
 struct WindowSettings {
     std::string title;
 
     // Ignored where the window always fills the screen, such as on Android.
     std::uint32_t width = 1280;
     std::uint32_t height = 720;
+    WindowMode mode = WindowMode::Normal;
 };
 
 enum class FileRoot : std::uint8_t {

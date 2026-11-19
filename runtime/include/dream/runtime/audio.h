@@ -8,6 +8,8 @@
 #include "dream/runtime/event_bus.h"
 #include "dream/runtime/world.h"
 
+#include <array>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -83,6 +85,10 @@ struct AudioListener {};
 //     effects_volume = 1.0
 //     music_volume = 1.0
 //     interface_volume = 1.0
+//     muted = false                 # Silences every bus, as the samples' test configs do.
+//
+// While muted, every bus plays at 0, but set_bus_volume and bus_volume still keep and report the
+// volumes the game sets, so a game that saves its player's volumes doesn't save silence.
 class Audio {
 public:
     Audio() = default;
@@ -114,6 +120,11 @@ public:
     void set_bus_volume(audio::Bus bus, float volume);
     [[nodiscard]] float bus_volume(audio::Bus bus) const;
 
+    // Whether `audio.muted` silenced every bus.
+    [[nodiscard]] bool muted() const noexcept {
+        return m_muted;
+    }
+
     // Null until initialized.
     [[nodiscard]] audio::AudioDevice* device() noexcept {
         return m_device.get();
@@ -124,6 +135,9 @@ private:
     std::vector<Subscription> m_subscriptions;
     std::unordered_map<Entity, audio::VoiceHandle> m_source_voices;
     const World* m_last_world = nullptr;
+    // The volume the game set for each bus, which the device plays at 0 while muted.
+    std::array<float, static_cast<std::size_t>(audio::Bus::Count)> m_bus_volumes{};
+    bool m_muted = false;
 };
 
 } // namespace dream::runtime

@@ -1,3 +1,6 @@
+[app]
+window = "hidden"
+
 # A backend that isn't listed is not linked.
 
 [modules.windows]
@@ -8,3 +11,6 @@ greeter = ["english"]
 
 [modules.linux]
 greeter = ["english"]
+
+[audio]
+muted = true

@@ -12,6 +12,7 @@
 #include <format>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <ostream> // Needed for doctest to print std::string.
 #include <set>
 #include <string>
@@ -579,4 +580,110 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer draws parts in full with lod_er
     CHECK(stats.simplified == 0);
     CHECK(std::ranges::count(calls, "draw 0+3 x1") == 1);
     CHECK(contains(described(state, "[renderer]\nlod_error = -1.0"), "error:"));
+}
+
+namespace {
+
+// The index of the first lit pipeline made with these settings, as the fake device numbers them.
+std::optional<std::uint32_t> pipeline_with(const FakeDeviceState& state, rhi::BlendMode blend,
+                                           rhi::CullMode cull, bool fragment_shader = true) {
+    for (std::size_t index = 0; index < state.pipelines.size(); ++index) {
+        const rhi::PipelineDesc& desc = state.pipelines[index];
+        // Lit pipelines draw models, with no depth bias, which the shadow ones have.
+        if (desc.blend == blend && desc.cull == cull &&
+            desc.fragment_shader.is_valid() == fragment_shader && desc.depth_bias == 0.0f &&
+            desc.vertex_stride == sizeof(MeshVertex)) {
+            return static_cast<std::uint32_t>(index);
+        }
+    }
+    return std::nullopt;
+}
+
+MeshDraw part_with(std::uint32_t first_index, AlphaMode mode, Vec3 position) {
+    MeshDraw part = box_part(position);
+    part.first_index = first_index;
+    part.material.alpha_mode = mode;
+    return part;
+}
+
+} // namespace
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer draws opaque, then cut-out, then blended parts, farthest first") {
+    start();
+    const std::array meshes{
+        part_with(9, AlphaMode::Blend, Vec3{0.0f, 0.0f, 2.0f}),
+        part_with(6, AlphaMode::Blend, Vec3{0.0f, 0.0f, -2.0f}),
+        part_with(3, AlphaMode::Mask, Vec3{1.0f, 0.0f, 0.0f}),
+        part_with(0, AlphaMode::Opaque, Vec3{-1.0f, 0.0f, 0.0f}),
+    };
+    FrameStats stats;
+    const Calls calls =
+        draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes}, &stats);
+
+    CHECK(stats.draws == 4);
+    CHECK(stats.blended == 2);
+    std::vector<std::string> draws;
+    for (const std::string& call : calls) {
+        if (call.starts_with("draw ") && call.ends_with(" x1")) {
+            draws.push_back(call);
+        }
+    }
+    // The blended part at z = -2 is farther from the camera at z = 5 than the one at z = 2.
+    CHECK(draws == std::vector<std::string>{"draw 0+3 x1", "draw 3+3 x1", "draw 6+3 x1",
+                                            "draw 9+3 x1"});
+
+    // Blended parts use a premultiplied pipeline that keeps depth as it is.
+    const auto blended = pipeline_with(state, rhi::BlendMode::PremultipliedAlpha, rhi::CullMode::Back);
+    REQUIRE(blended.has_value());
+    CHECK_FALSE(state.pipelines[*blended].depth_write);
+    const auto bound = std::ranges::find(calls, std::format("pipeline {}", *blended));
+    REQUIRE(bound != calls.end());
+    CHECK(bound < std::ranges::find(calls, "draw 6+3 x1"));
+    CHECK(std::ranges::find(calls, "draw 3+3 x1") < bound);
+}
+
+TEST_CASE_FIXTURE(Fixture, "Blended parts cast no shadow, and cut-out ones cast theirs with their texture") {
+    state.render_target_formats = {rhi::TextureFormat::Depth32Float};
+    start("[renderer.shadows]\nmode = \"on\"\ncascades = 1\nresolution = 1024");
+    std::array meshes{
+        part_with(0, AlphaMode::Opaque, Vec3{-1.0f, 0.0f, 0.0f}),
+        part_with(3, AlphaMode::Mask, Vec3{1.0f, 0.0f, 0.0f}),
+        part_with(6, AlphaMode::Blend, Vec3{0.0f, 0.0f, 1.0f}),
+    };
+    meshes[1].material.base_color_texture = rhi::TextureHandle{.index = 50, .generation = 1};
+    FrameStats stats;
+    const Calls calls = draw(Frame{.size = k_size,
+                                   .view = view_from({0, 0, 5}),
+                                   .sun = Sunlight{},
+                                   .meshes = meshes},
+                             &stats);
+
+    CHECK(stats.shadow_casters == 2);
+    // The cut-out caster's texture is bound before it is drawn into the shadow map.
+    const auto texture = std::ranges::find(calls, "bind_texture 50");
+    REQUIRE(texture != calls.end());
+    CHECK(texture < std::ranges::find(calls, "draw 3+3 x1"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "Double-sided parts are drawn without culling, and say so to the shader") {
+    start();
+    std::array meshes{part_with(0, AlphaMode::Opaque, Vec3{}), part_with(3, AlphaMode::Opaque, Vec3{})};
+    meshes[1].material.double_sided = true;
+    const Calls calls = draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes});
+
+    const auto double_sided = pipeline_with(state, rhi::BlendMode::Opaque, rhi::CullMode::None);
+    REQUIRE(double_sided.has_value());
+    const auto bound = std::ranges::find(calls, std::format("pipeline {}", *double_sided));
+    REQUIRE(bound != calls.end());
+    CHECK(bound < std::ranges::find(calls, "draw 3+3 x1"));
+    CHECK(std::ranges::find(calls, "draw 0+3 x1") < bound);
+
+    // The last part drawn's features: double-sided (16). Its alpha cutoff rides in the normals.
+    REQUIRE(state.last_instances.size() == 160);
+    float features = 0.0f;
+    float cutoff = 0.0f;
+    std::memcpy(&features, state.last_instances.data() + 156, sizeof(features));
+    std::memcpy(&cutoff, state.last_instances.data() + 76, sizeof(cutoff));
+    CHECK(features == 16.0f);
+    CHECK(cutoff == 0.5f);
 }

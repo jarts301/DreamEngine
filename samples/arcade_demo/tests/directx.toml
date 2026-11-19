@@ -1,5 +1,6 @@
 # The scripted run on the real GPU and sound hardware, with the Direct3D debug layer.
 [app]
+window = "hidden"
 title = "Dream Arcade DirectX Check"
 width = 960
 height = 540
@@ -36,3 +37,6 @@ physics3d = ["jolt"]
 audio = ["miniaudio"]
 ui = ["rmlui"]
 debug_ui = ["imgui"]
+
+[audio]
+muted = true

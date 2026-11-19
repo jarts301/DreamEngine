@@ -1,4 +1,5 @@
 [app]
+window = "hidden"
 max_fps = 0
 
 [demo]
@@ -20,3 +21,6 @@ rhi = ["null"]
 [modules.linux]
 platform = ["sdl3"]
 rhi = ["null"]
+
+[audio]
+muted = true

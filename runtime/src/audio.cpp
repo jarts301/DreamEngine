@@ -114,6 +114,21 @@ core::Result<void> Audio::initialize(App& app, std::unique_ptr<audio::AudioDevic
         return core::Error{core::ErrorCode::InvalidArgument, "Audio needs a backend"};
     }
     m_device = std::move(backend);
+    for (std::size_t bus = 0; bus < m_bus_volumes.size(); ++bus) {
+        m_bus_volumes[bus] = m_device->bus_volume(static_cast<audio::Bus>(bus));
+    }
+    m_muted = false;
+    if (app.config().contains("audio.muted")) {
+        const std::optional<bool> muted = app.config().get_bool("audio.muted");
+        if (!muted.has_value()) {
+            return core::Error{core::ErrorCode::InvalidArgument,
+                               "Setting 'audio.muted' must be true or false"};
+        }
+        m_muted = *muted;
+    }
+    if (m_muted) {
+        DREAM_LOG_INFO("Audio is muted by the project configuration");
+    }
 
     constexpr std::pair<const char*, audio::Bus> k_buses[] = {
         {"audio.effects_volume", audio::Bus::Effects},
@@ -127,8 +142,11 @@ core::Result<void> Audio::initialize(App& app, std::unique_ptr<audio::AudioDevic
                 return core::Error{core::ErrorCode::InvalidArgument,
                                    std::format("Setting '{}' must be a number of 0 or more", key)};
             }
-            m_device->set_bus_volume(bus, static_cast<float>(*volume));
+            m_bus_volumes[static_cast<std::size_t>(bus)] = static_cast<float>(*volume);
         }
+    }
+    for (std::size_t bus = 0; bus < m_bus_volumes.size(); ++bus) {
+        m_device->set_bus_volume(static_cast<audio::Bus>(bus), m_muted ? 0.0f : m_bus_volumes[bus]);
     }
 
     audio::AudioDevice* const device = m_device.get();
@@ -256,13 +274,18 @@ void Audio::stop(audio::VoiceHandle voice) {
 }
 
 void Audio::set_bus_volume(audio::Bus bus, float volume) {
-    if (m_device != nullptr) {
-        m_device->set_bus_volume(bus, volume);
+    if (m_device == nullptr || bus >= audio::Bus::Count) {
+        return;
     }
+    m_bus_volumes[static_cast<std::size_t>(bus)] = volume;
+    m_device->set_bus_volume(bus, m_muted ? 0.0f : volume);
 }
 
 float Audio::bus_volume(audio::Bus bus) const {
-    return m_device != nullptr ? m_device->bus_volume(bus) : 0.0f;
+    if (m_device == nullptr || bus >= audio::Bus::Count) {
+        return 0.0f;
+    }
+    return m_bus_volumes[static_cast<std::size_t>(bus)];
 }
 
 } // namespace dream::runtime

@@ -76,6 +76,9 @@ struct ModelMaterialData {
     float normal_scale = 1.0f;
     float occlusion_strength = 1.0f;
     core::Vec3 emissive{0.0f, 0.0f, 0.0f};
+    renderer::AlphaMode alpha_mode = renderer::AlphaMode::Opaque;
+    float alpha_cutoff = 0.5f;
+    bool double_sided = false;
 
     int image = -1;
     int normal_image = -1;
@@ -139,8 +142,8 @@ using ModelFileReader =
 // with normals are accepted. Animation and skinning are ignored. Images are PNG, JPEG or KTX2,
 // embedded or in files of their own, which `read_file` reads; textures with the KHR_texture_basisu
 // extension use their KTX2 image. Materials keep their metallic-roughness factors and textures,
-// normal map, occlusion and emission, with KHR_materials_emissive_strength; every texture is read
-// with the first texture coordinates.
+// normal map, occlusion and emission, with KHR_materials_emissive_strength, and their alpha mode,
+// alpha cutoff and double-sidedness; every texture is read with the first texture coordinates.
 [[nodiscard]] core::Result<ModelData> parse_glb(std::span<const std::byte> file,
                                                 const ModelFileReader& read_file = {});
 

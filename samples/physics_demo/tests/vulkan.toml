@@ -1,5 +1,6 @@
 # The scripted run on the real GPU, with Vulkan validation.
 [app]
+window = "hidden"
 title = "Dream Physics Check"
 width = 960
 height = 540
@@ -43,3 +44,6 @@ mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
 physics3d = ["jolt"]
 physics2d = ["box2d"]
+
+[audio]
+muted = true

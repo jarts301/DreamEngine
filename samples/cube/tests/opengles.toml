@@ -1,4 +1,5 @@
 [app]
+window = "hidden"
 title = "Dream Cube OpenGL ES Check"
 width = 960
 height = 540
@@ -27,3 +28,6 @@ quit = false
 [modules.windows]
 platform = ["sdl3"]
 rhi = ["opengles"]
+
+[audio]
+muted = true

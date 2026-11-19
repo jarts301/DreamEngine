@@ -1,4 +1,5 @@
 [app]
+window = "hidden"
 title = "Dream Render Targets OpenGL ES Check"
 width = 960
 height = 540
@@ -34,3 +35,6 @@ rhi = ["opengles"]
 [modules.linux]
 platform = ["sdl3"]
 rhi = ["opengles"]
+
+[audio]
+muted = true

@@ -125,9 +125,21 @@ public:
     SdlPlatform& operator=(const SdlPlatform&) = delete;
 
     core::Result<void> create_window(const WindowSettings& settings) override {
+        SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+        switch (settings.mode) {
+        case WindowMode::Normal:
+            break;
+        case WindowMode::Background:
+            // Shown without being activated, and never given the keyboard.
+            SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
+            flags |= SDL_WINDOW_NOT_FOCUSABLE;
+            break;
+        case WindowMode::Hidden:
+            flags |= SDL_WINDOW_HIDDEN;
+            break;
+        }
         m_window = SDL_CreateWindow(settings.title.c_str(), static_cast<int>(settings.width),
-                                    static_cast<int>(settings.height),
-                                    SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+                                    static_cast<int>(settings.height), flags);
         if (m_window == nullptr) {
             return sdl_error(core::ErrorCode::Unknown, "Could not create a window");
         }

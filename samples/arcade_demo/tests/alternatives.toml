@@ -1,6 +1,7 @@
 # The scripted run of check.toml, with the other backend of each kind: the same game, and the
 # same outcome, with only this file changed. One fixed step per frame, at most.
 [app]
+window = "hidden"
 max_fps = 120
 fixed_rate = 120
 
@@ -26,3 +27,6 @@ physics3d = ["impulse"]
 audio = ["portaudio"]
 ui = ["markup"]
 debug_ui = ["imgui"]
+
+[audio]
+muted = true

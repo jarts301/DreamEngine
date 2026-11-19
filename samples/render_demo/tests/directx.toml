@@ -1,4 +1,5 @@
 [app]
+window = "hidden"
 title = "Dream Renderer DirectX Check"
 width = 960
 height = 540
@@ -30,3 +31,6 @@ rhi = ["directx"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
+
+[audio]
+muted = true

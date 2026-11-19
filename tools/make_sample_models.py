@@ -5,7 +5,8 @@ Textures are PNG files of their own in models/textures, which the build cooks in
 docs/adr/0024-texture-cooking.md); the models refer to them by name. Every material states its
 metallic and roughness factors, since glTF's defaults are fully metallic and fully rough (see
 docs/guides/materials.md). The brick wall has a normal map and an occlusion-roughness-metallic
-map, and no tangents, which the engine's tangent generator makes.
+map, and no tangents, which the engine's tangent generator makes. The glass pane is blended, the
+fence is cut out of a board by its texture's alpha, and the lamp glows.
 
 Usage: python tools/make_sample_models.py
 
@@ -22,18 +23,21 @@ OUTPUT = Path(__file__).resolve().parent.parent / "samples" / "assets" / "models
 
 
 def png_bytes(width, height, pixel):
-    """Encodes an image, where pixel(x, y) returns (r, g, b)."""
+    """Encodes an image, where pixel(x, y) returns (r, g, b), or (r, g, b, a) for an image with
+    alpha. The first pixel decides which."""
 
     def chunk(kind, data):
         body = kind + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
 
+    channels = len(pixel(0, 0))
     rows = bytearray()
     for y in range(height):
         rows.append(0)
         for x in range(width):
             rows.extend(pixel(x, y))
-    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    color_type = 6 if channels == 4 else 2
+    header = struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0)
     return (
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", header)
@@ -54,10 +58,17 @@ def write_glb(
     roughness=0.7,
     normal_image=None,
     orm_image=None,
+    alpha_mode=None,
+    alpha_cutoff=None,
+    double_sided=False,
+    emissive=None,
+    emissive_strength=None,
 ):
     """Writes one mesh with one material. Each image is (file name, PNG bytes), saved in the
     textures folder beside the model: `image` is the base color, `normal_image` a normal map, and
-    `orm_image` occlusion in red, roughness in green and metallic in blue."""
+    `orm_image` occlusion in red, roughness in green and metallic in blue. `alpha_mode` is glTF's
+    "MASK" or "BLEND", and `emissive` a linear color, which `emissive_strength` multiplies through
+    KHR_materials_emissive_strength."""
     views = []
     accessors = []
     binary = bytearray()
@@ -107,6 +118,18 @@ def write_glb(
         },
         "name": path.stem,
     }
+    if alpha_mode is not None:
+        material["alphaMode"] = alpha_mode
+    if alpha_cutoff is not None:
+        material["alphaCutoff"] = alpha_cutoff
+    if double_sided:
+        material["doubleSided"] = True
+    if emissive is not None:
+        material["emissiveFactor"] = list(emissive)
+    if emissive_strength is not None:
+        material["extensions"] = {
+            "KHR_materials_emissive_strength": {"emissiveStrength": emissive_strength}
+        }
     gltf = {
         "asset": {"version": "2.0", "generator": "DreamEngine make_sample_models.py"},
         "scene": 0,
@@ -150,6 +173,9 @@ def write_glb(
         index = add_texture(orm_image)
         material["pbrMetallicRoughness"]["metallicRoughnessTexture"] = {"index": index}
         material["occlusionTexture"] = {"index": index}
+
+    if emissive_strength is not None:
+        gltf["extensionsUsed"] = ["KHR_materials_emissive_strength"]
 
     while len(binary) % 4:
         binary.append(0)
@@ -357,6 +383,52 @@ def make_gold_ball():
     write_glb(OUTPUT / "gold_ball.glb", *sphere(), (1.0, 0.71, 0.29, 1), metallic=1.0, roughness=0.3)
 
 
+def make_glass_pane():
+    # Clear glass: blended, nearly see-through, and smooth, so it shows the sun's highlight.
+    write_glb(
+        OUTPUT / "glass_pane.glb",
+        *box((0.6, 0.8, 0.02)),
+        (0.55, 0.75, 0.85, 0.25),
+        roughness=0.05,
+        alpha_mode="BLEND",
+    )
+
+
+def fence_pixel(x, y):
+    """Wooden slats in a lattice, with see-through holes between them: alpha 0 there."""
+    bar = x % 32 < 8 or y % 32 < 8
+    if not bar:
+        return (0, 0, 0, 0)
+    grain = 14 if (x * 5 + y * 3) % 19 < 5 else 0
+    return (150 - grain, 108 - grain, 66 - grain, 255)
+
+
+def make_fence():
+    # A lattice cut out of a thin board by its texture's alpha, seen from both sides.
+    write_glb(
+        OUTPUT / "fence.glb",
+        *box((0.9, 0.6, 0.02), texture_size=0.6),
+        (1, 1, 1, 1),
+        ("fence.png", png_bytes(128, 128, fence_pixel)),
+        roughness=0.8,
+        alpha_mode="MASK",
+        double_sided=True,
+    )
+
+
+def make_lamp():
+    # A glowing ball: its emission is brighter than white, which HDR keeps and tone mapping
+    # rolls off.
+    write_glb(
+        OUTPUT / "lamp.glb",
+        *sphere(),
+        (0.1, 0.06, 0.02, 1),
+        roughness=0.4,
+        emissive=(1.0, 0.4, 0.08),
+        emissive_strength=2.0,
+    )
+
+
 if __name__ == "__main__":
     OUTPUT.mkdir(parents=True, exist_ok=True)
     make_crate()
@@ -365,3 +437,6 @@ if __name__ == "__main__":
     make_ball()
     make_gold_ball()
     make_brick_wall()
+    make_glass_pane()
+    make_fence()
+    make_lamp()

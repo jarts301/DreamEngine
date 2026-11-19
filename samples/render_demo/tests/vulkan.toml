@@ -1,4 +1,5 @@
 [app]
+window = "hidden"
 title = "Dream Renderer Check"
 width = 960
 height = 540
@@ -43,3 +44,6 @@ rhi = ["vulkan"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
+
+[audio]
+muted = true

@@ -1,5 +1,6 @@
 # The scripted run on the real GPU, with the Direct3D debug layer.
 [app]
+window = "hidden"
 title = "Dream Physics OpenGL ES Check"
 width = 960
 height = 540
@@ -26,3 +27,6 @@ mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
 physics3d = ["jolt"]
 physics2d = ["box2d"]
+
+[audio]
+muted = true

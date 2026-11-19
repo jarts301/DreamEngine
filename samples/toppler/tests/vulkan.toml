@@ -1,5 +1,6 @@
 # Plays every level on the real GPU and sound hardware. Not a CTest, as build servers have neither.
 [app]
+window = "hidden"
 organization = "DreamEngine"
 name = "TopplerCheck"       # Its own storage, apart from a player's saved progress.
 title = "Toppler Vulkan Check"
@@ -55,3 +56,6 @@ tangent_generator = ["mikktspace"]
 physics3d = ["jolt"]
 audio = ["miniaudio"]
 ui = ["rmlui"]
+
+[audio]
+muted = true

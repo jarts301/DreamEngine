@@ -1,6 +1,7 @@
 # The game crashes on purpose in frame 2. cmake/tests/check_crash_report.cmake runs it and reads
 # the crash report it leaves.
 [app]
+window = "hidden"
 title = "Dream Hello"
 max_fps = 0
 
@@ -23,3 +24,6 @@ platform = ["null"]
 
 [modules.linux]
 platform = ["null"]
+
+[audio]
+muted = true

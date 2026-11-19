@@ -1,4 +1,5 @@
 [app]
+window = "hidden"
 max_fps = 0
 
 [platform.null]
@@ -18,3 +19,6 @@ platform = ["null"]
 [modules.linux]
 platform = ["null"]
 profiler = ["null"]
+
+[audio]
+muted = true

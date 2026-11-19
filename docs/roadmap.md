@@ -126,7 +126,7 @@ saved progress, music and settings, built this way and played on PC and phones.
 | Area | Available now |
 |---|---|
 | Platforms | Windows, and Android phones (arm64, Android 10 and up). Linux builds but is untested. |
-| Graphics | Five graphics APIs; the same picture on each. Static glTF models with metallic-roughness PBR materials, normal, occlusion and emissive maps; one directional light with soft cascaded shadows; HDR with PBR Neutral tone mapping; frustum culling, instancing and levels of detail made as models load; debug lines. |
+| Graphics | Five graphics APIs; the same picture on each. Static glTF models with metallic-roughness PBR materials, normal, occlusion and emissive maps, and opaque, cut-out, blended and double-sided surfaces; one directional light with soft cascaded shadows; HDR with PBR Neutral tone mapping; frustum culling, instancing and levels of detail made as models load; debug lines. |
 | Textures | PNG cooked to KTX2, sent to the GPU as BC7 on PC and ASTC on phones. |
 | Physics | 3D (Jolt or the engine's own impulse solver): bodies, joints, triggers, ray casts. 2D (Box2D or Chipmunk). |
 | Audio | WAV, MP3 and FLAC; streamed music; buses with volumes; sounds placed in 3D. |
@@ -141,8 +141,8 @@ static props, prototypes and game jams.
 
 Not yet possible without writing engine code first:
 - **Characters:** animated characters (no skinning or animation).
-- **Rendering:** environment lighting and transparency (materials are PBR, but reflect only the
-  sun and a flat ambient, and draw opaque), more than one light, visual effects (no particles), very large worlds (culling, instancing and LODs exist, but no streaming
+- **Rendering:** environment lighting (materials are PBR, but reflect only the sun and a flat
+  ambient), bloom, more than one light, visual effects (no particles), very large worlds (culling, instancing and LODs exist, but no streaming
   or spatial structures), 2D sprite games (no sprite renderer).
 - **Input:** gamepads.
 - **Online:** any online play.
@@ -228,16 +228,17 @@ and the remaining platforms.
 - **Done:** render targets (ADR 0027), HDR and tone mapping (ADR 0028), cascaded shadows
   (ADR 0029), the OpenGL backends (ADR 0026), the renderer as a module (ADR 0030), frustum
   culling (ADR 0031), instancing and levels of detail (ADR 0032), and PBR materials with normal
-  maps (ADR 0033, with a [guide](guides/materials.md)).
+  maps (ADR 0033, with a [guide](guides/materials.md)), and transparent, cut-out and double-sided
+  materials (ADR 0034).
 - **Next, in order:**
   1. Point and spot lights, with `forward_plus` for many lights.
   2. Skeletal animation (`animation: ozz`).
   3. Particles (`particles`).
   4. Gamepads (`input_device: sdl3_gamepad`).
   5. 2D sprites (`sprite_renderer`).
-  6. Materials, after ADR 0033: environment lighting (image-based, with reflection probes),
-     alpha-tested and blended materials, double-sided materials, reading `.gltf` files so
-     Blender's images are cooked, and half-precision lighting math for phones (PBR costs 1.4 ms
+  6. Materials, after ADR 0033 and 0034: environment lighting (image-based, with reflection
+     probes), bloom, order-independent transparency, antialiased cut-outs, reading `.gltf` files
+     so Blender's images are cooked, and half-precision lighting math for phones (PBR costs 1.4 ms
      of GPU time per frame on the A52s at full screen; see the Android performance report).
   7. Smaller items: blending between shadow cascades, a frame-rate cap, removing the ~13
      allocations per frame found on the A52s, and cooking levels of detail at build time instead of

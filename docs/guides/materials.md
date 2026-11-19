@@ -1,13 +1,15 @@
-# Materials: PBR and normal maps
+# Materials: PBR, normal maps, transparency and emission
 
 This guide explains how DreamEngine draws surfaces, how to make models whose materials look right
 in it, and what to check when they don't. The design is recorded in
-[ADR 0033](../adr/0033-pbr-materials-and-normal-maps.md).
+[ADR 0033](../adr/0033-pbr-materials-and-normal-maps.md) and
+[ADR 0034](../adr/0034-transparency.md).
 
 ## In short
 
 - Materials come from your glTF models. The engine reads glTF's **metallic-roughness** materials:
-  base color, metallic, roughness, a normal map, ambient occlusion and emission.
+  base color, metallic, roughness, a normal map, ambient occlusion and emission, and their alpha
+  mode (opaque, cut-out or blended) and double-sidedness.
 - List `tangent_generator = ["mikktspace", "null"]` beside your renderer, so normal maps work on
   models exported without tangents.
 - Always set **metallic** and **roughness** on every material. glTF's defaults are *fully metallic*
@@ -54,7 +56,7 @@ texture, and a missing texture counts as white, so the factor alone applies.
 
 | Property | Meaning | Texture |
 |---|---|---|
-| Base color | The surface's color. For a dielectric, the color of its diffuse light; for a metal, the color of its reflections. Linear RGBA in the file. | sRGB color, alpha unused |
+| Base color | The surface's color. For a dielectric, the color of its diffuse light; for a metal, the color of its reflections. Linear RGBA in the file. Its alpha is the opacity, for the cut-out and blended alpha modes. | sRGB color, and alpha |
 | Metallic | 0 for wood, stone, plastic, skin, paint and almost everything else; 1 for bare metal. Values between are only for blends, such as the edge of rust. | Blue channel |
 | Roughness | 0 is a mirror, 1 is chalk. Most things are between 0.3 and 0.9. | Green channel |
 | Normal map | Tilts the surface per pixel, for detail the mesh doesn't have. Its `scale` sets how strongly. | Linear, tangent space |
@@ -72,6 +74,49 @@ A `mesh` component's `tint` multiplies the base color, so one white model can be
 model = "assets:/models/ball.glb"
 tint = [0.85, 0.12, 0.10]
 ```
+
+### Transparency: alpha modes
+
+A material's **alpha mode** says what its base color's alpha, the factor times the texture's
+alpha, does. It is glTF's `alphaMode`, which Blender sets from the material's *Blend Mode*
+(*Settings* panel, or *Render Method* in newer versions):
+
+| Alpha mode | What it draws | For | Shadow |
+|---|---|---|---|
+| `OPAQUE` (the default) | Alpha is ignored. | Almost everything | Solid |
+| `MASK` | Pixels whose alpha is below `alphaCutoff` (0.5 by default) aren't drawn; the rest are solid. | Leaves, grass, fences, chain-link, cut-out decals | Cut out by the same alpha |
+| `BLEND` | Blended over what is behind it, by its alpha. | Glass, water, smoke, ghosts, fading effects | None |
+
+Use **`MASK` whenever the surface is either there or not**, such as a leaf: it costs almost the
+same as opaque, sorts correctly, and casts the right shadow. Keep **`BLEND`** for surfaces that
+are truly partly see-through:
+
+- A blended surface fades its own diffuse color by its alpha, but keeps its reflections and
+  emission, as glass does: a clear pane (alpha 0.1 to 0.3, roughness near 0) still shows the
+  sun's highlight.
+- Blended parts are drawn after everything else, farthest first, by the middle of each part. Two
+  blended parts that overlap or cross can draw in the wrong order, and so can a blended model's
+  own faces. Keep blended objects simple and apart: a pane, not a glass bottle with a liquid
+  inside.
+- They don't hide what is behind them in the depth buffer, and cast no shadow.
+
+**Double-sided** materials (`doubleSided`, Blender's *Backface Culling* off) draw both faces, and
+light the back face as the front turned around. Use them for single-sheet surfaces seen from both
+sides: leaves, cloth, paper, a fence board. A closed model, such as a crate, doesn't need it, and
+drawing it double-sided only costs time.
+
+### Emission
+
+**Emissive** color is light a surface gives off: screens, lamps, lava, glowing runes. It adds to
+whatever light the surface reflects, and isn't darkened by shadows or occlusion. In Blender it is
+the Principled BSDF's *Emission* color and *Strength*; a strength above 1 is written with
+`KHR_materials_emissive_strength`, which the engine reads. The scene is drawn in HDR, so values
+above 1 aren't clipped: tone mapping rolls them off toward white, which is why a strong orange
+glow looks paler at its brightest. A strength of 1 to 3 keeps a glow's color.
+
+An emissive surface lights only itself: it doesn't light what is around it, and nothing glows
+past its edges (no bloom). Put a light-colored surface near it, or wait for point lights on the
+roadmap.
 
 ### How light works
 
@@ -187,8 +232,9 @@ like plastic.
 
 ## Checking a model
 
-`samples/render_demo` has a gold ball, a metal, and a brick wall with a base color, a normal map
-and an ORM texture and no tangents of its own, made by `tools/make_sample_models.py`. Put a model
+`samples/render_demo` has a gold ball, a metal; a brick wall with a base color, a normal map and
+an ORM texture and no tangents of its own; a blended glass pane; a fence cut out of a board by its
+texture's alpha, and double-sided; and a glowing lamp. `tools/make_sample_models.py` makes them. Put a model
 beside them in `samples/render_demo/assets/scenes/yard.toml` to see it under the same light.
 Hot reload picks up a re-exported model while the game runs.
 
@@ -203,6 +249,11 @@ Hot reload picks up a re-exported model while the game runs.
 | Seams along UV edges on a normal-mapped model | Tangents made by a different method than the bake used | Export the model's own tangents, from the tool that baked the map |
 | A texture is misplaced, with a warning about texture coordinates | The material uses a second UV map, and the engine reads the first | Bake or move it onto the first UV map |
 | Glowing parts don't light their surroundings | Emissive is only the surface's own color | Expected: there is no bloom or emissive lighting yet |
+| A glow looks white rather than its color | Its emission is far above 1, and tone mapping rolls it off toward white | Lower the strength to 1–3 |
+| A see-through texture draws black or white where it should be clear | The material is `OPAQUE` | Set its alpha mode to `MASK` (cut-out) or `BLEND` |
+| Leaves or a fence vanish from one side | Back faces are culled | Make the material double-sided |
+| Glass hides objects behind it, or two glass objects swap places as the camera moves | Blended parts sort per part, and crossing ones can't be ordered | Keep blended objects apart, or split one into parts |
+| Cut-out edges look jagged or thin out in the distance | Alpha testing has no antialiasing, and smaller mip levels average alpha down | Lower `alphaCutoff` a little, or give the texture thicker shapes |
 | A material looks right in Blender's viewport but not here | Blender lights it with an environment | Compare in Blender with one sun and the World's strength at 0, plus a little ambient |
 
 ## Performance
@@ -231,9 +282,10 @@ These are not supported yet. Each is a later step on the roadmap.
 
 - **Environment lighting** (image-based lighting, reflection probes): ambient light is one value.
 - **More than one light**: the sun is the only one.
-- **Transparency**: alpha is ignored, so `BLEND` and `MASK` materials draw opaque. Cut-out
-  foliage needs alpha testing, which isn't there.
-- **Double-sided** materials: back faces are culled.
+- **Order-independent transparency**: blended parts sort per part, so crossing ones can blend in
+  the wrong order.
+- **Shadows from blended parts**, and colored shadows through glass.
+- **Antialiased cut-outs** (alpha to coverage).
 - **glTF extensions** besides `KHR_texture_basisu` and `KHR_materials_emissive_strength`, such as
   clearcoat, transmission, sheen and `KHR_texture_transform`.
 - **A second UV map**: every texture uses the first.
@@ -258,7 +310,9 @@ For engine developers, the path from file to pixel:
 6. **The `forward` module** groups parts by mesh and textures, and sends each part's factors as
    per-instance data. `forward.slang` lights each pixel with GGX, Smith's height-correlated
    visibility and Schlick's Fresnel for the sun, and an analytic fit for ambient specular, then
-   adds emission.
+   adds emission. It draws opaque parts, then cut-out ones with `forward_masked.slang`, which adds
+   the alpha test, then blended ones farthest first, each with a one-sided and a double-sided
+   pipeline. Cut-out parts cast shadows through `shadow_masked.slang`.
 
 `renderer::MeshVertex` is 48 bytes: position, normal, UV and a tangent whose `w` is the
 bitangent's sign, all zero where there is no tangent. The graphics interface has seven texture

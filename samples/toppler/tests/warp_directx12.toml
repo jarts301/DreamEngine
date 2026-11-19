@@ -1,6 +1,7 @@
 # The Direct3D 12 check on WARP, Windows' software rasterizer, so build servers without a GPU
 # compare the picture too. CTest runs it.
 [app]
+window = "hidden"
 organization = "DreamEngine"
 name = "TopplerCheck"       # Its own storage, apart from a player's saved progress.
 title = "Screenshot Check"
@@ -40,3 +41,6 @@ tangent_generator = ["mikktspace"]
 physics3d = ["jolt"]
 audio = ["miniaudio"]
 ui = ["rmlui"]
+
+[audio]
+muted = true

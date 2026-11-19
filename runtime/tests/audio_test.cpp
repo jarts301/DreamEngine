@@ -125,6 +125,35 @@ TEST_CASE_FIXTURE(AudioFixture, "Audio reads bus volumes and streams only large 
     CHECK(state.sounds.at(song.value()->get().index));
 }
 
+TEST_CASE("Muted audio plays every bus at 0, but keeps the game's volumes") {
+    FakeState platform;
+    FakeAudioState state;
+    // App keeps a reference to its configuration, so it must outlive the app.
+    const core::Config config =
+        core::Config::parse("[audio]\nmusic_volume = 0.4\nmuted = true").value();
+    App app{std::make_unique<FakePlatform>(platform), config};
+    Audio audio;
+    REQUIRE(audio.initialize(app, std::make_unique<FakeAudio>(state)).has_value());
+
+    CHECK(audio.muted());
+    CHECK(state.music_volume == 0.0f);
+    CHECK(audio.bus_volume(audio::Bus::Music) == doctest::Approx(0.4f));
+
+    // A game restoring its player's volume stays silent, and reads back what it set.
+    audio.set_bus_volume(audio::Bus::Music, 0.6f);
+    CHECK(state.music_volume == 0.0f);
+    CHECK(audio.bus_volume(audio::Bus::Music) == doctest::Approx(0.6f));
+}
+
+TEST_CASE("Audio refuses a muted setting that isn't true or false") {
+    FakeState platform;
+    FakeAudioState state;
+    const core::Config config = core::Config::parse("[audio]\nmuted = 1").value();
+    App app{std::make_unique<FakePlatform>(platform), config};
+    Audio audio;
+    CHECK_FALSE(audio.initialize(app, std::make_unique<FakeAudio>(state)).has_value());
+}
+
 TEST_CASE_FIXTURE(AudioFixture, "Audio plays one-off sounds, positioned or not") {
     const auto beep = app.assets().load<SoundAsset>("assets:/sounds/beep.wav").value();
     const audio::VoiceHandle plain = audio.play(beep, audio::PlayDesc{.volume = 0.5f});

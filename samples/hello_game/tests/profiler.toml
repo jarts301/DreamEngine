@@ -1,5 +1,6 @@
 # The game with the timeline profiler. cmake/tests/check_trace.cmake runs it and reads the trace.
 [app]
+window = "hidden"
 title = "Dream Hello"
 max_fps = 0
 
@@ -22,3 +23,6 @@ profiler = ["timeline"]
 [modules.linux]
 platform = ["null"]
 profiler = ["timeline"]
+
+[audio]
+muted = true

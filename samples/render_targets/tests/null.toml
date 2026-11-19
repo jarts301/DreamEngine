@@ -1,4 +1,5 @@
 [app]
+window = "hidden"
 title = "Dream Render Targets Null"
 max_fps = 0
 
@@ -20,3 +21,6 @@ rhi = ["null"]
 [modules.linux]
 platform = ["sdl3"]
 rhi = ["null"]
+
+[audio]
+muted = true

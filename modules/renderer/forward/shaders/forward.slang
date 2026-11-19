@@ -3,6 +3,10 @@
 // material has a base color, metallic and roughness, a normal map, ambient occlusion and emitted
 // light, each a factor times a texture. Output is linear, into the HDR target or the window.
 //
+// The same code is forward_masked.slang's, with DREAM_ALPHA_MASK defined, for materials whose
+// alpha cuts holes in them (ADR 0034). Only that one has a discard, which can stop phone GPUs
+// from testing depth before shading, so opaque parts are drawn without it.
+//
 // Every shader uses the same bindings, for both graphics APIs (ADR 0013): the uniform block is
 // binding 0 / register b0, the base color texture is binding 1 / registers t0 and s0. The shadow
 // map is texture slot 2: binding 3 / registers t2 and s2 (ADR 0027). The material's other textures
@@ -58,6 +62,10 @@ static const uint k_feature_normal_map = 1;
 static const uint k_feature_metallic_roughness_map = 2;
 static const uint k_feature_occlusion_map = 4;
 static const uint k_feature_emission = 8;
+// Both faces are drawn, and the back ones are lit as the front ones turned around.
+static const uint k_feature_double_sided = 16;
+// Blended over the scene: the output is premultiplied by its alpha.
+static const uint k_feature_blend = 32;
 
 struct VertexInput {
     [[vk::location(0)]] float3 position : POSITION;
@@ -90,6 +98,7 @@ struct VertexOutput {
     nointerpolation float4 base_color : COLOR0;
     nointerpolation float4 material : MATERIAL0;
     nointerpolation float4 emissive : EMISSIVE0;
+    nointerpolation float alpha_cutoff : CUTOFF0;
 };
 
 [shader("vertex")]
@@ -114,6 +123,8 @@ VertexOutput vertex_main(VertexInput input) {
     output.base_color = input.base_color;
     output.material = input.material;
     output.emissive = input.emissive;
+    // The instance's alpha cutoff rides in the normals' first column, which is otherwise unused.
+    output.alpha_cutoff = input.normal_x.w;
     return output;
 }
 
@@ -223,6 +234,11 @@ float3 ambient_specular(float3 f0, float roughness, float n_dot_v) {
 [shader("fragment")]
 float4 fragment_main(VertexOutput input) : SV_Target {
     const float4 base_color = base_color_texture.Sample(input.uv) * input.base_color;
+#if defined(DREAM_ALPHA_MASK)
+    if (base_color.a < input.alpha_cutoff) {
+        discard;
+    }
+#endif
     // Real branches, not ?:, which may read both sides.
     float4 metallic_roughness = float4(1.0, 1.0, 1.0, 1.0);
     if (has_feature(input, k_feature_metallic_roughness_map)) {
@@ -241,10 +257,16 @@ float4 fragment_main(VertexOutput input) : SV_Target {
         emissive = emissive_texture.Sample(input.uv).rgb * input.emissive.rgb;
     }
 
-    const float3 geometric = normalize(input.world_normal);
-    const float3 normal = surface_normal(input, geometric);
-    const float3 to_light = frame.direction_to_light.xyz;
     const float3 to_camera = normalize(frame.camera_position.xyz - input.world_position);
+    float3 geometric = normalize(input.world_normal);
+    float3 normal = surface_normal(input, geometric);
+    // The back face of a double-sided surface is lit as its front turned around. Which face is seen
+    // is told by the normal, which holds on every graphics API, however each flips its images.
+    if (has_feature(input, k_feature_double_sided) && dot(geometric, to_camera) < 0.0) {
+        geometric = -geometric;
+        normal = -normal;
+    }
+    const float3 to_light = frame.direction_to_light.xyz;
     const float n_dot_v = max(dot(normal, to_camera), 1e-4);
 
     // Dielectrics reflect 4% straight on; metals reflect their color and have no diffuse.
@@ -254,7 +276,8 @@ float4 fragment_main(VertexOutput input) : SV_Target {
     const float3 light = frame.light_color_and_ambient.rgb;
     const float ambient = frame.light_color_and_ambient.a;
 
-    float3 color = float3(0.0, 0.0, 0.0);
+    float3 diffuse_light = float3(0.0, 0.0, 0.0);
+    float3 specular_light = float3(0.0, 0.0, 0.0);
     const float n_dot_l = saturate(dot(normal, to_light));
     // Faces turned from the light stay dark, however their normal map tilts them.
     if (n_dot_l > 0.0 && dot(geometric, to_light) > 0.0) {
@@ -265,11 +288,18 @@ float4 fragment_main(VertexOutput input) : SV_Target {
                                 visibility(n_dot_v, n_dot_l, alpha) * f * k_pi;
         const float3 diffuse = diffuse_color * (1.0 - f);
         // The shadow lookup moves along the mesh's normal, not the mapped one.
-        color = (diffuse + specular) * light * (n_dot_l * sunlight(input.world_position, geometric));
+        const float3 lit = light * (n_dot_l * sunlight(input.world_position, geometric));
+        diffuse_light = diffuse * lit;
+        specular_light = specular * lit;
     }
 
     // Ambient light, the same from every side, which occlusion darkens.
-    color += (diffuse_color + ambient_specular(f0, roughness, n_dot_v)) * (ambient * occlusion);
-    color += emissive;
-    return float4(color, base_color.a);
+    diffuse_light += diffuse_color * (ambient * occlusion);
+    specular_light += ambient_specular(f0, roughness, n_dot_v) * (ambient * occlusion);
+
+    // A blended surface lets light through where it is transparent, so its diffuse light fades
+    // with its alpha, but its reflections and emission don't, as on glass. The output is
+    // premultiplied by that alpha.
+    const float coverage = has_feature(input, k_feature_blend) ? base_color.a : 1.0;
+    return float4(diffuse_light * coverage + specular_light + emissive, coverage);
 }

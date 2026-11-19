@@ -1,5 +1,6 @@
 # The same on Direct3D, which only Windows has.
 [app]
+window = "hidden"
 organization = "DreamEngine"
 name = "TopplerCheck"       # Its own storage, apart from a player's saved progress.
 title = "Toppler Direct3D 12 Check"
@@ -36,3 +37,6 @@ tangent_generator = ["mikktspace"]
 physics3d = ["impulse"]
 audio = ["portaudio"]
 ui = ["markup"]
+
+[audio]
+muted = true

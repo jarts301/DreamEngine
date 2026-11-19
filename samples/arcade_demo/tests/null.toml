@@ -1,5 +1,6 @@
 # The scripted run with every null backend.
 [app]
+window = "hidden"
 max_fps = 120
 fixed_rate = 120
 
@@ -43,3 +44,6 @@ physics3d = ["null"]
 audio = ["null"]
 ui = ["null"]
 debug_ui = ["null"]
+
+[audio]
+muted = true

@@ -1,5 +1,6 @@
 # The scripted run with the null backends: no collisions, so only loading, stepping and drawing are checked.
 [app]
+window = "hidden"
 max_fps = 120
 fixed_rate = 120
 
@@ -38,3 +39,6 @@ mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
 physics3d = ["null"]
 physics2d = ["null"]
+
+[audio]
+muted = true

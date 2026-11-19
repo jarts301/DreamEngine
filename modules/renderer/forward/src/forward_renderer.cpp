@@ -2,6 +2,7 @@
 // in HDR and tone-mapped with Khronos PBR Neutral (ADR 0028), then debug lines and the interface
 // layers over the result. Parts out of the camera's view, or out of a shadow cascade, are skipped
 // (ADR 0031). Surfaces are lit with glTF's metallic-roughness model and normal maps (ADR 0033).
+// Opaque parts are drawn first, then cut-out ones, then blended ones, farthest first (ADR 0034).
 
 #include "dream/core/config.h"
 #include "dream/core/log.h"
@@ -73,7 +74,34 @@ enum MaterialFeature : std::uint32_t {
     k_feature_metallic_roughness_map = 2,
     k_feature_occlusion_map = 4,
     k_feature_emission = 8,
+    k_feature_double_sided = 16,
+    k_feature_blend = 32,
 };
+
+// The passes that draw parts, each with the parts of one alpha mode.
+enum class Pass : std::uint8_t { Shadow, ShadowMasked, Opaque, Masked, Blend };
+
+bool is_shadow(Pass pass) {
+    return pass == Pass::Shadow || pass == Pass::ShadowMasked;
+}
+
+// Whether a pass draws a part.
+bool in_pass(const MeshDraw& mesh, Pass pass) {
+    const AlphaMode mode = mesh.material.alpha_mode;
+    switch (pass) {
+    case Pass::Shadow:
+        return mesh.casts_shadows && mode == AlphaMode::Opaque;
+    case Pass::ShadowMasked:
+        return mesh.casts_shadows && mode == AlphaMode::Mask;
+    case Pass::Opaque:
+        return mode == AlphaMode::Opaque;
+    case Pass::Masked:
+        return mode == AlphaMode::Mask;
+    case Pass::Blend:
+        return mode == AlphaMode::Blend;
+    }
+    return false;
+}
 
 float material_features(const MeshMaterial& material) {
     std::uint32_t features = 0;
@@ -88,6 +116,12 @@ float material_features(const MeshMaterial& material) {
     }
     if (material.emissive.x > 0.0f || material.emissive.y > 0.0f || material.emissive.z > 0.0f) {
         features |= k_feature_emission;
+    }
+    if (material.double_sided) {
+        features |= k_feature_double_sided;
+    }
+    if (material.alpha_mode == AlphaMode::Blend) {
+        features |= k_feature_blend;
     }
     return static_cast<float>(features);
 }
@@ -486,14 +520,25 @@ void fit_cascades(FrameUniforms& frame, const View& camera, Vec3 light_direction
 }
 
 // Every shader and pipeline, made from the compiled shader files together, and replaced together.
+// A pipeline for parts drawn one side only, and one for double-sided parts.
+struct SidedPipelines {
+    OwnedPipeline one_sided;
+    OwnedPipeline double_sided;
+};
+
 struct Pipelines {
     std::vector<OwnedShader> shaders;
-    OwnedPipeline forward;
+    SidedPipelines forward;
+    // Cut-out materials, with forward_masked.slang's discard.
+    SidedPipelines masked;
+    // Blended materials: premultiplied alpha, testing depth without writing it.
+    SidedPipelines blended;
     OwnedPipeline lines;
     OwnedPipeline ui;
     OwnedPipeline ui_premultiplied;
-    OwnedPipeline shadow;   // Only with shadows.
-    OwnedPipeline tone_map; // Only with HDR.
+    OwnedPipeline shadow;        // Only with shadows.
+    OwnedPipeline shadow_masked; // Only with shadows.
+    OwnedPipeline tone_map;      // Only with HDR.
 };
 
 class ForwardRenderer final : public SceneRenderer {
@@ -617,7 +662,7 @@ private:
 
     // Draws the parts, or the shadow casters among them, that `view` sees, when one is given,
     // with one instanced draw for the parts that share a range of indices and a texture.
-    void draw_meshes(rhi::CommandList& commands, std::span<const MeshDraw> meshes, bool casters,
+    void draw_meshes(rhi::CommandList& commands, std::span<const MeshDraw> meshes, Pass pass,
                      const core::Frustum* view, FrameStats& stats);
     void draw_lines(rhi::CommandList& commands, std::span<const LineVertex> lines,
                     FrameStats& stats);
@@ -646,6 +691,9 @@ private:
     // The parts one pass draws, in draw order, and the instance data of one draw.
     std::vector<std::uint32_t> m_order;
     std::vector<InstanceData> m_batch;
+    // Each blended part's squared distance from the eye, for drawing the farthest first.
+    std::vector<float> m_distances;
+    Vec3 m_eye;
     bool m_warned_instances = false;
 };
 
@@ -698,20 +746,53 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
     };
     static constexpr std::array k_instance_attributes = instance_attributes(4, k_instance_vec4s);
     static constexpr std::array k_shadow_instance_attributes = instance_attributes(1, 4);
-    core::Result<OwnedPipeline> forward = pipeline(rhi::PipelineDesc{
-        .vertex_shader = vertex.value(),
-        .fragment_shader = fragment.value(),
-        .vertex_stride = sizeof(MeshVertex),
-        .attributes = k_attributes,
-        .instance_stride = sizeof(InstanceData),
-        .instance_attributes = k_instance_attributes,
-        .color_target = hdr,
-        .depth_target = hdr.has_value() ? std::optional(k_depth_format) : std::nullopt,
-    });
-    if (!forward.has_value()) {
-        return forward.error();
+    const core::Result<rhi::ShaderHandle> masked_fragment =
+        shader("forward_masked.frag", rhi::ShaderStage::Fragment);
+    if (!masked_fragment.has_value()) {
+        return masked_fragment.error();
     }
-    made.forward = std::move(forward).value();
+    // One-sided and double-sided versions of a lit pipeline (ADR 0034).
+    const auto sided = [&](rhi::ShaderHandle fragment_shader, rhi::BlendMode blend,
+                           SidedPipelines& out) -> core::Result<void> {
+        rhi::PipelineDesc desc{
+            .vertex_shader = vertex.value(),
+            .fragment_shader = fragment_shader,
+            .vertex_stride = sizeof(MeshVertex),
+            .attributes = k_attributes,
+            .instance_stride = sizeof(InstanceData),
+            .instance_attributes = k_instance_attributes,
+            .blend = blend,
+            // Blended surfaces don't hide what is behind them, even each other.
+            .depth_write = blend == rhi::BlendMode::Opaque,
+            .color_target = hdr,
+            .depth_target = hdr.has_value() ? std::optional(k_depth_format) : std::nullopt,
+        };
+        core::Result<OwnedPipeline> one_sided = pipeline(desc);
+        if (!one_sided.has_value()) {
+            return one_sided.error();
+        }
+        desc.cull = rhi::CullMode::None;
+        core::Result<OwnedPipeline> double_sided = pipeline(desc);
+        if (!double_sided.has_value()) {
+            return double_sided.error();
+        }
+        out.one_sided = std::move(one_sided).value();
+        out.double_sided = std::move(double_sided).value();
+        return {};
+    };
+    if (auto made_forward = sided(fragment.value(), rhi::BlendMode::Opaque, made.forward);
+        !made_forward.has_value()) {
+        return made_forward.error();
+    }
+    if (auto made_masked = sided(masked_fragment.value(), rhi::BlendMode::Opaque, made.masked);
+        !made_masked.has_value()) {
+        return made_masked.error();
+    }
+    if (auto made_blended =
+            sided(fragment.value(), rhi::BlendMode::PremultipliedAlpha, made.blended);
+        !made_blended.has_value()) {
+        return made_blended.error();
+    }
 
     const core::Result<rhi::ShaderHandle> line_vertex =
         shader("debug_lines.vert", rhi::ShaderStage::Vertex);
@@ -799,6 +880,50 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
             return shadow.error();
         }
         made.shadow = std::move(shadow).value();
+
+        // Cut-out casters: the position and texture coordinates, and of each instance its model
+        // matrix, its alpha cutoff in the normals' first column, and its base color.
+        const core::Result<rhi::ShaderHandle> masked_vertex =
+            shader("shadow_masked.vert", rhi::ShaderStage::Vertex);
+        if (!masked_vertex.has_value()) {
+            return masked_vertex.error();
+        }
+        const core::Result<rhi::ShaderHandle> masked_shadow_fragment =
+            shader("shadow_masked.frag", rhi::ShaderStage::Fragment);
+        if (!masked_shadow_fragment.has_value()) {
+            return masked_shadow_fragment.error();
+        }
+        static constexpr std::array k_masked_attributes{
+            rhi::VertexAttribute{0, rhi::VertexFormat::Float3, offsetof(MeshVertex, position)},
+            rhi::VertexAttribute{1, rhi::VertexFormat::Float2, offsetof(MeshVertex, uv)},
+        };
+        static constexpr std::array k_masked_instance_attributes{
+            rhi::VertexAttribute{2, rhi::VertexFormat::Float4, offsetof(InstanceData, model)},
+            rhi::VertexAttribute{3, rhi::VertexFormat::Float4,
+                                 offsetof(InstanceData, model) + sizeof(Vec4)},
+            rhi::VertexAttribute{4, rhi::VertexFormat::Float4,
+                                 offsetof(InstanceData, model) + 2 * sizeof(Vec4)},
+            rhi::VertexAttribute{5, rhi::VertexFormat::Float4,
+                                 offsetof(InstanceData, model) + 3 * sizeof(Vec4)},
+            rhi::VertexAttribute{6, rhi::VertexFormat::Float4, offsetof(InstanceData, normals)},
+            rhi::VertexAttribute{7, rhi::VertexFormat::Float4, offsetof(InstanceData, base_color)},
+        };
+        core::Result<OwnedPipeline> shadow_masked = pipeline(rhi::PipelineDesc{
+            .vertex_shader = masked_vertex.value(),
+            .fragment_shader = masked_shadow_fragment.value(),
+            .vertex_stride = sizeof(MeshVertex),
+            .attributes = k_masked_attributes,
+            .instance_stride = sizeof(InstanceData),
+            .instance_attributes = k_masked_instance_attributes,
+            .cull = rhi::CullMode::None,
+            .depth_bias = 1.0f,
+            .slope_depth_bias = 1.5f,
+            .depth_target = k_depth_format,
+        });
+        if (!shadow_masked.has_value()) {
+            return shadow_masked.error();
+        }
+        made.shadow_masked = std::move(shadow_masked).value();
     }
 
     if (hdr.has_value()) {
@@ -897,7 +1022,10 @@ void ForwardRenderer::prepare_meshes(const Frame& frame, bool boxes) {
         }
         m_instances[index] = InstanceData{
             .model = mesh.model.columns,
-            .normals = {normals.columns[0], normals.columns[1], normals.columns[2]},
+            // The first column's w, otherwise unused, carries the alpha cutoff.
+            .normals = {Vec4{normals.columns[0].x, normals.columns[0].y, normals.columns[0].z,
+                             mesh.material.alpha_cutoff},
+                        normals.columns[1], normals.columns[2]},
             .base_color = mesh.material.base_color,
             .material = Vec4{mesh.material.metallic, mesh.material.roughness,
                              mesh.material.normal_scale, mesh.material.occlusion_strength},
@@ -933,10 +1061,11 @@ void ForwardRenderer::prepare_meshes(const Frame& frame, bool boxes) {
 }
 
 void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const MeshDraw> meshes,
-                                  bool casters, const core::Frustum* view, FrameStats& stats) {
+                                  Pass pass, const core::Frustum* view, FrameStats& stats) {
+    const bool casters = is_shadow(pass);
     m_order.clear();
     for (std::size_t index = 0; index < meshes.size(); ++index) {
-        if (casters && !meshes[index].casts_shadows) {
+        if (!in_pass(meshes[index], pass)) {
             continue;
         }
         if (view != nullptr && !core::intersects(*view, m_world_bounds[index])) {
@@ -945,9 +1074,12 @@ void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const Me
         }
         m_order.push_back(static_cast<std::uint32_t>(index));
     }
+    if (m_order.empty()) {
+        return;
+    }
 
-    // Parts that draw the same indices with the same textures become one draw, whatever their
-    // material's factors. Shadows ignore textures.
+    // Parts that draw the same indices with the same textures and sides become one draw, whatever
+    // their material's factors. Opaque shadows ignore textures; cut-out ones need the base color.
     const auto key = [&](std::uint32_t index) {
         const MeshDraw& mesh = meshes[index];
         const Chosen& chosen = m_chosen[index];
@@ -955,15 +1087,39 @@ void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const Me
         const auto texture = [&](rhi::TextureHandle handle) {
             return casters ? rhi::TextureHandle{} : handle;
         };
-        return std::make_tuple(mesh.vertices, mesh.indices, chosen.first_index, chosen.index_count,
-                               texture(material.base_color_texture),
-                               texture(material.normal_texture),
-                               texture(material.metallic_roughness_texture),
-                               texture(material.occlusion_texture),
-                               texture(material.emissive_texture));
+        return std::make_tuple(
+            !casters && material.double_sided, mesh.vertices, mesh.indices, chosen.first_index,
+            chosen.index_count,
+            pass == Pass::Shadow ? rhi::TextureHandle{} : material.base_color_texture,
+            texture(material.normal_texture), texture(material.metallic_roughness_texture),
+            texture(material.occlusion_texture), texture(material.emissive_texture));
     };
-    std::ranges::stable_sort(m_order, [&](std::uint32_t a, std::uint32_t b) { return key(a) < key(b); });
+    if (pass == Pass::Blend) {
+        // Farthest first, by the middle of each part's box, so nearer glass blends over farther.
+        // Equal neighbours still share a draw.
+        m_distances.resize(meshes.size());
+        const Vec3 eye = m_eye;
+        for (const std::uint32_t index : m_order) {
+            const MeshDraw& mesh = meshes[index];
+            const Vec3 middle = mesh.bounds.empty()
+                                    ? Vec3{}
+                                    : (mesh.bounds.min + mesh.bounds.max) * 0.5f;
+            const Vec3 world = core::transform_point(mesh.model, middle);
+            m_distances[index] = core::length_squared(world - eye);
+        }
+        std::ranges::stable_sort(m_order, [&](std::uint32_t a, std::uint32_t b) {
+            return m_distances[a] > m_distances[b];
+        });
+    } else {
+        std::ranges::stable_sort(m_order,
+                                 [&](std::uint32_t a, std::uint32_t b) { return key(a) < key(b); });
+    }
 
+    const SidedPipelines* const sided = pass == Pass::Opaque   ? &m_pipelines->forward
+                                        : pass == Pass::Masked ? &m_pipelines->masked
+                                        : pass == Pass::Blend  ? &m_pipelines->blended
+                                                               : nullptr;
+    std::optional<bool> bound_double_sided;
     rhi::BufferHandle bound_vertices;
     rhi::BufferHandle bound_indices;
     for (std::size_t first = 0; first < m_order.size();) {
@@ -981,6 +1137,11 @@ void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const Me
         const auto count = static_cast<std::uint32_t>(last - first);
         first = last;
 
+        if (sided != nullptr && bound_double_sided != mesh.material.double_sided) {
+            bound_double_sided = mesh.material.double_sided;
+            commands.bind_pipeline(*bound_double_sided ? sided->double_sided.get()
+                                                       : sided->one_sided.get());
+        }
         if (mesh.vertices != bound_vertices) {
             commands.bind_vertex_buffer(mesh.vertices);
             bound_vertices = mesh.vertices;
@@ -989,7 +1150,9 @@ void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const Me
             commands.bind_index_buffer(mesh.indices, rhi::IndexFormat::UInt32);
             bound_indices = mesh.indices;
         }
-        if (!casters) {
+        if (pass == Pass::ShadowMasked) {
+            commands.bind_texture(mesh.material.base_color_texture);
+        } else if (!casters) {
             const MeshMaterial& material = mesh.material;
             commands.bind_texture(material.base_color_texture);
             // Without a normal map, a flat one, which leaves the surface's normal as it is.
@@ -1014,6 +1177,9 @@ void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const Me
             stats.shadow_casters += count;
         } else {
             stats.draws += count;
+            if (pass == Pass::Blend) {
+                stats.blended += count;
+            }
             if (chosen.simplified) {
                 stats.simplified += count;
             }
@@ -1139,6 +1305,7 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
     std::optional<core::Frustum> camera_bounds;
     if (frame.view.has_value()) {
         DREAM_PROFILE_ZONE("Prepare parts");
+        m_eye = frame.view->eye;
         prepare_meshes(frame, culling || m_settings.lod_error > 0.0f);
         if (culling) {
             camera_bounds = core::frustum_from(frame.view->view_projection);
@@ -1149,7 +1316,6 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
         // Each cascade into its own part of the map, kept there by a scissor.
         DREAM_PROFILE_ZONE("Shadow map");
         commands.begin_render_pass(rhi::RenderTargets{.depth = m_shadow_map.get()});
-        commands.bind_pipeline(m_pipelines->shadow.get());
         FrameUniforms cascade_uniforms = *uniforms;
         const std::uint32_t cell_size = m_settings.shadow_resolution;
         for (std::uint32_t cascade = 0; cascade < m_settings.shadow_cascades; ++cascade) {
@@ -1160,9 +1326,14 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
                 .width = cell_size,
                 .height = cell_size});
             cascade_uniforms.light_view_projection = uniforms->cascades[cascade];
+            const core::Frustum* const bounds = culling ? &cascade_bounds[cascade] : nullptr;
+            commands.bind_pipeline(m_pipelines->shadow.get());
             commands.set_uniforms(std::as_bytes(std::span(&cascade_uniforms, 1)));
-            draw_meshes(commands, frame.meshes, true, culling ? &cascade_bounds[cascade] : nullptr,
-                        stats);
+            draw_meshes(commands, frame.meshes, Pass::Shadow, bounds, stats);
+            // Cut-out casters, which need their base color's alpha.
+            commands.bind_pipeline(m_pipelines->shadow_masked.get());
+            commands.set_uniforms(std::as_bytes(std::span(&cascade_uniforms, 1)));
+            draw_meshes(commands, frame.meshes, Pass::ShadowMasked, bounds, stats);
         }
         commands.end_render_pass();
     }
@@ -1175,12 +1346,16 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
         if (!uniforms.has_value()) {
             return;
         }
-        commands.bind_pipeline(m_pipelines->forward.get());
+        commands.bind_pipeline(m_pipelines->forward.one_sided.get());
         commands.set_uniforms(uniform_bytes());
         if (shadows) {
             commands.bind_texture(rhi::k_shadow_slot, m_shadow_map.get());
         }
-        draw_meshes(commands, frame.meshes, false, camera_bounds ? &*camera_bounds : nullptr, stats);
+        // Opaque, then cut-out, then blended over both. Each pass binds its own pipelines.
+        const core::Frustum* const bounds = camera_bounds ? &*camera_bounds : nullptr;
+        draw_meshes(commands, frame.meshes, Pass::Opaque, bounds, stats);
+        draw_meshes(commands, frame.meshes, Pass::Masked, bounds, stats);
+        draw_meshes(commands, frame.meshes, Pass::Blend, bounds, stats);
     };
     if (hdr && m_hdr_color.exists()) {
         // The scene in HDR, then tone-mapped onto the window, with the lines and interface over it.

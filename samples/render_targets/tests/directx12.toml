@@ -1,4 +1,5 @@
 [app]
+window = "hidden"
 title = "Dream Render Targets Direct3D 12 Check"
 width = 960
 height = 540
@@ -27,3 +28,6 @@ quit = true
 [modules.windows]
 platform = ["sdl3"]
 rhi = ["directx12"]
+
+[audio]
+muted = true

@@ -1,6 +1,7 @@
 # The scripted run of physics.toml, with the other physics backends: the same game, and the
 # same outcome, with only this file changed.
 [app]
+window = "hidden"
 max_fps = 120
 fixed_rate = 120
 
@@ -22,3 +23,6 @@ mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
 physics3d = ["impulse"]
 physics2d = ["chipmunk"]
+
+[audio]
+muted = true

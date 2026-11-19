@@ -1,3 +1,6 @@
+[app]
+window = "hidden"
+
 # The first choice fails to start, so the next one in the list is used.
 
 [greeter.spanish]
@@ -11,3 +14,6 @@ greeter = ["spanish", "english"]
 
 [modules.linux]
 greeter = ["spanish", "english"]
+
+[audio]
+muted = true

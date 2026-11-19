@@ -237,10 +237,24 @@ core::Result<void> App::run(Game& game) {
         handle_memory_pressure(game, *change, false);
     }
 
+    platform::WindowMode window_mode = platform::WindowMode::Normal;
+    if (m_config.contains("app.window")) {
+        const std::optional<std::string_view> mode = m_config.get_string("app.window");
+        if (mode == "background") {
+            window_mode = platform::WindowMode::Background;
+        } else if (mode == "hidden") {
+            window_mode = platform::WindowMode::Hidden;
+        } else if (mode != "normal") {
+            return core::Error{core::ErrorCode::InvalidArgument,
+                               "Setting 'app.window' must be \"normal\", \"background\" or "
+                               "\"hidden\""};
+        }
+    }
     const platform::WindowSettings window{
         .title = std::string(m_config.get_string("app.title").value_or("Dream Engine")),
         .width = width.value(),
         .height = height.value(),
+        .mode = window_mode,
     };
     {
         // Creating the window and the game's on_start, where most loading happens.

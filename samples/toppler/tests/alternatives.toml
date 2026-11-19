@@ -1,5 +1,6 @@
 # The same with the other physics, audio and interface backends. Only the outcome matters.
 [app]
+window = "hidden"
 organization = "DreamEngine"
 name = "TopplerCheck"       # Its own storage, apart from a player's saved progress.
 title = "Toppler Check"
@@ -25,3 +26,6 @@ tangent_generator = ["mikktspace"]
 physics3d = ["impulse"]
 audio = ["portaudio"]
 ui = ["markup"]
+
+[audio]
+muted = true

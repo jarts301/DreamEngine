@@ -1,5 +1,6 @@
 # Plays every level with no graphics device or sound hardware, as CTest does.
 [app]
+window = "hidden"
 organization = "DreamEngine"
 name = "TopplerCheck"       # Its own storage, apart from a player's saved progress.
 title = "Toppler Check"
@@ -45,3 +46,6 @@ tangent_generator = ["mikktspace"]
 physics3d = ["jolt"]
 audio = ["miniaudio"]
 ui = ["rmlui"]
+
+[audio]
+muted = true

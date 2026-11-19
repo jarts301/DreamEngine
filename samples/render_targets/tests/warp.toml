@@ -1,4 +1,5 @@
 [app]
+window = "hidden"
 title = "Dream Render Targets WARP Check"
 width = 960
 height = 540
@@ -28,3 +29,6 @@ quit = true
 [modules.windows]
 platform = ["sdl3"]
 rhi = ["directx"]
+
+[audio]
+muted = true

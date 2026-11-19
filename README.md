@@ -114,8 +114,10 @@ Surfaces use glTF's metallic-roughness materials: base color, metallic, roughnes
 occlusion and emissive maps, lit with a physically based model. Normal maps need tangents, which a
 model's file may have; listing `tangent_generator = ["mikktspace", "null"]` makes them for models
 that don't. Textures named like `rock_normal.png` or `rock_orm.png` are cooked as data rather than
-colors. [Materials](docs/guides/materials.md) explains how to make models that look right, and
-[ADR 0033](docs/adr/0033-pbr-materials-and-normal-maps.md) records the design.
+colors. Materials can be opaque, cut out by their alpha, as for leaves and fences, or blended,
+as for glass, and double-sided. [Materials](docs/guides/materials.md) explains how to make models
+that look right, and [ADR 0033](docs/adr/0033-pbr-materials-and-normal-maps.md) and
+[ADR 0034](docs/adr/0034-transparency.md) record the design.
 
 ## Screenshot tests
 
@@ -132,6 +134,22 @@ The cube, the render demo, the arcade and Toppler have `_warp_check` and `_direc
 programs that do this on Windows' software rasterizer with Direct3D 11 and 12, which CTest runs, and
 their Vulkan and DirectX checks do it on the GPU. To update a reference, run the check and copy the capture it saves into the sample's
 `tests/reference/screenshots/`. See [ADR 0021](docs/adr/0021-screenshot-tests.md).
+
+Checks run unattended, so every sample's test configuration hides its window and mutes its audio:
+
+```toml
+[app]
+window = "hidden"   # "normal" (the default), "background" or "hidden".
+
+[audio]
+muted = true        # Every bus plays at 0.
+```
+
+`hidden` never shows the window, and drawing and captures still work on all five PC graphics
+backends. `background` shows it without taking the keyboard or coming to the front, for watching
+a run without being interrupted. While muted, a game still reads back the bus volumes it sets, so
+a game that saves its player's volumes doesn't save silence. Both settings are ignored on Android,
+where the game fills the screen.
 
 ## Cooked textures and packages
 

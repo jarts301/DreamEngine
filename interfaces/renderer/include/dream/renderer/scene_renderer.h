@@ -33,10 +33,22 @@ struct MeshVertex {
     core::Vec4 tangent{};
 };
 
+// How a surface's alpha is used, as glTF's alphaMode (ADR 0034).
+enum class AlphaMode : std::uint8_t {
+    // Alpha is ignored, and the surface hides what is behind it.
+    Opaque,
+    // Pixels whose alpha is below the cutoff aren't drawn, and the rest are opaque: leaves, fences,
+    // cut-out decals. They cast cut-out shadows.
+    Mask,
+    // Blended over what is behind it by its alpha: glass, water, smoke. Drawn after everything
+    // opaque, farthest first, and casting no shadow.
+    Blend,
+};
+
 // How a surface looks, in glTF's metallic-roughness model (ADR 0033). Factors multiply their
 // textures, and a missing texture reads as white, so the factors alone apply.
 struct MeshMaterial {
-    // Linear. Its alpha is kept in the output, but surfaces are drawn opaque.
+    // Linear. Its alpha is the surface's opacity for the Mask and Blend alpha modes.
     core::Vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};
     // 0 for dielectrics such as wood, stone and plastic; 1 for bare metal. The texture's blue
     // channel.
@@ -49,6 +61,13 @@ struct MeshMaterial {
     float occlusion_strength = 1.0f;
     // Light the surface gives off, linear and in the same units as the sun's intensity.
     core::Vec3 emissive{0.0f, 0.0f, 0.0f};
+    // How the base color's alpha, its factor times its texture's, is used.
+    AlphaMode alpha_mode = AlphaMode::Opaque;
+    // The alpha below which a Mask surface isn't drawn.
+    float alpha_cutoff = 0.5f;
+    // Both faces are drawn, and lit from the side seen, as for leaves and thin glass. Otherwise
+    // only the front faces, counter-clockwise ones, are drawn.
+    bool double_sided = false;
 
     // sRGB colors.
     rhi::TextureHandle base_color_texture{};
@@ -148,6 +167,8 @@ struct FrameStats {
     std::uint32_t draw_calls = 0;
     // Parts drawn with one of their simpler versions.
     std::uint32_t simplified = 0;
+    // Parts blended over the scene, which `draws` also counts.
+    std::uint32_t blended = 0;
 };
 
 // Reads one of the game's files, such as "assets:/shaders/forward.vert.spv".

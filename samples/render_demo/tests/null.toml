@@ -1,4 +1,5 @@
 [app]
+window = "hidden"
 max_fps = 0
 
 [demo]
@@ -28,3 +29,6 @@ rhi = ["null"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
+
+[audio]
+muted = true

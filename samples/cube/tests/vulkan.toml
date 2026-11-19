@@ -1,4 +1,5 @@
 [app]
+window = "hidden"
 title = "Dream Cube Check"
 width = 960
 height = 540
@@ -34,3 +35,6 @@ rhi = ["vulkan"]
 [modules.linux]
 platform = ["sdl3"]
 rhi = ["vulkan"]
+
+[audio]
+muted = true

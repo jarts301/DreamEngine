@@ -35,6 +35,9 @@ struct FakeDeviceState {
     std::vector<rhi::TextureDesc> textures;
     // Formats the device draws into, besides the Rgba8 ones every device does.
     std::vector<rhi::TextureFormat> render_target_formats;
+    // Each pipeline made, as it was described, without its spans. A pipeline's handle index is its
+    // place here, and binding one records "pipeline <index>".
+    std::vector<rhi::PipelineDesc> pipelines;
 };
 
 class FakeDevice final : public rhi::Device, private rhi::CommandList {
@@ -107,8 +110,13 @@ public:
         return rhi::ShaderHandle{.index = 0, .generation = 1};
     }
 
-    core::Result<rhi::PipelineHandle> create_pipeline(const rhi::PipelineDesc&) override {
-        return rhi::PipelineHandle{.index = 0, .generation = 1};
+    core::Result<rhi::PipelineHandle> create_pipeline(const rhi::PipelineDesc& desc) override {
+        rhi::PipelineDesc kept = desc;
+        kept.attributes = {};
+        kept.instance_attributes = {};
+        m_state.pipelines.push_back(kept);
+        return rhi::PipelineHandle{.index = static_cast<std::uint32_t>(m_state.pipelines.size() - 1),
+                                   .generation = 1};
     }
 
     void destroy_texture(rhi::TextureHandle) override {}
@@ -149,7 +157,9 @@ private:
         m_state.calls.emplace_back("render_targets");
     }
     void end_render_pass() override {}
-    void bind_pipeline(rhi::PipelineHandle) override {}
+    void bind_pipeline(rhi::PipelineHandle pipeline) override {
+        m_state.calls.push_back(std::format("pipeline {}", pipeline.index));
+    }
     void bind_vertex_buffer(rhi::BufferHandle) override {}
     void bind_index_buffer(rhi::BufferHandle, rhi::IndexFormat) override {}
     void push_constants(std::span<const std::byte>) override {}

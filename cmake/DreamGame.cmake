@@ -210,6 +210,14 @@ function(_dream_compile_shaders target output_dir formats)
     # Warning 39001 is that false alarm, so it is turned off.
     set(common_options -matrix-layout-column-major -warnings-disable 39001)
 
+    # A shader may #include another, such as forward_masked.slang including forward.slang, so each
+    # is compiled again when any of the target's shaders changes. There are only a few.
+    set(all_sources "")
+    foreach(source IN LISTS ARGN)
+        cmake_path(ABSOLUTE_PATH source NORMALIZE)
+        list(APPEND all_sources "${source}")
+    endforeach()
+
     set(outputs "")
     foreach(format IN LISTS formats)
         string(REPLACE "|" ";" format "${format}")
@@ -236,7 +244,7 @@ function(_dream_compile_shaders target output_dir formats)
                             -DSPIRV_CROSS=${DREAM_SPIRV_CROSS} -DSOURCE=${source}
                             -DSTAGE=${stage} -DOUTPUT=${output} -DLANGUAGE=${slang_target}
                             -DVERSION=${profile} -P "${script}"
-                        DEPENDS "${source}" "${script}"
+                        DEPENDS ${all_sources} "${script}"
                         COMMENT "Compiling ${stem} ${stage} shader to ${suffix}"
                         VERBATIM)
                 else()
@@ -248,7 +256,7 @@ function(_dream_compile_shaders target output_dir formats)
                             ${common_options}
                             -entry ${stage}_main -stage ${stage}
                             -o "${output}"
-                        DEPENDS "${source}"
+                        DEPENDS ${all_sources}
                         COMMENT "Compiling ${stem} ${stage} shader to ${suffix}"
                         VERBATIM)
                 endif()

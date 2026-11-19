@@ -1,4 +1,5 @@
 [app]
+window = "hidden"
 organization = "DreamEngine"
 name = "DreamHelloTest"
 max_fps = 0
@@ -18,3 +19,6 @@ platform = ["sdl3"]
 
 [modules.linux]
 platform = ["sdl3"]
+
+[audio]
+muted = true

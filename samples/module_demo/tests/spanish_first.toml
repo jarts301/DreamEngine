@@ -1,3 +1,6 @@
+[app]
+window = "hidden"
+
 # Changing the order changes which backend runs.
 
 [modules.windows]
@@ -8,3 +11,6 @@ greeter = ["spanish", "english"]
 
 [modules.linux]
 greeter = ["spanish", "english"]
+
+[audio]
+muted = true

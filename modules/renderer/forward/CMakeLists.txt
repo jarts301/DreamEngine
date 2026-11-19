@@ -4,7 +4,9 @@ dream_add_module(renderer forward
     SOURCES src/forward_renderer.cpp
     SHADERS
         shaders/forward.slang
+        shaders/forward_masked.slang
         shaders/shadow.slang
+        shaders/shadow_masked.slang
         shaders/tonemap.slang
         shaders/debug_lines.slang
         shaders/ui.slang

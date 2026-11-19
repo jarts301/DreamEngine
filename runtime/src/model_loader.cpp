@@ -142,6 +142,19 @@ core::Result<std::uint32_t> add_material(const cgltf_material* material, ModelDa
     data.metallic = 1.0f;
     data.roughness = 1.0f;
     if (material != nullptr) {
+        switch (material->alpha_mode) {
+        case cgltf_alpha_mode_mask:
+            data.alpha_mode = renderer::AlphaMode::Mask;
+            break;
+        case cgltf_alpha_mode_blend:
+            data.alpha_mode = renderer::AlphaMode::Blend;
+            break;
+        default:
+            data.alpha_mode = renderer::AlphaMode::Opaque;
+            break;
+        }
+        data.alpha_cutoff = material->alpha_cutoff;
+        data.double_sided = material->double_sided != 0;
         const auto texture = [&](const cgltf_texture_view& view, bool color,
                                  int& image) -> core::Result<void> {
             const core::Result<int> added = add_texture(view, color, model, images, read_file);
@@ -557,6 +570,9 @@ core::Result<ModelAsset> create_model_asset(rhi::Device& device, const ModelData
             .normal_scale = material.normal_scale,
             .occlusion_strength = material.occlusion_strength,
             .emissive = material.emissive,
+            .alpha_mode = material.alpha_mode,
+            .alpha_cutoff = material.alpha_cutoff,
+            .double_sided = material.double_sided,
             .base_color_texture = texture_of(material.image),
             .normal_texture = texture_of(material.normal_image),
             .metallic_roughness_texture = texture_of(material.metallic_roughness_image),
