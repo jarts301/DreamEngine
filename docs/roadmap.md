@@ -163,7 +163,6 @@ Not yet possible without writing engine code first:
 | Settings menu and display modes | Resolution, fullscreen and borderless, frame cap, quality presets | A `settings` service in the runtime spine, with values from each module |
 | Save system | Versioned saves, migration, corruption safety, cloud sync hook | `save_storage`: `local_files`, `steam_cloud`, `play_saved_games`, `icloud` |
 | Asset streaming | Big games can't load everything at start | `asset_source`: `loose_files`, `pak`, `bundles` |
-| Scripting (optional) | Designers iterate without recompiling | `scripting`: `lua` (MIT) or `wasm`, `null` |
 
 Already done in Phase 12, and no longer missing: PBR materials with normal, occlusion and emissive
 maps, tangents from `tangent_generator` (ADR 0033); transparent, cut-out and double-sided materials
@@ -226,7 +225,7 @@ maps, tangents from `tangent_generator` (ADR 0033); transparent, cut-out and dou
 ## 4. The plan
 
 The original roadmap ended with Phase 12 (feature backlog) and Phase 13 (new platforms). This plan
-keeps Phase 12, and splits what follows into tools, store readiness, Apple platforms, online play,
+keeps Phase 12, and splits what follows into tools, store readiness, online play, Apple platforms,
 and the remaining platforms.
 
 ### Phase 12: features (in progress)
@@ -265,7 +264,8 @@ and the remaining platforms.
 
 - **Installable SDK:** CMake package config, `dream new <name>` with a project template, and games
   in their own repositories.
-- **Editor v1:** a program built on the engine. It needs:
+- **Editor v1:** a program built on the engine, with its interface in Dear ImGui (decided in
+  section 5). It needs:
   - a scene view;
   - an entity tree and component inspector, with components describing their fields through a
     reflection registry;
@@ -297,24 +297,7 @@ and the remaining platforms.
 - **Pass condition:** Toppler, updated, passes Steam Deck Verified checks and the Google Play
   pre-launch report.
 
-### Phase 15: Apple platforms, macOS and iOS
-
-- **Platform:** `sdl3` already supports both.
-- **Graphics:** a native `metal` RHI module, with shaders compiled by Slang to Metal. Vulkan on
-  MoltenVK (Apache 2.0) can come first as a quick start, since Slang and the `vulkan` module
-  already work.
-- **Audio:** `miniaudio` already speaks CoreAudio.
-- **Build:**
-  - CMake presets with the Xcode generator;
-  - `macos-universal` and `ios-arm64` toolchains, built in CI on Apple runners;
-  - signing, provisioning and notarization from settings outside the repository.
-- **Packaging:** a `.app` bundle on macOS and an `.ipa` on iOS, from `dream_add_game`, as the APK
-  is today. The touch, lifecycle and surface-loss work done for Android carries over.
-- **Store services:** `store_services: game_center`, StoreKit purchases, `save_storage: icloud`.
-- **Pass condition:** Toppler and the render demo match their screenshot references on a Mac and an
-  iPhone, and Toppler goes through TestFlight.
-
-### Phase 16: online play
+### Phase 15: online play
 
 Online play splits into four interfaces, so a game takes only what it needs and each part can be
 replaced.
@@ -344,6 +327,23 @@ replaced.
 **Pass condition:** two phones and a PC play the same match through a dedicated server, at 150 ms
 of simulated latency and 5% packet loss, and the match stays in sync.
 
+### Phase 16: Apple platforms, macOS and iOS
+
+- **Platform:** `sdl3` already supports both.
+- **Graphics:** a native `metal` RHI module, with shaders compiled by Slang to Metal. Vulkan on
+  MoltenVK (Apache 2.0) can come first as a quick start, since Slang and the `vulkan` module
+  already work.
+- **Audio:** `miniaudio` already speaks CoreAudio.
+- **Build:**
+  - CMake presets with the Xcode generator;
+  - `macos-universal` and `ios-arm64` toolchains, built in CI on Apple runners;
+  - signing, provisioning and notarization from settings outside the repository.
+- **Packaging:** a `.app` bundle on macOS and an `.ipa` on iOS, from `dream_add_game`, as the APK
+  is today. The touch, lifecycle and surface-loss work done for Android carries over.
+- **Store services:** `store_services: game_center`, StoreKit purchases, `save_storage: icloud`.
+- **Pass condition:** Toppler and the render demo match their screenshot references on a Mac and an
+  iPhone, and Toppler goes through TestFlight.
+
 ### Phase 17: more platforms
 
 - **Consoles** (Xbox, PlayStation, Switch): private, out-of-tree modules under each vendor's
@@ -354,16 +354,30 @@ of simulated latency and 5% packet loss, and the match stays in sync.
 
 ## 5. Decisions to make before these phases
 
-1. **Proprietary store SDKs:** keep them only as private, out-of-tree modules (the console
-   approach), or allow a written exception in ADR 0022 for platform-vendor SDKs in an optional
-   folder that is never built by default.
-2. **Editor technology:** an engine-hosted editor on Dear ImGui (fast to build, consistent with the
-   debug UI), or a separate application with a native UI.
-3. **Scripting:** none (C++ only), Lua, or WebAssembly. Each would be a module, but the choice
-   affects the editor and hot reload.
+1. **Proprietary store SDKs:** open, needed before Phase 14. Steamworks, Google Play Billing and
+   Play Games Services, and Game Center may be used by a game, but their files can't be published
+   in a public repository, and ADR 0022 allows only permissive licenses. Either way the engine
+   gets a `store_services` interface with `steam` and `google_play` modules; the choice is where
+   those modules' code lives.
+
+   | | A: a private repository outside the engine | B: an optional folder in the engine |
+   |---|---|---|
+   | How | The modules live in a separate private repository, found through a local path, as console modules will be | Our module code, which calls the SDK, lives in a folder such as `modules/vendor/`. Each developer downloads the SDK, and a CMake option such as `-DDREAM_STEAMWORKS_SDK=<path>` turns the module on; without it the folder isn't built. ADR 0022 gets a written exception: our code may call a platform vendor's SDK, as long as the SDK is optional and never committed |
+   | For | The public engine stays fully open source, with no exception to the license rule. No risk of pushing an SDK file by mistake. One approach, shared with consoles | One repository: a change to the interface and to the store modules lands in one commit. The code is visible and reviewable, and others can use it with their own SDK download. Our CI can build it where the SDK is installed |
+   | Against | Two repositories to keep in step: a change to `store_services` can break the private modules without the public tests noticing. Public builds can't check the store code compiles. A new machine needs extra setup | An exception to the license rule, guarded by a `.gitignore` entry and a CI check that no SDK file is committed. Public builds still can't compile these modules, so a private CI machine should. A different approach from consoles |
+
+   Consoles stay private (option A) whichever is chosen: console vendors' agreements usually forbid
+   publishing even the code that calls their APIs. Option B is the common choice for engines with
+   an open core; option A suits keeping the public repository strictly open source, or keeping the
+   store integration private.
+2. **Editor technology:** decided: an editor hosted in the engine, with its interface in Dear
+   ImGui, as the debug UI is. It is quicker to build, draws with the renderer games use, and its
+   panels are `editor_panel` modules over `debug_ui`.
+3. **Scripting:** decided: none. Games are written in C++, and hot reload covers assets. A
+   `scripting` interface can still be added later as a module if a project needs one.
 4. **The renderer as a module:** decided and done ([ADR 0030](adr/0030-renderer-module.md)).
-5. **Order after Phase 12:** this plan puts tools before stores and stores before Apple and online.
-   Online play could move ahead of Apple if the first commercial game needs it.
+5. **Order after Phase 12:** decided: tools (Phase 13), then stores (Phase 14), then online play
+   (Phase 15), then Apple platforms (Phase 16), then the remaining platforms (Phase 17).
 
 ## 6. Summary
 
@@ -376,5 +390,5 @@ professional work needs. Before a commercial release on Steam or Google Play, it
 - release packaging: AAB and real signing on Android, depots on Steam;
 - an installable SDK and an editor.
 
-Each of those is planned as a module, as is everything for macOS, iOS and online play, so a
+Each of those is planned as a module, as is everything for online play, macOS and iOS, so a
 project only carries what it uses.
