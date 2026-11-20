@@ -71,7 +71,7 @@ constexpr std::string_view k_shader_version = k_es ? "#version 310 es" : "#versi
 // OpenGL, and the push constants, which OpenGL has no special kind of buffer for, at block
 // binding 2.
 constexpr GLuint k_uniform_binding = 0;
-constexpr GLuint k_texture_unit = 1; // Slot 0's; slot n's is k_texture_unit + n (ADR 0027).
+constexpr GLuint k_texture_unit = 1; // Slot 0's; slot n's is texture_binding(n) (ADR 0027).
 constexpr GLuint k_push_constant_binding = 2;
 // The block of set_draw_uniforms, at the same binding as in Vulkan (ADR 0036).
 constexpr GLuint k_draw_block_binding = k_draw_uniform_binding;
@@ -772,7 +772,10 @@ GLenum internal_format(TextureFormat format) {
 
 // The type of each component of an uncompressed texture's pixels.
 GLenum pixel_type(TextureFormat format) {
-    return format == TextureFormat::Rgba32Float ? GL_FLOAT : GL_UNSIGNED_BYTE;
+    if (format == TextureFormat::Rgba32Float) {
+        return GL_FLOAT;
+    }
+    return format == TextureFormat::Rgba16Float ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE;
 }
 
 class GlDevice final : public Device, private CommandList {
@@ -917,10 +920,11 @@ public:
         case TextureFormat::Astc4x4Srgb:
         case TextureFormat::Astc4x4Unorm:
             return m_has_astc;
-        case TextureFormat::Rgba16Float:
         case TextureFormat::Rg11B10Float:
         case TextureFormat::Depth32Float:
             return false;
+        // Half floats filter in OpenGL and OpenGL ES 3.0 and up.
+        case TextureFormat::Rgba16Float:
         case TextureFormat::Rgba32Float:
             return true;
         }
@@ -1310,7 +1314,7 @@ private:
                                        GL_COMPARE_REF_TO_TEXTURE);
                 m_gl.SamplerParameteri(sampler, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
             }
-            m_gl.BindSampler(k_texture_unit + slot, sampler);
+            m_gl.BindSampler(texture_binding(slot), sampler);
         }
         m_gl.ActiveTexture(GL_TEXTURE0 + k_texture_unit);
 
@@ -1421,18 +1425,21 @@ private:
             }
             GLint unit = -1;
             m_gl.GetUniformiv(program, m_gl.GetUniformLocation(program, name.data()), &unit);
-            const GLuint shadow_unit = k_texture_unit + k_shadow_slot;
+            const GLuint shadow_unit = texture_binding(k_shadow_slot);
             const bool shadow = type == GL_SAMPLER_2D_SHADOW;
-            const bool placed =
-                count == 1 && unit >= static_cast<GLint>(k_texture_unit) &&
-                static_cast<GLuint>(unit) < k_texture_unit + k_texture_slots &&
-                (static_cast<GLuint>(unit) == shadow_unit) == shadow;
+            bool on_a_slot = false;
+            for (std::uint32_t slot = 0; slot < k_texture_slots; ++slot) {
+                on_a_slot = on_a_slot || static_cast<GLint>(texture_binding(slot)) == unit;
+            }
+            const bool placed = count == 1 && on_a_slot &&
+                                (static_cast<GLuint>(unit) == shadow_unit) == shadow;
             if (!placed) {
                 return invalid(std::format("Texture '{}' is at binding {}; textures go at bindings "
-                                           "{} to {}, and shadow samplers at {} alone, see ADR "
-                                           "0027",
-                                           name.data(), unit, k_texture_unit,
-                                           k_texture_unit + k_texture_slots - 1, shadow_unit));
+                                           "{} to {} and {}, and shadow samplers at {} alone, see "
+                                           "ADR 0027",
+                                           name.data(), unit, texture_binding(0),
+                                           texture_binding(k_texture_slots - 2),
+                                           texture_binding(k_texture_slots - 1), shadow_unit));
             }
         }
 
@@ -1712,7 +1719,7 @@ void main() {
     // expects.
     void bind_on_unit(std::uint32_t slot, GLuint id) {
         if (slot != 0) {
-            m_gl.ActiveTexture(GL_TEXTURE0 + k_texture_unit + slot);
+            m_gl.ActiveTexture(GL_TEXTURE0 + texture_binding(slot));
         }
         m_gl.BindTexture(GL_TEXTURE_2D, id);
         if (slot != 0) {
@@ -2136,7 +2143,7 @@ void main() {
         m_bound_textures[slot] = id;
         // A full-float texture is read by its own nearest settings, not the slot's sampler.
         if (unfiltered != m_unfiltered_slots[slot]) {
-            m_gl.BindSampler(k_texture_unit + slot, unfiltered ? 0 : m_samplers[slot]);
+            m_gl.BindSampler(texture_binding(slot), unfiltered ? 0 : m_samplers[slot]);
             m_unfiltered_slots[slot] = unfiltered;
         }
     }

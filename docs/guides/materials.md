@@ -114,9 +114,9 @@ the Principled BSDF's *Emission* color and *Strength*; a strength above 1 is wri
 above 1 aren't clipped: tone mapping rolls them off toward white, which is why a strong orange
 glow looks paler at its brightest. A strength of 1 to 3 keeps a glow's color.
 
-An emissive surface lights only itself: it doesn't light what is around it, and nothing glows
-past its edges (no bloom). Put a light-colored surface near it, or wait for point lights on the
-roadmap.
+An emissive surface lights only itself: it doesn't light what is around it. Above the bloom
+threshold it glows past its edges (see the [environment and bloom guide](environment.md)); to light
+its surroundings, put a point light inside it (see the [lighting guide](lighting.md)).
 
 ### How light works
 
@@ -248,7 +248,7 @@ Hot reload picks up a re-exported model while the game runs.
 | Normal map detail fades out with distance more than it should | The same | The same |
 | Seams along UV edges on a normal-mapped model | Tangents made by a different method than the bake used | Export the model's own tangents, from the tool that baked the map |
 | A texture is misplaced, with a warning about texture coordinates | The material uses a second UV map, and the engine reads the first | Bake or move it onto the first UV map |
-| Glowing parts don't light their surroundings | Emissive is only the surface's own color | Expected: there is no bloom or emissive lighting yet |
+| Glowing parts don't light their surroundings | Emissive is only the surface's own color | Put a point light inside; above the bloom threshold it glows |
 | A glow looks white rather than its color | Its emission is far above 1, and tone mapping rolls it off toward white | Lower the strength to 1–3 |
 | A see-through texture draws black or white where it should be clear | The material is `OPAQUE` | Set its alpha mode to `MASK` (cut-out) or `BLEND` |
 | Leaves or a fence vanish from one side | Back faces are culled | Make the material double-sided |
@@ -280,8 +280,8 @@ old fixed lighting: comfortably inside a 120 Hz frame of 8.3 ms
 
 These are not supported yet. Each is a later step on the roadmap.
 
-- **Environment lighting** (image-based lighting, reflection probes): ambient light is one value.
-- **More than one light**: the sun is the only one.
+- **Reflection probes**: one environment lights the whole scene (see the
+  [environment guide](environment.md)).
 - **Order-independent transparency**: blended parts sort per part, so crossing ones can blend in
   the wrong order.
 - **Shadows from blended parts**, and colored shadows through glass.
@@ -291,7 +291,6 @@ These are not supported yet. Each is a later step on the roadmap.
 - **A second UV map**: every texture uses the first.
 - **`.gltf` files**, and cooking images embedded in a `.glb`.
 - **Materials set from code or scene files**: only the tint. Materials come from the model.
-- **Bloom**: emissive surfaces don't glow beyond their own pixels.
 
 ## How it works inside
 

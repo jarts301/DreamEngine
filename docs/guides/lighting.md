@@ -103,8 +103,9 @@ Starting points, with a sun of 1.3 and ambient 0.3:
 | Torch or flashlight (spot) | 10–30 | 10–20 m |
 | Stage spot (spot) | 50–100 | 20–30 m |
 
-At night, lower the sun's intensity and ambient (an ambient of 0.03 to 0.08 reads as night) so
-the lights stand out; lights against a bright sun barely show.
+At night, lower the sun's intensity and ambient (an ambient of 0.03 to 0.08 reads as night), or
+use a dark environment (see the [environment guide](environment.md)), so the lights stand out;
+lights against a bright sun barely show.
 
 **Light very close to a surface** makes a hot spot, since brightness grows as the distance
 shrinks. Keep lights at least 0.3–0.5 m from the surfaces they light, or lower their intensity.

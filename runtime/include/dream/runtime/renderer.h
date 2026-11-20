@@ -154,7 +154,9 @@ struct RendererShaders {};
 //
 // Entities with a ParticleEmitter, which runtime::Particles moves on, are drawn too (ADR 0038), and
 // 2D sprites and tile maps through a Camera2D, over the 3D scene (ADR 0039, dream/runtime/sprites.h):
-// initialize also adds the components "camera_2d", "sprite", "sprite_animator" and "tile_map".
+// initialize also adds the components "camera_2d", "sprite", "sprite_animator" and "tile_map". An
+// "environment" (dream/runtime/environment.h) lights the scene from an HDR image of its
+// surroundings (ADR 0040).
 //
 // How many point and spot lights are drawn depends on the renderer module: `forward` takes the 16
 // nearest, and `forward_plus` 256 (ADR 0037).

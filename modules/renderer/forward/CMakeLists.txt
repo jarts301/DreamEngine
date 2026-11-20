@@ -12,6 +12,9 @@ dream_add_module(renderer forward
         shaders/shadow_skinned.slang
         shaders/shadow_masked_skinned.slang
         shaders/tonemap.slang
+        shaders/sky.slang
+        shaders/bloom_down.slang
+        shaders/bloom_up.slang
         shaders/debug_lines.slang
         shaders/particles.slang
         shaders/sprites.slang

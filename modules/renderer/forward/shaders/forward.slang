@@ -32,6 +32,9 @@ struct FrameUniforms {
     // down, in texture coordinates. z: a depth bias.
     float4 shadow_settings;
     float4 camera_forward;
+    // The environment (ADR 0040). x: its intensity, 0 without one, when the sun's flat ambient
+    // light is used. y: its last level, the matte one. z and w: its rotation's cosine and sine.
+    float4 environment;
 };
 
 [[vk::binding(0, 0)]]
@@ -61,6 +64,8 @@ Texture2D<float4> light_data : register(t1);
 static const int k_light_texture_width = 256;
 
 static const float k_pi = 3.14159265;
+
+#include "environment.slang"
 
 #if defined(DREAM_SKINNED)
 #include "skinning.slang"
@@ -392,9 +397,22 @@ float4 fragment_main(VertexOutput input) : SV_Target {
     add_lights(input.world_position, normal, to_camera, n_dot_v, f0, diffuse_color, alpha,
                diffuse_light, specular_light);
 
-    // Ambient light, the same from every side, which occlusion darkens.
-    diffuse_light += diffuse_color * (ambient * occlusion);
-    specular_light += ambient_specular(f0, roughness, n_dot_v) * (ambient * occlusion);
+    if (frame.environment.x > 0.0) {
+        // Light from the surroundings, which occlusion darkens: the matte level toward the normal,
+        // and the reflection from the level for the surface's roughness.
+        const float2 turn = frame.environment.zw;
+        const float last = frame.environment.y;
+        const float3 reflected = reflect(-to_camera, normal);
+        const float3 received = environment_light(normal, turn, last);
+        const float3 mirrored = environment_light(reflected, turn, roughness * (last - 1.0));
+        const float strength = frame.environment.x * occlusion;
+        diffuse_light += diffuse_color * received * strength;
+        specular_light += ambient_specular(f0, roughness, n_dot_v) * mirrored * strength;
+    } else {
+        // Ambient light, the same from every side, which occlusion darkens.
+        diffuse_light += diffuse_color * (ambient * occlusion);
+        specular_light += ambient_specular(f0, roughness, n_dot_v) * (ambient * occlusion);
+    }
 
     // A blended surface lets light through where it is transparent, so its diffuse light fades
     // with its alpha, but its reflections and emission don't, as on glass. The output is

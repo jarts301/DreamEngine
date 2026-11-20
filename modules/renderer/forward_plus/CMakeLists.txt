@@ -14,6 +14,9 @@ dream_add_module(renderer forward_plus
         ${forward_dir}/shaders/shadow_skinned.slang
         ${forward_dir}/shaders/shadow_masked_skinned.slang
         ${forward_dir}/shaders/tonemap.slang
+        ${forward_dir}/shaders/sky.slang
+        ${forward_dir}/shaders/bloom_down.slang
+        ${forward_dir}/shaders/bloom_up.slang
         ${forward_dir}/shaders/debug_lines.slang
         ${forward_dir}/shaders/particles.slang
         ${forward_dir}/shaders/sprites.slang

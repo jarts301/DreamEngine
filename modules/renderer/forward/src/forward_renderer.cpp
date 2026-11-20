@@ -59,6 +59,8 @@ struct FrameUniforms {
     Vec4 cascade_normal_offset;
     Vec4 shadow_settings;
     Vec4 camera_forward;
+    // The environment: intensity (0 for none), its last level, and its rotation's cosine and sine.
+    Vec4 environment;
 };
 
 // One instance of a part, as forward.slang reads it per instance: the columns of its model
@@ -143,6 +145,7 @@ static_assert(k_emissive_slot < rhi::k_texture_slots);
 
 struct ToneMapConstants {
     Vec4 settings;
+    Vec4 bloom_texel;
 };
 
 struct UiConstants {
@@ -195,7 +198,24 @@ constexpr std::size_t k_max_sprites_per_draw = 8192;
 static_assert(sizeof(ParticleInstance) == 48);
 static_assert(sizeof(SpriteInstance) == 64);
 static_assert(sizeof(FrameUniforms) <= rhi::k_max_uniform_size);
-static_assert(sizeof(FrameUniforms) == 496);
+static_assert(sizeof(FrameUniforms) == 512);
+
+// The environment's texture slot (ADR 0040), and the sky's and bloom's constants.
+constexpr std::uint32_t k_environment_slot = 7;
+static_assert(k_environment_slot < rhi::k_texture_slots);
+
+struct SkyConstants {
+    std::array<Vec4, 4> clip_to_world;
+    Vec4 eye;
+    Vec4 environment;
+};
+
+struct BloomConstants {
+    Vec4 settings;
+};
+
+// The most halvings bloom makes: each spreads the glow twice as wide.
+constexpr std::size_t k_max_bloom_levels = 6;
 static_assert(sizeof(InstanceData) == 160);
 
 // How many instances one draw takes at most, so each call's data stays small.
@@ -330,6 +350,10 @@ struct Settings {
     float lod_error = 1.0f;
     // At most this many point and spot lights, the nearest, up to the module's own limit.
     std::uint32_t max_lights = k_max_lights;
+    // Glow around light brighter than the threshold, in HDR only (ADR 0040).
+    bool bloom = true;
+    float bloom_intensity = 0.6f;
+    float bloom_threshold = 1.0f;
 };
 
 core::Result<Settings> read_settings(const core::Config& config, const rhi::Device& device) {
@@ -467,6 +491,26 @@ core::Result<Settings> read_settings(const core::Config& config, const rhi::Devi
                                              k_max_lights, k_module_name));
         }
         settings.max_lights = static_cast<std::uint32_t>(*max_lights);
+    }
+    if (const std::optional<bool> bloom = config.get_bool("renderer.bloom")) {
+        settings.bloom = *bloom;
+    } else if (config.contains("renderer.bloom")) {
+        return setting_error("Setting 'renderer.bloom' must be true or false");
+    }
+    const double intensity =
+        config.get_float("renderer.bloom_intensity").value_or(settings.bloom_intensity);
+    if (!(intensity >= 0.0 && intensity <= 10.0)) {
+        return setting_error("Setting 'renderer.bloom_intensity' must be from 0 to 10");
+    }
+    settings.bloom_intensity = static_cast<float>(intensity);
+    const double threshold =
+        config.get_float("renderer.bloom_threshold").value_or(settings.bloom_threshold);
+    if (!(threshold >= 0.0 && threshold <= 100.0)) {
+        return setting_error("Setting 'renderer.bloom_threshold' must be from 0 to 100");
+    }
+    settings.bloom_threshold = static_cast<float>(threshold);
+    if (!settings.hdr_format.has_value()) {
+        settings.bloom = false;
     }
     return settings;
 }
@@ -646,6 +690,11 @@ struct Pipelines {
     OwnedPipeline shadow_skinned;        // Only with shadows.
     OwnedPipeline shadow_masked_skinned; // Only with shadows.
     OwnedPipeline tone_map;      // Only with HDR.
+    // The environment behind the scene (ADR 0040).
+    OwnedPipeline sky;
+    // Bloom's halving and adding back, only with HDR (ADR 0040).
+    OwnedPipeline bloom_down;
+    OwnedPipeline bloom_up;
 };
 
 class ForwardRenderer final : public SceneRenderer {
@@ -665,6 +714,7 @@ public:
         m_particle_indices.reset();
         m_hdr_color.reset();
         m_hdr_depth.reset();
+        m_bloom.clear();
     }
 
     core::Result<void> start(rhi::Device& device) override {
@@ -758,7 +808,12 @@ public:
                            ? std::format("; simpler versions of parts within {} pixels",
                                          m_settings.lod_error)
                            : std::string("; parts are always drawn in full");
-        description += "; materials are metallic-roughness PBR with normal maps";
+        description += "; materials are metallic-roughness PBR with normal maps, lit by the "
+                       "environment when the scene has one";
+        description += m_settings.bloom ? std::format("; bloom above {} at {}",
+                                                      m_settings.bloom_threshold,
+                                                      m_settings.bloom_intensity)
+                                        : std::string("; no bloom");
         if (m_light_texture.exists()) {
             description += std::format(
                 "; up to {} point and spot lights{}", m_settings.max_lights,
@@ -825,6 +880,11 @@ private:
     // particles farthest first, then additive ones.
     void draw_particles(rhi::CommandList& commands, const Frame& frame, FrameStats& stats);
     void draw_ui(rhi::CommandList& commands, const Frame& frame, FrameStats& stats);
+    // Draws the environment behind everything, into the pass begun. Says whether it drew.
+    bool draw_sky(rhi::CommandList& commands, const Frame& frame);
+    // Adds the glow of the HDR target's brightest light back into it, between its pass and tone
+    // mapping.
+    void draw_bloom(rhi::CommandList& commands);
 
     core::Config m_config;
     rhi::Device* m_device = nullptr;
@@ -856,6 +916,9 @@ private:
     std::vector<SpriteInstance> m_sprite_instances;
     OwnedTexture m_hdr_color;
     OwnedTexture m_hdr_depth;
+    // Bloom's images, each half the size of the last, starting at half the HDR target's.
+    std::vector<OwnedTexture> m_bloom;
+    std::vector<platform::SurfaceSize> m_bloom_sizes;
     platform::SurfaceSize m_hdr_size;
     // What prepare_meshes works out for each part this frame, reused between frames.
     struct Chosen {
@@ -1293,7 +1356,69 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
             return tone_map.error();
         }
         made.tone_map = std::move(tone_map).value();
+
+        if (m_settings.bloom) {
+            for (const auto& [name, blend, out] :
+                 {std::tuple{"bloom_down", rhi::BlendMode::Opaque, &made.bloom_down},
+                  std::tuple{"bloom_up", rhi::BlendMode::PremultipliedAlpha, &made.bloom_up}}) {
+                const core::Result<rhi::ShaderHandle> vertex_shader =
+                    shader(std::format("{}.vert", name), rhi::ShaderStage::Vertex);
+                if (!vertex_shader.has_value()) {
+                    return vertex_shader.error();
+                }
+                const core::Result<rhi::ShaderHandle> fragment_shader =
+                    shader(std::format("{}.frag", name), rhi::ShaderStage::Fragment);
+                if (!fragment_shader.has_value()) {
+                    return fragment_shader.error();
+                }
+                core::Result<OwnedPipeline> bloom = pipeline(rhi::PipelineDesc{
+                    .vertex_shader = vertex_shader.value(),
+                    .fragment_shader = fragment_shader.value(),
+                    .vertex_stride = sizeof(ScreenVertex),
+                    .attributes = k_screen_attributes,
+                    .blend = blend,
+                    .depth_test = false,
+                    .cull = rhi::CullMode::None,
+                    .color_target = hdr,
+                });
+                if (!bloom.has_value()) {
+                    return bloom.error();
+                }
+                *out = std::move(bloom).value();
+            }
+        }
     }
+
+    const core::Result<rhi::ShaderHandle> sky_vertex =
+        shader("sky.vert", rhi::ShaderStage::Vertex);
+    if (!sky_vertex.has_value()) {
+        return sky_vertex.error();
+    }
+    const core::Result<rhi::ShaderHandle> sky_fragment =
+        shader("sky.frag", rhi::ShaderStage::Fragment);
+    if (!sky_fragment.has_value()) {
+        return sky_fragment.error();
+    }
+    constexpr std::array k_sky_attributes{
+        rhi::VertexAttribute{0, rhi::VertexFormat::Float2, offsetof(ScreenVertex, position)},
+        rhi::VertexAttribute{1, rhi::VertexFormat::Float2, offsetof(ScreenVertex, uv)},
+    };
+    core::Result<OwnedPipeline> sky = pipeline(rhi::PipelineDesc{
+        .vertex_shader = sky_vertex.value(),
+        .fragment_shader = sky_fragment.value(),
+        .vertex_stride = sizeof(ScreenVertex),
+        .attributes = k_sky_attributes,
+        // Behind everything, so only pixels nothing covers are shaded.
+        .depth_test = true,
+        .depth_write = false,
+        .cull = rhi::CullMode::None,
+        .color_target = hdr,
+        .depth_target = hdr.has_value() ? std::optional(k_depth_format) : std::nullopt,
+    });
+    if (!sky.has_value()) {
+        return sky.error();
+    }
+    made.sky = std::move(sky).value();
     return made;
 }
 
@@ -1328,6 +1453,95 @@ void ForwardRenderer::fit_hdr_targets(platform::SurfaceSize size) {
         return;
     }
     m_hdr_size = size;
+
+    m_bloom.clear();
+    m_bloom_sizes.clear();
+    if (m_settings.bloom) {
+        // The first image is a quarter of the scene's size, which halves bloom's cost on phones
+        // against starting at half, with no difference to see in a glow this soft.
+        platform::SurfaceSize level{size.width * 2, size.height * 2};
+        while (m_bloom.size() < k_max_bloom_levels && level.width >= 16 && level.height >= 16) {
+            level = platform::SurfaceSize{level.width / (m_bloom.empty() ? 8 : 2),
+                                          level.height / (m_bloom.empty() ? 8 : 2)};
+            const core::Result<rhi::TextureHandle> texture = m_device->create_texture(
+                rhi::TextureDesc{.width = level.width,
+                                 .height = level.height,
+                                 .format = *m_settings.hdr_format,
+                                 .render_target = true},
+                {});
+            if (!texture.has_value()) {
+                DREAM_LOG_WARNING("No bloom: {}", texture.error().message);
+                m_bloom.clear();
+                m_bloom_sizes.clear();
+                break;
+            }
+            m_bloom.emplace_back(*m_device, texture.value());
+            m_bloom_sizes.push_back(level);
+        }
+    }
+}
+
+bool ForwardRenderer::draw_sky(rhi::CommandList& commands, const Frame& frame) {
+    if (!frame.environment.has_value() || !frame.environment->background ||
+        !frame.environment->radiance.is_valid() || !m_pipelines->sky.exists()) {
+        return false;
+    }
+    const std::optional<Mat4> clip_to_world = core::inverse(frame.view->view_projection);
+    if (!clip_to_world.has_value()) {
+        return false;
+    }
+    const Environment& environment = *frame.environment;
+    const SkyConstants constants{
+        .clip_to_world = clip_to_world->columns,
+        .eye = extend(frame.view->eye, 1.0f),
+        .environment = Vec4{environment.intensity, 0.0f, std::cos(environment.rotation),
+                            std::sin(environment.rotation)}};
+    commands.bind_pipeline(m_pipelines->sky.get());
+    commands.bind_texture(k_environment_slot, environment.radiance);
+    commands.push_constants(std::as_bytes(std::span(&constants, 1)));
+    commands.draw_vertices(std::as_bytes(std::span(k_screen_triangle)),
+                           static_cast<std::uint32_t>(k_screen_triangle.size()));
+    return true;
+}
+
+void ForwardRenderer::draw_bloom(rhi::CommandList& commands) {
+    if (m_bloom.empty() || !m_pipelines->bloom_down.exists() || !m_pipelines->bloom_up.exists()) {
+        return;
+    }
+    DREAM_PROFILE_ZONE("Bloom");
+    const auto texel = [](platform::SurfaceSize size) {
+        return core::Vec2{1.0f / static_cast<float>(size.width),
+                          1.0f / static_cast<float>(size.height)};
+    };
+    const auto pass = [&](rhi::TextureHandle target, bool keep, rhi::PipelineHandle pipeline,
+                          rhi::TextureHandle source, Vec4 settings) {
+        commands.begin_render_pass(rhi::RenderTargets{
+            .color = target,
+            .clear_color = keep ? std::nullopt : std::optional(rhi::ClearColor{}),
+            .clear_depth = std::nullopt});
+        commands.bind_pipeline(pipeline);
+        commands.bind_texture(1, source);
+        const BloomConstants constants{.settings = settings};
+        commands.push_constants(std::as_bytes(std::span(&constants, 1)));
+        commands.draw_vertices(std::as_bytes(std::span(k_screen_triangle)),
+                               static_cast<std::uint32_t>(k_screen_triangle.size()));
+        commands.end_render_pass();
+    };
+    // Halving, from the scene down, keeping only what is above the threshold at the first step,
+    // which quarters it: its taps are twice as far apart, to cover the scene.
+    for (std::size_t level = 0; level < m_bloom.size(); ++level) {
+        const bool first = level == 0;
+        const core::Vec2 step = first ? texel(m_hdr_size) * 2.0f : texel(m_bloom_sizes[level - 1]);
+        pass(m_bloom[level].get(), false, m_pipelines->bloom_down.get(),
+             first ? m_hdr_color.get() : m_bloom[level - 1].get(),
+             Vec4{step.x, step.y, m_settings.bloom_threshold, first ? 1.0f : 0.0f});
+    }
+    // Each smaller image added to the next larger. Tone mapping adds the largest to the scene.
+    for (std::size_t level = m_bloom.size() - 1; level > 0; --level) {
+        const core::Vec2 step = texel(m_bloom_sizes[level]);
+        pass(m_bloom[level - 1].get(), true, m_pipelines->bloom_up.get(), m_bloom[level].get(),
+             Vec4{step.x, step.y, 1.0f, 0.0f});
+    }
 }
 
 void ForwardRenderer::prepare_meshes(const Frame& frame, bool boxes) {
@@ -1990,7 +2204,15 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
             .cascade_normal_offset = Vec4{},
             .shadow_settings = Vec4{},
             .camera_forward = Vec4{},
+            .environment = Vec4{},
         };
+        if (frame.environment.has_value() && frame.environment->radiance.is_valid()) {
+            const Environment& environment = *frame.environment;
+            values.environment =
+                Vec4{std::max(environment.intensity, 1e-6f),
+                     static_cast<float>(std::max(environment.levels, 2u) - 1),
+                     std::cos(environment.rotation), std::sin(environment.rotation)};
+        }
         if (frame.sun.has_value()) {
             const Sunlight& sun = *frame.sun;
             values.direction_to_light = extend(core::normalized(-sun.direction), 0.0f);
@@ -2065,6 +2287,9 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
         }
         commands.bind_pipeline(m_pipelines->forward.one_sided.get());
         commands.set_uniforms(uniform_bytes());
+        if (uniforms->environment.x > 0.0f) {
+            commands.bind_texture(k_environment_slot, frame.environment->radiance);
+        }
         if (shadows) {
             commands.bind_texture(rhi::k_shadow_slot, m_shadow_map.get());
         }
@@ -2076,6 +2301,10 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
         const core::Frustum* const bounds = camera_bounds ? &*camera_bounds : nullptr;
         draw_meshes(commands, frame.meshes, Pass::Opaque, bounds, stats);
         draw_meshes(commands, frame.meshes, Pass::Masked, bounds, stats);
+        // The environment where no opaque surface is, before what blends over it.
+        if (draw_sky(commands, frame)) {
+            commands.set_uniforms(uniform_bytes());
+        }
         draw_meshes(commands, frame.meshes, Pass::Blend, bounds, stats);
         draw_particles(commands, frame, stats);
     };
@@ -2086,15 +2315,32 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
                                                       .clear_color = frame.clear_color});
         draw_lit_scene();
         commands.end_render_pass();
+        const bool bloom = m_settings.bloom && !m_bloom.empty() &&
+                           m_pipelines->bloom_down.exists() && m_pipelines->bloom_up.exists();
+        if (bloom) {
+            draw_bloom(commands);
+        }
 
         commands.begin_render_pass(rhi::ClearColor{0.0f, 0.0f, 0.0f, 1.0f});
         {
             DREAM_PROFILE_ZONE("Tone mapping");
-            const ToneMapConstants constants{.settings = Vec4{
-                m_settings.exposure,
-                m_settings.tone_mapping == ToneMapping::PbrNeutral ? 1.0f : 0.0f, 0.0f, 0.0f}};
+            // The bloom's levels are added up, so its intensity is shared among them.
+            const float glow = bloom ? m_settings.bloom_intensity /
+                                           static_cast<float>(m_bloom.size())
+                                     : 0.0f;
+            const ToneMapConstants constants{
+                .settings = Vec4{m_settings.exposure,
+                                 m_settings.tone_mapping == ToneMapping::PbrNeutral ? 1.0f : 0.0f,
+                                 glow, 0.0f},
+                .bloom_texel =
+                    bloom ? Vec4{1.0f / static_cast<float>(m_bloom_sizes[0].width),
+                                 1.0f / static_cast<float>(m_bloom_sizes[0].height), 0.0f, 0.0f}
+                          : Vec4{}};
             commands.bind_pipeline(m_pipelines->tone_map.get());
             commands.bind_texture(1, m_hdr_color.get());
+            if (bloom) {
+                commands.bind_texture(3, m_bloom[0].get());
+            }
             commands.push_constants(std::as_bytes(std::span(&constants, 1)));
             commands.draw_vertices(std::as_bytes(std::span(k_screen_triangle)),
                                    static_cast<std::uint32_t>(k_screen_triangle.size()));

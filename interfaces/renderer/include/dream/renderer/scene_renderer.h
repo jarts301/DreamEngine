@@ -145,6 +145,23 @@ struct Sunlight {
     bool casts_shadows = true;
 };
 
+// The scene's surroundings (ADR 0040): an HDR image all around it, whose light every surface
+// receives from each side and shiny ones reflect, in place of the sun's flat ambient light.
+struct Environment {
+    // An equirectangular image, longitude across and latitude down with +Y up, in Rgba16Float, with
+    // `levels` mip levels: level 0 sharp, each next one as a rougher surface reflects it, fully
+    // rough at levels - 2, and at the last level what a matte surface receives from each side,
+    // cosine-weighted and divided by pi. runtime::EnvironmentAsset makes it.
+    rhi::TextureHandle radiance;
+    std::uint32_t levels = 1;
+    // Multiplies its light, in the sun's units: 1 keeps the image's values.
+    float intensity = 1.0f;
+    // How far it is turned around +Y, in radians.
+    float rotation = 0.0f;
+    // Whether it is drawn behind the scene, where nothing else is, in place of the clear color.
+    bool background = true;
+};
+
 // A light other than the sun (ADR 0037): a point that shines every way, or a spot that shines in a
 // cone. Neither casts shadows.
 enum class LightType : std::uint8_t { Point, Spot };
@@ -246,6 +263,8 @@ struct Frame {
     // Without a view, only the interface layers are drawn, over the clear color.
     std::optional<View> view;
     std::optional<Sunlight> sun;
+    // Without one, the sun's ambient light lights the scene evenly from every side.
+    std::optional<Environment> environment;
     // Point and spot lights. A renderer may draw only some, such as the nearest, when there are
     // more than it takes.
     std::span<const Light> lights;

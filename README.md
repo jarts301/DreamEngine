@@ -135,6 +135,22 @@ itself only with the lights that reach it; `forward` takes the 16 nearest. They 
 yet. [Lighting](docs/guides/lighting.md) explains placing lights and how bright to make them, and
 [ADR 0037](docs/adr/0037-point-and-spot-lights.md) records the design.
 
+## Environment lighting and bloom
+
+An `environment` lights the whole scene from an HDR image of its surroundings, which shiny metals
+and glass reflect and which can be drawn as the sky; bloom makes light brighter than the screen
+glow:
+
+```toml
+[entities.sky.environment]
+map = "assets:/environments/sky.hdr"
+intensity = 0.8
+```
+
+The render demo's yard has a generated sky. [Environment lighting and bloom](docs/guides/environment.md)
+explains finding images, brightness and tuning bloom, and
+[ADR 0040](docs/adr/0040-environment-lighting-and-bloom.md) records the design.
+
 ## Particles
 
 With `particles = ["cpu", "null"]` listed and a `runtime::Particles` updated each frame, a

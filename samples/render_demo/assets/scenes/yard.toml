@@ -16,6 +16,12 @@ color = [1.0, 0.95, 0.85]
 intensity = 1.3
 ambient = 0.3
 
+# The sky all around, lighting everything from each side and reflected in shiny surfaces (see
+# docs/guides/environment.md). It replaces the sun's flat ambient light.
+[entities.sky.environment]
+map = "assets:/environments/sky.hdr"
+intensity = 0.8
+
 [entities.ground.transform]
 scale = [9.0, 1.0, 9.0]
 

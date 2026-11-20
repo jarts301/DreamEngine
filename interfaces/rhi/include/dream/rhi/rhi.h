@@ -57,10 +57,11 @@ enum class BufferUsage : std::uint8_t { Vertex, Index };
 // bottom edges covering pixels past them: BC7 is the PC's, and ASTC 4x4 the phone's. Only the Rgba8
 // formats work everywhere; see Device::supports_texture_format.
 //
-// The last three are for render targets only (TextureDesc::render_target): Rgba16Float is eight
-// bytes per pixel of half floats, Rg11B10Float four bytes of red, green and blue as small floats
-// with no alpha, both for colors brighter than 1, and Depth32Float a depth buffer that shaders can
-// read. See Device::supports_render_target.
+// Rgba16Float is eight bytes per pixel of half floats, for colors brighter than 1: a render target,
+// or a texture filled with its pixels and filtered, such as the environment (ADR 0040), every level
+// given, as it makes no mipmaps of its own. Rg11B10Float, four bytes of red, green and blue as small
+// floats with no alpha, and Depth32Float, a depth buffer that shaders can read, are for render
+// targets only (TextureDesc::render_target). See Device::supports_render_target.
 //
 // Rgba32Float is sixteen bytes per pixel of full floats, for data that shaders read texel by texel,
 // such as lights (ADR 0037), never filtered: Slang's Texture2D.Load, or texelFetch. Every device
@@ -89,8 +90,7 @@ enum class TextureFormat : std::uint8_t {
 
 // The formats a texture can have only as a render target, never filled with pixels.
 [[nodiscard]] constexpr bool is_render_target_only(TextureFormat format) noexcept {
-    return format == TextureFormat::Rgba16Float || format == TextureFormat::Rg11B10Float ||
-           format == TextureFormat::Depth32Float;
+    return format == TextureFormat::Rg11B10Float || format == TextureFormat::Depth32Float;
 }
 
 [[nodiscard]] constexpr bool is_srgb(TextureFormat format) noexcept {
@@ -199,7 +199,8 @@ texture_problem(const TextureDesc& desc, std::size_t pixel_bytes) noexcept {
 [[nodiscard]] constexpr bool generates_mipmaps(const TextureDesc& desc) noexcept {
     return desc.generate_mipmaps && !desc.render_target && !desc.dynamic && desc.mip_levels == 1 &&
            !is_compressed(desc.format) && !is_render_target_only(desc.format) &&
-           desc.format != TextureFormat::Rgba32Float && (desc.width > 1 || desc.height > 1);
+           desc.format != TextureFormat::Rgba32Float && desc.format != TextureFormat::Rgba16Float &&
+           (desc.width > 1 || desc.height > 1);
 }
 
 enum class ShaderStage : std::uint8_t { Vertex, Fragment };
@@ -222,11 +223,18 @@ enum class CullMode : std::uint8_t { None, Back, Front };
 // | 1 | linear, clamped to the edge | set 0, binding 2 | t1, s1 | texture unit 2 |
 // | 2 | depth comparison, less or equal, linear, clamped | set 0, binding 3 | t2, s2 | texture unit 3 |
 // | 3 to 6 | linear, mipmaps, repeating | set 0, bindings 4 to 7 | t3 to t6, s3 to s6 | texture units 4 to 7 |
+// | 7 | linear, mipmaps, repeating | set 0, binding 9 | t7, s7 | texture unit 9 |
 //
 // Slot 2 takes a Depth32Float texture, read with a shader's shadow sampler: Sampler2DShadow in
-// Slang. Slots 3 to 6 are for a material's other textures, such as its normal map.
-inline constexpr std::uint32_t k_texture_slots = 7;
+// Slang. Slots 3 to 6 are for a material's other textures, such as its normal map. Slot 7 is for
+// the scene's environment (ADR 0040); binding 8 was already the per-draw block's, so it skips it.
+inline constexpr std::uint32_t k_texture_slots = 8;
 inline constexpr std::uint32_t k_shadow_slot = 2;
+
+// The Vulkan binding, and OpenGL texture unit, of a texture slot's texture.
+[[nodiscard]] constexpr std::uint32_t texture_binding(std::uint32_t slot) noexcept {
+    return slot < 7 ? slot + 1 : slot + 2;
+}
 
 // How a slot's sampler reads its texture.
 enum class SlotSampler : std::uint8_t { Repeat, Clamp, ShadowCompare };
