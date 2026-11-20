@@ -5,6 +5,7 @@
 #include "dream/core/profile.h"
 #include "dream/runtime/animation.h"
 #include "dream/runtime/app.h"
+#include "dream/runtime/environment.h"
 #include "dream/runtime/particles.h"
 #include "dream/runtime/sprites.h"
 #include "dream/runtime/texture.h"
@@ -593,6 +594,7 @@ core::Result<void> Renderer::initialize(App& app,
     app.scenes().register_component("point_light", &read_point_light);
     app.scenes().register_component("spot_light", &read_spot_light);
     register_sprite_components(app.scenes());
+    register_environment(app.scenes(), app.assets(), *device);
     return {};
 }
 
@@ -612,6 +614,20 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
                                     .eye = camera->eye,
                                     .z_near = camera->z_near,
                                     .z_far = camera->z_far};
+
+        // The first environment lights the scene from its surroundings (ADR 0040).
+        const auto environments = world.registry().view<const EnvironmentLight>();
+        if (const Entity sky = environments.front(); sky != k_no_entity) {
+            const EnvironmentLight& light = environments.get<const EnvironmentLight>(sky);
+            if (light.map) {
+                frame.environment = renderer::Environment{
+                    .radiance = light.map->radiance.get(),
+                    .levels = light.map->levels,
+                    .intensity = light.intensity,
+                    .rotation = core::radians(light.rotation_degrees),
+                    .background = light.background};
+            }
+        }
 
         const auto lights = world.registry().view<const DirectionalLight>();
         if (const Entity light_entity = lights.front(); light_entity != k_no_entity) {

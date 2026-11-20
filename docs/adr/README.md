@@ -44,6 +44,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0037](0037-point-and-spot-lights.md) | Point and spot lights, sorted into clusters on the CPU, in `forward` and `forward_plus` |
 | [0038](0038-particles.md) | Particles: a `particles` interface simulated on the CPU, drawn as camera-facing squares |
 | [0039](0039-sprites-and-tile-maps.md) | 2D sprites, sprite-sheet animation and tile maps, drawn by the renderer modules over the scene |
+| [0040](0040-environment-lighting-and-bloom.md) | Environment lighting from prefiltered HDR images, an eighth texture slot, half-float textures, and bloom |
 
 ## Template
 

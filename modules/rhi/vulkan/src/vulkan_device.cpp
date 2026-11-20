@@ -435,6 +435,7 @@ public:
         case TextureFormat::Astc4x4Unorm:
             return m_has_astc && can_sample(to_vulkan(format));
         case TextureFormat::Rgba16Float:
+            return can_sample(to_vulkan(format));
         case TextureFormat::Rg11B10Float:
         case TextureFormat::Depth32Float:
             return false;
@@ -1248,8 +1249,9 @@ private:
             std::max<VkDeviceSize>(properties.limits.minUniformBufferOffsetAlignment, 1);
         create_timestamps(properties);
 
-        // One layout for every pipeline: a uniform block, a texture per slot at bindings 1 to 7
-        // (ADR 0027, 0033), the per-draw block at binding 8 (ADR 0036), and push constants.
+        // One layout for every pipeline: a uniform block, a texture per slot at bindings 1 to 7 and
+        // 9 (ADR 0027, 0033, 0040), the per-draw block at binding 8 (ADR 0036), and push
+        // constants.
         std::array<VkDescriptorSetLayoutBinding, 2 + k_texture_slots> bindings{};
         bindings[0] = VkDescriptorSetLayoutBinding{
             .binding = 0,
@@ -1259,13 +1261,14 @@ private:
         };
         for (std::uint32_t slot = 0; slot < k_texture_slots; ++slot) {
             bindings[1 + slot] = VkDescriptorSetLayoutBinding{
-                .binding = 1 + slot,
+                .binding = texture_binding(slot),
                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             };
         }
-        static_assert(1 + k_texture_slots == k_draw_uniform_binding);
+        static_assert(texture_binding(6) + 1 == k_draw_uniform_binding &&
+                      texture_binding(7) == k_draw_uniform_binding + 1);
         bindings[1 + k_texture_slots] = VkDescriptorSetLayoutBinding{
             .binding = k_draw_uniform_binding,
             .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
@@ -2547,7 +2550,7 @@ private:
                 writes[1 + slot] = VkWriteDescriptorSet{
                     .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                     .dstSet = set,
-                    .dstBinding = 1 + slot,
+                    .dstBinding = texture_binding(slot),
                     .descriptorCount = 1,
                     .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                     .pImageInfo = &images[slot],

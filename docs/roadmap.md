@@ -126,7 +126,7 @@ saved progress, music and settings, built this way and played on PC and phones.
 | Area | Available now |
 |---|---|
 | Platforms | Windows, and Android phones (arm64, Android 10 and up). Linux builds but is untested. |
-| Graphics | Five graphics APIs; the same picture on each. glTF models, static or skinned and animated, with metallic-roughness PBR materials, normal, occlusion and emissive maps, and opaque, cut-out, blended and double-sided surfaces; one directional light with soft cascaded shadows, and point and spot lights, up to 256 with `forward_plus`; HDR with PBR Neutral tone mapping; frustum culling, instancing and levels of detail made as models load; particles; 2D sprites, sprite-sheet animation and tile maps, with crisp pixel art; debug lines. |
+| Graphics | Five graphics APIs; the same picture on each. glTF models, static or skinned and animated, with metallic-roughness PBR materials, normal, occlusion and emissive maps, and opaque, cut-out, blended and double-sided surfaces; one directional light with soft cascaded shadows, and point and spot lights, up to 256 with `forward_plus`; lighting from an HDR environment, which shiny surfaces reflect; HDR with PBR Neutral tone mapping and bloom; frustum culling, instancing and levels of detail made as models load; particles; 2D sprites, sprite-sheet animation and tile maps, with crisp pixel art; debug lines. |
 | Textures | PNG cooked to KTX2, sent to the GPU as BC7 on PC and ASTC on phones. |
 | Physics | 3D (Jolt or the engine's own impulse solver): bodies, joints, triggers, ray casts. 2D (Box2D or Chipmunk). |
 | Audio | WAV, MP3 and FLAC; streamed music; buses with volumes; sounds placed in 3D. |
@@ -143,8 +143,8 @@ static props, prototypes and game jams.
 Not yet possible without writing engine code first:
 - **Characters:** root motion, animation events, inverse kinematics, blend trees, facial morph
   targets and ragdolls (skeletal animation with fades between clips exists).
-- **Rendering:** environment lighting (materials are PBR, but reflect only the sun and a flat
-  ambient), bloom, shadows from point and spot lights, visual effects beyond particles, very
+- **Rendering:** reflection probes for interiors (one environment lights the whole scene),
+  shadows from point and spot lights, visual effects beyond particles, very
   large worlds (culling, instancing and LODs exist, but no streaming or spatial structures).
 - **2D:** levels from Tiled, parallax backgrounds, animated tiles and lit sprites (sprites, sprite
   sheets, tile maps and tile collisions exist).
@@ -157,7 +157,6 @@ Not yet possible without writing engine code first:
 
 | Need | Why it matters | As a module |
 |---|---|---|
-| Environment lighting and bloom | Shiny metals and glass reflect their surroundings, and glowing surfaces glow | In `forward`: image-based lighting, reflection probes and a bloom pass |
 | Spatial structures and streaming | Very large worlds | A `visibility` interface, with `asset_source` streaming below |
 | Localization | Stores expect several languages; Play and the App Store list them | `localization`: `fluent` or `gettext`-style files, `null` |
 | Accessibility | Platform reviews and players ask for it: text size, colour-blind modes, subtitles, remapping | Settings over existing modules |
@@ -171,7 +170,8 @@ maps, tangents from `tangent_generator` (ADR 0033); transparent, cut-out and dou
 (ADR 0032); gamepads through `input_device` (ADR 0035); skeletal animation through `animation`:
 `ozz`, `null`, with GPU skinning (ADR 0036); point and spot lights in `forward` and
 `forward_plus` (ADR 0037); particles through `particles`: `cpu`, `null` (ADR 0038); 2D sprites,
-sprite-sheet animation and tile maps with collisions, drawn by `forward` (ADR 0039).
+sprite-sheet animation and tile maps with collisions, drawn by `forward` (ADR 0039); environment
+lighting from HDR images and bloom (ADR 0040).
 
 ### 3.2 Tools
 
@@ -239,8 +239,9 @@ and the remaining platforms.
   materials (ADR 0034), gamepads (ADR 0035, with a [guide](guides/input.md)), skeletal
   animation (ADR 0036, with a [guide](guides/animation.md)), and point and spot lights with
   `forward_plus` (ADR 0037, with a [guide](guides/lighting.md)), particles (ADR 0038, with a
-  [guide](guides/particles.md)), and 2D sprites and tile maps (ADR 0039, with a
-  [guide](guides/sprites.md) and `samples/platformer`).
+  [guide](guides/particles.md)), 2D sprites and tile maps (ADR 0039, with a
+  [guide](guides/sprites.md) and `samples/platformer`), and environment lighting and bloom
+  (ADR 0040, with a [guide](guides/environment.md)).
 - **Next, in order:**
   1. 2D, after ADR 0039: tile maps from Tiled files (a JSON reader), animated tiles, parallax
      backgrounds, 9-slice sprites, atlases packed at build time, sorting by Y for top-down games,
@@ -255,8 +256,8 @@ and the remaining platforms.
   5. Gamepads, after ADR 0035: focus navigation in `ui` menus, an on-screen aiming cursor for
      pointer-aimed games such as Toppler, rebinding in a settings menu, and a check with a real
      gamepad on a phone.
-  6. Materials, after ADR 0033 and 0034: environment lighting (image-based, with reflection
-     probes), bloom, order-independent transparency, antialiased cut-outs, reading `.gltf` files
+  6. Materials, after ADR 0033, 0034 and 0040: reflection probes for interiors, environments
+     prepared at build time, order-independent transparency, antialiased cut-outs, reading `.gltf` files
      so Blender's images are cooked, and half-precision lighting math for phones (PBR costs 1.4 ms
      of GPU time per frame on the A52s at full screen; see the Android performance report).
   7. Smaller items: blending between shadow cascades, a frame-rate cap, removing the ~13
@@ -392,8 +393,7 @@ of simulated latency and 5% packet loss, and the match stays in sync.
 The engine can already ship small, polished 3D games on Windows and Android phones, built from
 modules that swap through configuration, and with the testing, profiling and crash tooling
 professional work needs. Before a commercial release on Steam or Google Play, it most needs:
-- environment lighting, bloom and shadows from point and spot lights, and gamepad navigation in
-  menus;
+- shadows from point and spot lights, reflection probes, and gamepad navigation in menus;
 - a settings menu, localization and store services;
 - release packaging: AAB and real signing on Android, depots on Steam;
 - an installable SDK and an editor.

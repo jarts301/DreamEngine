@@ -43,7 +43,10 @@ entities with a `ParticleEmitter`, which needs `particles` listed
 ([ADR 0038](../docs/adr/0038-particles.md), and the [particles guide](../docs/guides/particles.md)).
 `dream/runtime/sprites.h` has the 2D camera, sprites, sprite animators and tile maps, which the
 renderer draws and its scene components set up ([ADR 0039](../docs/adr/0039-sprites-and-tile-maps.md),
-and the [2D games guide](../docs/guides/sprites.md)).
+and the [2D games guide](../docs/guides/sprites.md)). An `environment` component
+(`dream/runtime/environment.h`) lights the scene from an HDR image
+([ADR 0040](../docs/adr/0040-environment-lighting-and-bloom.md), and the
+[environment guide](../docs/guides/environment.md)).
 [samples/physics_demo](../samples/physics_demo/src/physics_demo.cpp) adds 3D and 2D physics with
 `runtime::Physics3D` and `runtime::Physics2D`, which need `physics3d` or `physics2d` listed under
 `[modules.<platform>]`.

@@ -951,3 +951,89 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer draws sprite batches in order, 
     CHECK(sprites->blend == rhi::BlendMode::Alpha);
     CHECK_FALSE(sprites->depth_test);
 }
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer adds bloom between the HDR scene and tone mapping") {
+    state.render_target_formats = {rhi::TextureFormat::Rg11B10Float,
+                                   rhi::TextureFormat::Depth32Float};
+    SUBCASE("on, by default") {
+        start("[renderer.shadows]\nmode = \"off\"");
+        const std::array meshes{mesh(0)};
+        const Calls calls =
+            draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes});
+        // The scene's pass, five images from a quarter of it, 200 x 150, halving down to 12 x 9,
+        // and four additions back, the last one in tone mapping, which reads the largest at slot 3.
+        const auto passes = std::ranges::count(calls, std::string("render_targets"));
+        CHECK(passes == 1 + 5 + 4);
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> sizes;
+        for (const rhi::TextureDesc& desc : state.textures) {
+            if (desc.render_target && desc.width < k_size.width) {
+                sizes.emplace_back(desc.width, desc.height);
+            }
+        }
+        CHECK(sizes.front() == std::pair<std::uint32_t, std::uint32_t>{200, 150});
+        CHECK(sizes.back() == std::pair<std::uint32_t, std::uint32_t>{12, 9});
+        // Then the tone mapping, which draws one triangle into the window.
+        const auto last_pass =
+            std::find(calls.rbegin(), calls.rend(), std::string("render_targets"));
+        CHECK(std::find(calls.rbegin(), last_pass, std::string("vertices 3")) != last_pass);
+    }
+    SUBCASE("off") {
+        start("[renderer]\nbloom = false\n[renderer.shadows]\nmode = \"off\"");
+        const std::array meshes{mesh(0)};
+        const Calls calls =
+            draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes});
+        CHECK(std::ranges::count(calls, std::string("render_targets")) == 1);
+    }
+}
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer checks its bloom settings") {
+    CHECK_FALSE(make("[renderer]\nbloom = \"yes\"").value()->start(device).has_value());
+    CHECK_FALSE(make("[renderer]\nbloom_intensity = -1.0").value()->start(device).has_value());
+    CHECK_FALSE(make("[renderer]\nbloom_threshold = 500.0").value()->start(device).has_value());
+}
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer lights the scene from its environment") {
+    start();
+    const std::array meshes{mesh(0)};
+    const rhi::TextureHandle sky{.index = 9, .generation = 1};
+    SUBCASE("with the environment behind the scene") {
+        const Calls calls = draw(Frame{.size = k_size,
+                                       .view = view_from({0, 0, 5}),
+                                       .environment = Environment{.radiance = sky,
+                                                                  .levels = 6,
+                                                                  .intensity = 0.5f,
+                                                                  .rotation = 0.0f},
+                                       .meshes = meshes});
+        // The model, then the sky's triangle behind it, with the environment at slot 7.
+        const auto sky_draw = first(calls, "vertices 3");
+        const auto model = first(calls, "draw 0+3");
+        REQUIRE(sky_draw < static_cast<std::ptrdiff_t>(calls.size()));
+        CHECK(model < sky_draw);
+        CHECK(std::ranges::find(calls, "bind_texture 9 at 7") != calls.end());
+        // The uniforms' last four floats: intensity, the last level, and the rotation.
+        std::array<float, 4> environment{};
+        REQUIRE(state.last_uniforms.size() == 512);
+        std::memcpy(environment.data(), state.last_uniforms.data() + 496, 16);
+        CHECK(environment[0] == Approx(0.5f));
+        CHECK(environment[1] == Approx(5.0f));
+        CHECK(environment[2] == Approx(1.0f));
+    }
+    SUBCASE("without its background") {
+        const Calls calls = draw(Frame{.size = k_size,
+                                       .view = view_from({0, 0, 5}),
+                                       .environment = Environment{.radiance = sky,
+                                                                  .levels = 6,
+                                                                  .background = false},
+                                       .meshes = meshes});
+        CHECK(first(calls, "vertices 3") == static_cast<std::ptrdiff_t>(calls.size()));
+        CHECK(std::ranges::find(calls, "bind_texture 9 at 7") != calls.end());
+    }
+    SUBCASE("without an environment") {
+        const Calls calls =
+            draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes});
+        CHECK(std::ranges::find(calls, "bind_texture 9 at 7") == calls.end());
+        std::array<float, 4> environment{};
+        std::memcpy(environment.data(), state.last_uniforms.data() + 496, 16);
+        CHECK(environment[0] == Approx(0.0f));
+    }
+}
