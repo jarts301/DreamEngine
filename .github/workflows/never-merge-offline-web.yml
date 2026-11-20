@@ -1,0 +1,40 @@
+name: Never merge offline-web
+
+# The offline-web branch (ADR 0039) removes most of the engine and must never be merged into main.
+# This check fails on any pull request or push to main that brings it in: its marker file,
+# OFFLINE_WEB_BRANCH.md, or its first commit. Make it a required check of main's branch protection
+# so GitHub refuses such a merge, as tools/git-hooks/README.md describes.
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+jobs:
+  guard:
+    name: offline-web stays out of main
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Refuse the offline-web branch
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+          OFFLINE_WEB_FIRST_COMMIT: 1c97bd61a1694ac06d3c2cf42255fa26327c1001
+        run: |
+          if [ "$HEAD_BRANCH" = "offline-web" ]; then
+            echo "::error::offline-web must never be merged into main (OFFLINE_WEB_BRANCH.md)."
+            exit 1
+          fi
+          if [ -e OFFLINE_WEB_BRANCH.md ]; then
+            echo "::error::This brings in OFFLINE_WEB_BRANCH.md: offline-web must never be merged into main."
+            exit 1
+          fi
+          if git cat-file -e "$OFFLINE_WEB_FIRST_COMMIT" 2>/dev/null &&
+             git merge-base --is-ancestor "$OFFLINE_WEB_FIRST_COMMIT" HEAD; then
+            echo "::error::This contains offline-web's first commit: offline-web must never be merged into main."
+            exit 1
+          fi
+          echo "No offline-web history here."
