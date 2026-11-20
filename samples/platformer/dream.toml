@@ -1,0 +1,34 @@
+[app]
+organization = "DreamEngine"
+name = "DreamPlatformer"
+title = "Dream Platformer"
+width = 1280
+height = 720
+
+[input.actions]
+move_left = ["key:a", "key:left", "gamepad:left_stick_left", "gamepad:dpad_left"]
+move_right = ["key:d", "key:right", "gamepad:left_stick_right", "gamepad:dpad_right"]
+jump = ["key:space", "key:w", "key:up", "gamepad:south"]
+touch = ["touch", "mouse:left"]
+quit = ["key:escape", "gamepad:back"]
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
+renderer = ["forward", "null"]
+physics2d = ["box2d", "chipmunk"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "opengles", "null"]
+renderer = ["forward", "null"]
+physics2d = ["box2d"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "null"]
+renderer = ["forward", "null"]
+physics2d = ["box2d"]

@@ -900,3 +900,54 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer draws no particles without a vi
     CHECK(stats.particles == 0);
     CHECK(std::ranges::find(calls, "draw 0+6 x1") == calls.end());
 }
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer draws sprite batches in order, without a 3D view") {
+    start();
+    const std::array back{SpriteQuad{.position = {1.0f, 2.0f}, .size = {3.0f, 4.0f}}};
+    const std::array front{
+        SpriteQuad{.rotation = 1.5707963f, .uv = {0.5f, 0.0f, 0.0f, 1.0f}},
+        SpriteQuad{},
+    };
+    const std::array batches{
+        SpriteBatch{.sprites = back,
+                    .texture = rhi::TextureHandle{.index = 5, .generation = 1},
+                    .texture_width = 32,
+                    .texture_height = 16},
+        SpriteBatch{.sprites = front, .filter = SpriteFilter::Smooth},
+    };
+    const std::array<LineVertex, 2> lines{};
+    FrameStats stats;
+    const Calls calls = draw(Frame{.size = k_size,
+                                   .sprite_view = core::orthographic(-5, 5, -5, 5, -1, 1),
+                                   .sprites = batches,
+                                   .lines = lines},
+                             &stats);
+    CHECK(stats.sprites == 3);
+    // A 2D game's debug lines use the 2D camera.
+    CHECK(stats.lines == 1);
+    const Calls drawn = only_drawing(calls);
+    const auto first_draw = std::ranges::find(drawn, "draw 0+6 x1");
+    const auto second_draw = std::ranges::find(drawn, "draw 0+6 x2");
+    REQUIRE(first_draw != drawn.end());
+    REQUIRE(second_draw != drawn.end());
+    CHECK(first_draw < second_draw);
+    CHECK(*(first_draw - 1) == "bind_texture 5");
+    CHECK(*(second_draw - 1) == "bind_texture 0");
+
+    // The last batch's instances: position and size, texture rectangle, color, pivot and turn.
+    std::vector<std::array<float, 16>> instances(state.last_instances.size() / 64);
+    std::memcpy(instances.data(), state.last_instances.data(), instances.size() * 64);
+    REQUIRE(instances.size() == 2);
+    CHECK(instances[0][4] == Approx(0.5f));
+    CHECK(instances[0][6] == Approx(0.0f));
+    CHECK(instances[0][12] == Approx(0.5f));
+    CHECK(instances[0][14] == Approx(0.0f).epsilon(0.001));
+    CHECK(instances[0][15] == Approx(1.0f));
+
+    const auto sprites = std::ranges::find_if(state.pipelines, [](const rhi::PipelineDesc& desc) {
+        return desc.instance_stride == 64;
+    });
+    REQUIRE(sprites != state.pipelines.end());
+    CHECK(sprites->blend == rhi::BlendMode::Alpha);
+    CHECK_FALSE(sprites->depth_test);
+}

@@ -34,6 +34,8 @@ struct FakeFrame {
     std::vector<renderer::MeshDraw> meshes;
     std::vector<renderer::Light> lights;
     std::vector<FakeParticleBatch> particles;
+    std::optional<core::Mat4> sprite_view;
+    std::vector<std::vector<renderer::SpriteQuad>> sprites;
     std::vector<renderer::LineVertex> lines;
     std::vector<FakeUiLayer> ui_layers;
 };
@@ -74,6 +76,8 @@ public:
                        .meshes = {frame.meshes.begin(), frame.meshes.end()},
                        .lights = {frame.lights.begin(), frame.lights.end()},
                        .particles = {},
+                       .sprite_view = frame.sprite_view,
+                       .sprites = {},
                        .lines = {frame.lines.begin(), frame.lines.end()},
                        .ui_layers = {}};
         for (const renderer::ParticleBatch& batch : frame.particles) {
@@ -81,6 +85,9 @@ public:
                 FakeParticleBatch{.particles = {batch.particles.begin(), batch.particles.end()},
                                   .texture = batch.texture,
                                   .blend = batch.blend});
+        }
+        for (const renderer::SpriteBatch& batch : frame.sprites) {
+            copy.sprites.emplace_back(batch.sprites.begin(), batch.sprites.end());
         }
         renderer::FrameStats stats;
         stats.draws = static_cast<std::uint32_t>(frame.meshes.size());

@@ -1,0 +1,37 @@
+[app]
+window = "hidden"
+max_fps = 0
+
+[demo]
+script = true
+
+[input.actions]
+move_left = ["key:a"]
+move_right = ["key:d"]
+jump = ["key:space"]
+touch = ["touch"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["null"]
+renderer = ["forward"]
+physics2d = ["box2d"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["null"]
+renderer = ["forward"]
+physics2d = ["box2d"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["null"]
+renderer = ["forward"]
+physics2d = ["box2d"]
+
+[audio]
+muted = true

@@ -155,6 +155,30 @@ The render demo's yard has a campfire of flames, sparks and textured smoke.
 [Particles](docs/guides/particles.md) explains every setting and how to make common effects, and
 [ADR 0038](docs/adr/0038-particles.md) records the design.
 
+## 2D games
+
+Sprites, sprite sheets with animated clips, and tile maps written as rows of characters, all drawn
+through a 2D camera with pixel art kept crisp. Tile maps make their own 2D physics colliders:
+
+```toml
+[entities.hero.sprite]
+texture = "assets:/sprites/hero.png"
+columns = 4
+rows = 2
+
+[entities.level.tile_map]
+tileset = "assets:/sprites/tiles.png"
+solid = [0]
+rows = ["....##....", "##########"]
+
+[entities.level.tile_map.legend]
+"#" = 0
+```
+
+`samples/platformer` is a small 2D platformer with a tile map level, an animated hero, coins and
+touch controls. [2D games](docs/guides/sprites.md) explains sprites, animation, tile maps and making
+the art, and [ADR 0039](docs/adr/0039-sprites-and-tile-maps.md) records the design.
+
 ## Animation
 
 Skinned glTF models load with their skeleton and animations, and are skinned on the GPU on every

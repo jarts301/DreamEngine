@@ -14,6 +14,7 @@ dream_add_module(renderer forward
         shaders/tonemap.slang
         shaders/debug_lines.slang
         shaders/particles.slang
+        shaders/sprites.slang
         shaders/ui.slang
 )
 

@@ -41,6 +41,9 @@ the scene besides the sun; list `renderer = ["forward_plus", "forward", "null"]`
 [lighting guide](../docs/guides/lighting.md)). `runtime::Particles` moves particle effects on
 entities with a `ParticleEmitter`, which needs `particles` listed
 ([ADR 0038](../docs/adr/0038-particles.md), and the [particles guide](../docs/guides/particles.md)).
+`dream/runtime/sprites.h` has the 2D camera, sprites, sprite animators and tile maps, which the
+renderer draws and its scene components set up ([ADR 0039](../docs/adr/0039-sprites-and-tile-maps.md),
+and the [2D games guide](../docs/guides/sprites.md)).
 [samples/physics_demo](../samples/physics_demo/src/physics_demo.cpp) adds 3D and 2D physics with
 `runtime::Physics3D` and `runtime::Physics2D`, which need `physics3d` or `physics2d` listed under
 `[modules.<platform>]`.

@@ -14,6 +14,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace dream::runtime {
 
@@ -40,7 +41,21 @@ public:
     [[nodiscard]] core::Result<std::string> text(std::string_view key,
                                                  std::string_view fallback) const;
 
-    // Fails if the table has a setting not in `known`, which is usually a typo.
+    // A list of strings, or of numbers, which may be empty. Fails if the value isn't one.
+    [[nodiscard]] core::Result<std::vector<std::string>> strings(std::string_view key) const;
+    [[nodiscard]] core::Result<std::vector<float>> numbers(std::string_view key) const;
+
+    // The tables inside this one, by name, such as each clip of [entities.hero.animator.clips].
+    [[nodiscard]] std::vector<std::string> tables() const;
+    // The settings directly in this table, by name.
+    [[nodiscard]] std::vector<std::string> keys() const;
+    // A table inside this one, read the same way.
+    [[nodiscard]] ComponentData child(std::string_view key) const {
+        return ComponentData(m_config, full_key(key));
+    }
+
+    // Fails if the table has a setting or a table inside it not in `known`, which is usually a
+    // typo.
     [[nodiscard]] core::Result<void>
     check_keys(std::initializer_list<std::string_view> known) const;
 

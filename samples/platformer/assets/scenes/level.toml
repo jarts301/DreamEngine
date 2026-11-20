@@ -1,0 +1,190 @@
+# The platformer's level (see docs/guides/sprites.md): a tile map with its colliders, clouds in
+# a tile map behind it, the hero and coins. The map's bottom left corner is at the world's origin,
+# one world unit per 16-pixel tile.
+
+[entities.camera.transform]
+position = [8.0, 4.5, 0.0]
+
+[entities.camera.camera_2d]
+height = 9.0
+min_width = 12.0      # On a phone held upright, still 12 units across.
+
+[entities.sky.transform]
+position = [0.0, 5.0, 0.0]
+
+[entities.sky.tile_map]
+tileset = "assets:/sprites/tiles.png"
+layer = -1
+alpha = 0.9
+rows = [
+    "................................................",
+    "...........<>.............<>....................",
+    "..................<>..................<>........",
+    "................................................",
+]
+
+[entities.sky.tile_map.legend]
+"<" = 6
+">" = 7
+
+[entities.level.tile_map]
+tileset = "assets:/sprites/tiles.png"
+solid = [0, 1, 2, 3]
+rows = [
+    "................................................",
+    "................................................",
+    "................................................",
+    "..........................................BBB...",
+    "....................PPP..............BBB........",
+    "................................................",
+    "............PPPP..........BB....................",
+    ".........................BBBB...................",
+    "........................BBBBBB..............f...",
+    "...f..b.......f....b...BBBBBBBB....GGGG...GGGGGG",
+    "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG..DDDD...DDDDDD",
+    "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD..DDDD...DDDDDD",
+]
+
+[entities.level.tile_map.legend]
+G = 0
+D = 1
+B = 2
+P = 3
+b = 4
+f = 5
+
+[entities.hero.transform]
+position = [3.5, 2.45, 0.0]
+
+[entities.hero.sprite]
+texture = "assets:/sprites/hero.png"
+columns = 4
+rows = 2
+pivot = [0.5, 0.45]
+layer = 1
+
+[entities.hero.sprite_animator]
+clip = "idle"
+
+[entities.hero.sprite_animator.clips.idle]
+frames = [0, 1]
+fps = 2.0
+
+[entities.hero.sprite_animator.clips.run]
+frames = [2, 3, 4, 5]
+fps = 10.0
+
+[entities.hero.sprite_animator.clips.jump]
+frames = [6]
+
+[entities.hero.sprite_animator.clips.fall]
+frames = [7]
+
+[entities.hero.rigid_body_2d]
+shape = "capsule"
+radius = 0.3
+half_height = 0.15
+fixed_rotation = true
+friction = 0.0
+
+[entities.coin_0.transform]
+position = [8.5, 2.6, 0.0]
+
+[entities.coin_0.sprite]
+texture = "assets:/sprites/coin.png"
+columns = 4
+
+[entities.coin_0.sprite_animator]
+clip = "spin"
+time = 0.0
+
+[entities.coin_0.sprite_animator.clips.spin]
+frames = [0, 1, 2, 3]
+fps = 8.0
+
+[entities.coin_0.coin]
+
+[entities.coin_1.transform]
+position = [13.5, 6.6, 0.0]
+
+[entities.coin_1.sprite]
+texture = "assets:/sprites/coin.png"
+columns = 4
+
+[entities.coin_1.sprite_animator]
+clip = "spin"
+time = 0.1
+
+[entities.coin_1.sprite_animator.clips.spin]
+frames = [0, 1, 2, 3]
+fps = 8.0
+
+[entities.coin_1.coin]
+
+[entities.coin_2.transform]
+position = [21.5, 8.6, 0.0]
+
+[entities.coin_2.sprite]
+texture = "assets:/sprites/coin.png"
+columns = 4
+
+[entities.coin_2.sprite_animator]
+clip = "spin"
+time = 0.2
+
+[entities.coin_2.sprite_animator.clips.spin]
+frames = [0, 1, 2, 3]
+fps = 8.0
+
+[entities.coin_2.coin]
+
+[entities.coin_3.transform]
+position = [27.5, 7.6, 0.0]
+
+[entities.coin_3.sprite]
+texture = "assets:/sprites/coin.png"
+columns = 4
+
+[entities.coin_3.sprite_animator]
+clip = "spin"
+time = 0.3
+
+[entities.coin_3.sprite_animator.clips.spin]
+frames = [0, 1, 2, 3]
+fps = 8.0
+
+[entities.coin_3.coin]
+
+[entities.coin_4.transform]
+position = [37.5, 3.6, 0.0]
+
+[entities.coin_4.sprite]
+texture = "assets:/sprites/coin.png"
+columns = 4
+
+[entities.coin_4.sprite_animator]
+clip = "spin"
+time = 0.4
+
+[entities.coin_4.sprite_animator.clips.spin]
+frames = [0, 1, 2, 3]
+fps = 8.0
+
+[entities.coin_4.coin]
+
+[entities.coin_5.transform]
+position = [43.5, 9.6, 0.0]
+
+[entities.coin_5.sprite]
+texture = "assets:/sprites/coin.png"
+columns = 4
+
+[entities.coin_5.sprite_animator]
+clip = "spin"
+time = 0.5
+
+[entities.coin_5.sprite_animator.clips.spin]
+frames = [0, 1, 2, 3]
+fps = 8.0
+
+[entities.coin_5.coin]
