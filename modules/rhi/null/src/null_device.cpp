@@ -206,6 +206,17 @@ private:
         DREAM_VERIFY(data.size() <= k_max_draw_uniform_size, "Too many per-draw uniforms");
     }
 
+    void update_texture(TextureHandle texture, std::uint32_t first_row,
+                        std::span<const std::byte> rows) override {
+        DREAM_VERIFY(!m_in_pass, "Textures are updated between render passes");
+        const TextureInfo* const info = m_textures.get(handle_cast<TextureInfo>(texture));
+        DREAM_VERIFY(info != nullptr && info->desc.dynamic, "Updating a texture that isn't dynamic");
+        const std::size_t row_bytes = texture_level_bytes(info->desc.format, info->desc.width, 1);
+        DREAM_VERIFY(rows.size() % row_bytes == 0 &&
+                         first_row + rows.size() / row_bytes <= info->desc.height,
+                     "update_texture takes whole rows within the texture");
+    }
+
     void bind_texture(std::uint32_t slot, TextureHandle texture) override {
         DREAM_VERIFY(slot < k_texture_slots, "There is no such texture slot");
         if (!texture.is_valid()) {

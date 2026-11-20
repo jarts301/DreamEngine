@@ -156,6 +156,8 @@ std::string_view texture_format_name(rhi::TextureFormat format) noexcept {
         return "RGBA16 float";
     case rhi::TextureFormat::Rg11B10Float:
         return "R11G11B10 float";
+    case rhi::TextureFormat::Rgba32Float:
+        return "RGBA32 float";
     case rhi::TextureFormat::Depth32Float:
         return "Depth32 float";
     }

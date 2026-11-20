@@ -103,6 +103,8 @@ DXGI_FORMAT to_directx(TextureFormat format) {
     // Typeless, so it has a depth view to draw into and a float view to read.
     case TextureFormat::Depth32Float:
         return DXGI_FORMAT_R32_TYPELESS;
+    case TextureFormat::Rgba32Float:
+        return DXGI_FORMAT_R32G32B32A32_FLOAT;
     }
     return DXGI_FORMAT_UNKNOWN;
 }
@@ -173,6 +175,8 @@ struct TextureResource {
     ComPtr<ID3D11DepthStencilView> depth;
     TextureFormat format = TextureFormat::Rgba8Srgb;
     platform::SurfaceSize size;
+    // Its rows can be replaced with update_texture (ADR 0037).
+    bool dynamic = false;
 };
 
 // A graphics device on Direct3D 11, feature level 11.0, presenting with the DXGI flip model that
@@ -1020,7 +1024,8 @@ private:
             }
         } else {
             texture_desc.MipLevels = desc.mip_levels;
-            texture_desc.Usage = D3D11_USAGE_IMMUTABLE;
+            // A dynamic texture is updated by copies, which immutable ones refuse.
+            texture_desc.Usage = desc.dynamic ? D3D11_USAGE_DEFAULT : D3D11_USAGE_IMMUTABLE;
             result = m_device->CreateTexture2D(&texture_desc, levels.data(), &texture.texture);
         }
         if (FAILED(result)) {
@@ -1036,6 +1041,7 @@ private:
         }
         texture.format = desc.format;
         texture.size = {desc.width, desc.height};
+        texture.dynamic = desc.dynamic;
         return texture;
     }
 
@@ -1450,6 +1456,24 @@ private:
     void set_draw_uniforms(std::span<const std::byte> data) override {
         DREAM_VERIFY(data.size() <= k_max_draw_uniform_size, "Too many per-draw uniforms");
         write_dynamic(m_draw_uniform_buffer.Get(), data);
+    }
+
+    void update_texture(TextureHandle handle, std::uint32_t first_row,
+                        std::span<const std::byte> rows) override {
+        TextureResource* const texture = m_textures.get(handle_cast<TextureResource>(handle));
+        DREAM_VERIFY(texture != nullptr && texture->dynamic, "Updating a texture that isn't dynamic");
+        const std::size_t row_bytes = texture_level_bytes(texture->format, texture->size.width, 1);
+        const std::size_t row_count = rows.size() / row_bytes;
+        DREAM_VERIFY(row_count * row_bytes == rows.size() &&
+                         first_row + row_count <= texture->size.height,
+                     "update_texture takes whole rows within the texture");
+        if (row_count == 0) {
+            return;
+        }
+        const D3D11_BOX box{0, first_row, 0, texture->size.width,
+                            first_row + static_cast<UINT>(row_count), 1};
+        m_context->UpdateSubresource(texture->texture.Get(), 0, &box, rows.data(),
+                                     static_cast<UINT>(row_bytes), 0);
     }
 
     void bind_texture(std::uint32_t slot, TextureHandle handle) override {

@@ -61,6 +61,10 @@ enum class BufferUsage : std::uint8_t { Vertex, Index };
 // bytes per pixel of half floats, Rg11B10Float four bytes of red, green and blue as small floats
 // with no alpha, both for colors brighter than 1, and Depth32Float a depth buffer that shaders can
 // read. See Device::supports_render_target.
+//
+// Rgba32Float is sixteen bytes per pixel of full floats, for data that shaders read texel by texel,
+// such as lights (ADR 0037), never filtered: Slang's Texture2D.Load, or texelFetch. Every device
+// takes it.
 enum class TextureFormat : std::uint8_t {
     Rgba8Srgb,
     Rgba8Unorm,
@@ -71,6 +75,7 @@ enum class TextureFormat : std::uint8_t {
     Rgba16Float,
     Rg11B10Float,
     Depth32Float,
+    Rgba32Float,
 };
 
 [[nodiscard]] constexpr bool is_compressed(TextureFormat format) noexcept {
@@ -109,6 +114,10 @@ struct TextureDesc {
     // level and no pixels to start with: its contents are undefined until a pass clears or draws
     // into it. A depth format makes it a depth target, and any other a color target.
     bool render_target = false;
+
+    // A texture whose rows CommandList::update_texture replaces, as often as every frame
+    // (ADR 0037). One level, no mipmaps made, and never a render target.
+    bool dynamic = false;
 };
 
 // The size of one level of a texture, in pixels.
@@ -133,7 +142,9 @@ struct TextureDesc {
     if (is_compressed(format)) {
         return std::size_t{(width + 3) / 4} * ((height + 3) / 4) * 16;
     }
-    const std::size_t pixel_bytes = format == TextureFormat::Rgba16Float ? 8 : 4;
+    const std::size_t pixel_bytes = format == TextureFormat::Rgba32Float   ? 16
+                                    : format == TextureFormat::Rgba16Float ? 8
+                                                                           : 4;
     return std::size_t{width} * height * pixel_bytes;
 }
 
@@ -169,6 +180,9 @@ texture_problem(const TextureDesc& desc, std::size_t pixel_bytes) noexcept {
     if (is_render_target_only(desc.format)) {
         return "This format is only for render targets";
     }
+    if (desc.dynamic && (desc.mip_levels != 1 || is_compressed(desc.format))) {
+        return "A dynamic texture has one level and isn't compressed";
+    }
     if (desc.mip_levels == 0 || desc.mip_levels > full_mip_chain(desc.width, desc.height)) {
         return "A texture's mip levels must be from 1 down to 1x1 at most";
     }
@@ -183,9 +197,9 @@ texture_problem(const TextureDesc& desc, std::size_t pixel_bytes) noexcept {
 
 // Whether the device makes a texture's mipmaps itself.
 [[nodiscard]] constexpr bool generates_mipmaps(const TextureDesc& desc) noexcept {
-    return desc.generate_mipmaps && !desc.render_target && desc.mip_levels == 1 &&
+    return desc.generate_mipmaps && !desc.render_target && !desc.dynamic && desc.mip_levels == 1 &&
            !is_compressed(desc.format) && !is_render_target_only(desc.format) &&
-           (desc.width > 1 || desc.height > 1);
+           desc.format != TextureFormat::Rgba32Float && (desc.width > 1 || desc.height > 1);
 }
 
 enum class ShaderStage : std::uint8_t { Vertex, Fragment };
@@ -352,6 +366,12 @@ public:
     // At most k_max_draw_uniform_size bytes, copied, for this and later draws. A shader may
     // declare the block as large as k_max_draw_uniform_size; what wasn't set reads as anything.
     virtual void set_draw_uniforms(std::span<const std::byte> data) = 0;
+
+    // Replaces rows of a dynamic texture (TextureDesc::dynamic), from `first_row` down, with
+    // `rows`: whole rows, packed. Only between render passes; draws in later passes read the new
+    // rows, and draws before it the old ones (ADR 0037).
+    virtual void update_texture(TextureHandle texture, std::uint32_t first_row,
+                                std::span<const std::byte> rows) = 0;
 
     // Sets the texture that shaders read at `slot`, below k_texture_slots, for this and later draws
     // in the pass. Each pass starts with defaults, which an invalid handle also selects: plain

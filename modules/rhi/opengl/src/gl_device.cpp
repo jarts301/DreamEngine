@@ -202,6 +202,7 @@ core::Error failure(std::string message) {
     F(SamplerParameteri, glSamplerParameteri)                                                      \
     F(Scissor, glScissor)                                                                          \
     F(ShaderSource, glShaderSource)                                                                \
+    F(TexParameteri, glTexParameteri)                                                              \
     F(TexStorage2D, glTexStorage2D)                                                                \
     F(TexSubImage2D, glTexSubImage2D)                                                              \
     F(Uniform1f, glUniform1f)                                                                      \
@@ -684,6 +685,8 @@ struct TextureResource {
     TextureFormat format = TextureFormat::Rgba8Srgb;
     platform::SurfaceSize size;
     bool render_target = false;
+    // Its rows can be replaced with update_texture (ADR 0037).
+    bool dynamic = false;
 };
 
 // A framebuffer object for one pair of render targets, made the first time a pass uses them.
@@ -761,8 +764,15 @@ GLenum internal_format(TextureFormat format) {
         return GL_R11F_G11F_B10F;
     case TextureFormat::Depth32Float:
         return GL_DEPTH_COMPONENT32F;
+    case TextureFormat::Rgba32Float:
+        return GL_RGBA32F;
     }
     return GL_RGBA8;
+}
+
+// The type of each component of an uncompressed texture's pixels.
+GLenum pixel_type(TextureFormat format) {
+    return format == TextureFormat::Rgba32Float ? GL_FLOAT : GL_UNSIGNED_BYTE;
 }
 
 class GlDevice final : public Device, private CommandList {
@@ -911,6 +921,8 @@ public:
         case TextureFormat::Rg11B10Float:
         case TextureFormat::Depth32Float:
             return false;
+        case TextureFormat::Rgba32Float:
+            return true;
         }
         return false;
     }
@@ -1468,7 +1480,8 @@ private:
 
         TextureResource texture{.format = desc.format,
                                 .size = {desc.width, desc.height},
-                                .render_target = desc.render_target};
+                                .render_target = desc.render_target,
+                                .dynamic = desc.dynamic && !desc.render_target};
         m_gl.GenTextures(1, &texture.id);
         bind_on_unit(0, texture.id);
         m_gl.TexStorage2D(GL_TEXTURE_2D, static_cast<GLsizei>(levels), format,
@@ -1491,12 +1504,19 @@ private:
             } else {
                 m_gl.TexSubImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), 0, 0,
                                    static_cast<GLsizei>(width), static_cast<GLsizei>(height),
-                                   GL_RGBA, GL_UNSIGNED_BYTE, pixels.data() + offset);
+                                   GL_RGBA, pixel_type(desc.format), pixels.data() + offset);
             }
             offset += bytes;
         }
         if (mipmaps) {
             m_gl.GenerateMipmap(GL_TEXTURE_2D);
+        }
+        if (desc.format == TextureFormat::Rgba32Float) {
+            // OpenGL ES can't filter full floats, and a texture that would be filtered is
+            // incomplete, so even texelFetch reads nothing. It is read without a sampler object,
+            // by these settings of its own.
+            m_gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            m_gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         }
         bind_on_unit(0, m_bound_textures[0]);
 
@@ -2100,6 +2120,7 @@ void main() {
     void bind_texture(std::uint32_t slot, TextureHandle handle) override {
         DREAM_VERIFY(slot < k_texture_slots, "There is no such texture slot");
         GLuint id = slot == k_shadow_slot ? m_far_depth_texture.id : m_white_texture.id;
+        bool unfiltered = false;
         if (handle.is_valid()) {
             const TextureResource* const resource =
                 m_textures.get(handle_cast<TextureResource>(handle));
@@ -2109,9 +2130,36 @@ void main() {
             DREAM_VERIFY(resource->id != m_pass_textures[0] && resource->id != m_pass_textures[1],
                          "A pass can't read the textures it draws into");
             id = resource->id;
+            unfiltered = resource->format == TextureFormat::Rgba32Float;
         }
         bind_on_unit(slot, id);
         m_bound_textures[slot] = id;
+        // A full-float texture is read by its own nearest settings, not the slot's sampler.
+        if (unfiltered != m_unfiltered_slots[slot]) {
+            m_gl.BindSampler(k_texture_unit + slot, unfiltered ? 0 : m_samplers[slot]);
+            m_unfiltered_slots[slot] = unfiltered;
+        }
+    }
+
+    void update_texture(TextureHandle handle, std::uint32_t first_row,
+                        std::span<const std::byte> rows) override {
+        DREAM_VERIFY(!m_in_pass, "Textures are updated between render passes");
+        const TextureResource* const texture = m_textures.get(handle_cast<TextureResource>(handle));
+        DREAM_VERIFY(texture != nullptr && texture->dynamic, "Updating a texture that isn't dynamic");
+        const std::size_t row_bytes = texture_level_bytes(texture->format, texture->size.width, 1);
+        const std::size_t row_count = rows.size() / row_bytes;
+        DREAM_VERIFY(row_count * row_bytes == rows.size() &&
+                         first_row + row_count <= texture->size.height,
+                     "update_texture takes whole rows within the texture");
+        if (row_count == 0) {
+            return;
+        }
+        bind_on_unit(0, texture->id);
+        m_gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, static_cast<GLint>(first_row),
+                           static_cast<GLsizei>(texture->size.width),
+                           static_cast<GLsizei>(row_count), GL_RGBA, pixel_type(texture->format),
+                           rows.data());
+        bind_on_unit(0, m_bound_textures[0]);
     }
 
     void draw_indexed(std::uint32_t index_count) override {
@@ -2258,6 +2306,8 @@ void main() {
     bool m_vertex_buffer_dirty = true;
     GLuint m_bound_program = 0;
     std::array<GLuint, k_texture_slots> m_bound_textures{};
+    // Slots holding a full-float texture, which read it without the slot's sampler.
+    std::array<bool, k_texture_slots> m_unfiltered_slots{};
     platform::SurfaceSize m_pass_size;
     bool m_pass_into_textures = false;
     std::optional<TextureFormat> m_pass_color;

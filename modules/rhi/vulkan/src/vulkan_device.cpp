@@ -97,6 +97,8 @@ struct TextureResource {
     TextureFormat format = TextureFormat::Rgba8Srgb;
     VkExtent2D extent{};
     bool render_target = false;
+    // Its rows can be replaced with update_texture (ADR 0037).
+    bool dynamic = false;
 };
 
 // A render pass for passes into textures, by the targets' formats and whether each is cleared.
@@ -171,6 +173,8 @@ VkFormat to_vulkan(TextureFormat format) {
         return VK_FORMAT_B10G11R11_UFLOAT_PACK32;
     case TextureFormat::Depth32Float:
         return VK_FORMAT_D32_SFLOAT;
+    case TextureFormat::Rgba32Float:
+        return VK_FORMAT_R32G32B32A32_SFLOAT;
     }
     return VK_FORMAT_UNDEFINED;
 }
@@ -434,6 +438,15 @@ public:
         case TextureFormat::Rg11B10Float:
         case TextureFormat::Depth32Float:
             return false;
+        case TextureFormat::Rgba32Float: {
+            // Read texel by texel, so it needn't filter.
+            VkFormatProperties properties{};
+            vkGetPhysicalDeviceFormatProperties(m_physical_device, VK_FORMAT_R32G32B32A32_SFLOAT,
+                                                &properties);
+            constexpr VkFormatFeatureFlags k_needed =
+                VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+            return (properties.optimalTilingFeatures & k_needed) == k_needed;
+        }
         }
         return false;
     }
@@ -462,6 +475,9 @@ public:
         if (!texture.has_value()) {
             return texture.error();
         }
+        texture.value().format = desc.format;
+        texture.value().extent = VkExtent2D{desc.width, desc.height};
+        texture.value().dynamic = desc.dynamic && !desc.render_target;
         return handle_cast<TextureTag>(m_textures.create(texture.value()));
     }
 
@@ -1846,7 +1862,9 @@ private:
             const VkBufferCreateInfo vertex_info{
                 .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                 .size = k_max_frame_vertex_bytes,
-                .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                // Also where update_texture's rows are copied from.
+                .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
             };
             result = vmaCreateBuffer(m_allocator, &vertex_info, &uniform_allocation,
@@ -2240,6 +2258,7 @@ private:
             .pClearValues = clear_values.data(),
         };
         vkCmdBeginRenderPass(m_recording, &info, VK_SUBPASS_CONTENTS_INLINE);
+        m_in_pass = true;
         start_pass(m_extent, true, {}, {});
     }
 
@@ -2290,6 +2309,7 @@ private:
             .pClearValues = clear_values.data(),
         };
         vkCmdBeginRenderPass(m_recording, &info, VK_SUBPASS_CONTENTS_INLINE);
+        m_in_pass = true;
         start_pass(extent, false, color != nullptr ? std::optional(color->format) : std::nullopt,
                    depth != nullptr ? std::optional(depth->format) : std::nullopt);
         m_pass_views = {color != nullptr ? color->view : VK_NULL_HANDLE,
@@ -2322,7 +2342,70 @@ private:
         m_descriptors_dirty = true;
     }
 
+    void update_texture(TextureHandle handle, std::uint32_t first_row,
+                        std::span<const std::byte> rows) override {
+        DREAM_VERIFY(!m_in_pass, "Textures are updated between render passes");
+        TextureResource* const texture = m_textures.get(handle_cast<TextureResource>(handle));
+        DREAM_VERIFY(texture != nullptr && texture->dynamic, "Updating a texture that isn't dynamic");
+        const std::size_t row_bytes = texture_level_bytes(texture->format, texture->extent.width, 1);
+        const std::size_t row_count = rows.size() / row_bytes;
+        DREAM_VERIFY(row_count * row_bytes == rows.size() &&
+                         first_row + row_count <= texture->extent.height,
+                     "update_texture takes whole rows within the texture");
+        if (row_count == 0) {
+            return;
+        }
+
+        // Through this frame's vertex memory, at an offset the copy accepts: a whole texel.
+        FrameResources& frame = m_frames[m_frame_index];
+        const std::size_t texel = texture_level_bytes(texture->format, 1, 1);
+        const VkDeviceSize offset = (frame.vertex_used + texel - 1) / texel * texel;
+        if (offset + rows.size() > k_max_frame_vertex_bytes) {
+            DREAM_LOG_WARNING("The frame's vertex memory is used up, so a texture isn't updated");
+            return;
+        }
+        std::memcpy(frame.vertex_memory + offset, rows.data(), rows.size());
+        vmaFlushAllocation(m_allocator, frame.vertex_allocation, offset, rows.size());
+        frame.vertex_used = offset + rows.size();
+
+        const auto barrier = [&](VkImageLayout from, VkImageLayout to, VkAccessFlags from_access,
+                                 VkAccessFlags to_access, VkPipelineStageFlags from_stage,
+                                 VkPipelineStageFlags to_stage) {
+            const VkImageMemoryBarrier memory_barrier{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask = from_access,
+                .dstAccessMask = to_access,
+                .oldLayout = from,
+                .newLayout = to,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = texture->image,
+                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+            };
+            vkCmdPipelineBarrier(m_recording, from_stage, to_stage, 0, 0, nullptr, 0, nullptr, 1,
+                                 &memory_barrier);
+        };
+        constexpr VkPipelineStageFlags k_shaders =
+            VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        // Earlier draws finish reading it before the copy, and later ones read the new rows.
+        barrier(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, k_shaders,
+                VK_PIPELINE_STAGE_TRANSFER_BIT);
+        const VkBufferImageCopy copy{
+            .bufferOffset = offset,
+            .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+            .imageOffset = {0, static_cast<std::int32_t>(first_row), 0},
+            .imageExtent = {texture->extent.width, static_cast<std::uint32_t>(row_count), 1},
+        };
+        vkCmdCopyBufferToImage(m_recording, frame.vertex_buffer, texture->image,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        barrier(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, k_shaders);
+    }
+
     void end_render_pass() override {
+        m_in_pass = false;
         vkCmdEndRenderPass(m_recording);
         if (m_pass_into_window) {
             m_render_pass_ended = true;
@@ -2631,6 +2714,8 @@ private:
     VkCommandBuffer m_recording = VK_NULL_HANDLE;
     std::uint32_t m_uniform_offset = 0;
     std::uint32_t m_draw_uniform_offset = 0;
+    // Between begin_render_pass and end_render_pass, where textures can't be updated.
+    bool m_in_pass = false;
     std::array<VkImageView, k_texture_slots> m_bound_textures{};
     TextureSlotsKey m_bound_texture_keys{};
     bool m_descriptors_dirty = false;

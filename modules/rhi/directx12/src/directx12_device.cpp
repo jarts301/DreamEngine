@@ -135,6 +135,8 @@ DXGI_FORMAT to_directx(TextureFormat format) {
     // Typeless, so it has a depth view to draw into and a float view to read.
     case TextureFormat::Depth32Float:
         return DXGI_FORMAT_R32_TYPELESS;
+    case TextureFormat::Rgba32Float:
+        return DXGI_FORMAT_R32G32B32A32_FLOAT;
     }
     return DXGI_FORMAT_UNKNOWN;
 }
@@ -291,6 +293,8 @@ struct TextureResource {
     TextureFormat format = TextureFormat::Rgba8Srgb;
     platform::SurfaceSize size;
     bool render_target = false;
+    // Its rows can be replaced with update_texture (ADR 0037).
+    bool dynamic = false;
 };
 
 // Memory the CPU writes and the GPU reads, mapped for as long as it lives.
@@ -1455,7 +1459,9 @@ private:
         texture_desc.SampleDesc.Count = 1;
         texture_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 
-        TextureResource texture{.format = desc.format, .size = {desc.width, desc.height}};
+        TextureResource texture{.format = desc.format,
+                                .size = {desc.width, desc.height},
+                                .dynamic = desc.dynamic};
         const D3D12_HEAP_PROPERTIES heap{.Type = D3D12_HEAP_TYPE_DEFAULT};
         HRESULT result = m_device->CreateCommittedResource(
             &heap, D3D12_HEAP_FLAG_NONE, &texture_desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
@@ -2030,6 +2036,75 @@ private:
         DREAM_VERIFY(data.size() <= k_max_uniform_size, "Too many uniforms");
         std::memcpy(m_uniforms.data(), data.data(), data.size());
         upload_uniforms();
+    }
+
+    void update_texture(TextureHandle handle, std::uint32_t first_row,
+                        std::span<const std::byte> rows) override {
+        TextureResource* const texture = m_textures.get(handle_cast<TextureResource>(handle));
+        DREAM_VERIFY(texture != nullptr && texture->dynamic, "Updating a texture that isn't dynamic");
+        const std::size_t row_bytes = texture_level_bytes(texture->format, texture->size.width, 1);
+        const std::size_t row_count = rows.size() / row_bytes;
+        DREAM_VERIFY(row_count * row_bytes == rows.size() &&
+                         first_row + row_count <= texture->size.height,
+                     "update_texture takes whole rows within the texture");
+        if (row_count == 0) {
+            return;
+        }
+
+        // Into this frame's upload memory, each row at the pitch copies need, from a placement
+        // they accept.
+        const UINT64 pitch = (row_bytes + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1) /
+                             D3D12_TEXTURE_DATA_PITCH_ALIGNMENT * D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
+        const UINT64 bytes = pitch * row_count;
+        FrameSlot& frame = m_frames[m_frame_index];
+        UINT64 offset = (frame.constant_offset + D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1) /
+                        D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT *
+                        D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
+        DREAM_VERIFY(bytes <= k_constant_chunk_bytes, "A texture update larger than 1 MB");
+        if (frame.constant_chunk < frame.constant_chunks.size() &&
+            offset + bytes > k_constant_chunk_bytes) {
+            ++frame.constant_chunk;
+            offset = 0;
+        }
+        if (frame.constant_chunk == frame.constant_chunks.size()) {
+            core::Result<UploadBuffer> chunk = create_upload_buffer(k_constant_chunk_bytes);
+            if (!chunk.has_value()) {
+                if (!m_frame_error.has_value()) {
+                    m_frame_error = chunk.error();
+                }
+                return;
+            }
+            frame.constant_chunks.push_back(std::move(chunk).value());
+            offset = 0;
+        }
+        const UploadBuffer& chunk = frame.constant_chunks[frame.constant_chunk];
+        for (std::size_t row = 0; row < row_count; ++row) {
+            std::memcpy(chunk.mapped + offset + row * pitch, rows.data() + row * row_bytes,
+                        row_bytes);
+        }
+        frame.constant_offset = offset + bytes;
+
+        D3D12_TEXTURE_COPY_LOCATION target{};
+        target.pResource = texture->texture.Get();
+        target.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        target.SubresourceIndex = 0;
+        D3D12_TEXTURE_COPY_LOCATION source{};
+        source.pResource = chunk.resource.Get();
+        source.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        source.PlacedFootprint.Offset = offset;
+        source.PlacedFootprint.Footprint = D3D12_SUBRESOURCE_FOOTPRINT{
+            .Format = to_directx(texture->format),
+            .Width = texture->size.width,
+            .Height = static_cast<UINT>(row_count),
+            .Depth = 1,
+            .RowPitch = static_cast<UINT>(pitch)};
+        const D3D12_RESOURCE_BARRIER to_copy =
+            transition(texture->texture.Get(), k_shader_read, D3D12_RESOURCE_STATE_COPY_DEST);
+        m_list->ResourceBarrier(1, &to_copy);
+        m_list->CopyTextureRegion(&target, 0, first_row, 0, &source, nullptr);
+        const D3D12_RESOURCE_BARRIER to_read =
+            transition(texture->texture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, k_shader_read);
+        m_list->ResourceBarrier(1, &to_read);
     }
 
     void set_draw_uniforms(std::span<const std::byte> data) override {

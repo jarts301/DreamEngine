@@ -44,6 +44,9 @@ function(dream_add_game name)
             list(APPEND ARG_SHADERS ${module_shaders})
         endif()
     endforeach()
+    # Modules built from the same files, such as forward and forward_plus (ADR 0037), share their
+    # shaders, compiled once.
+    list(REMOVE_DUPLICATES ARG_SHADERS)
     list(FILTER module_targets INCLUDE REGEX "^dream_module_profiler_")
     if(module_targets)
         target_sources(${name} PRIVATE "${DreamEngine_SOURCE_DIR}/runtime/entry/heap_counting.cpp")

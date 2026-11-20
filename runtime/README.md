@@ -35,7 +35,10 @@ pointers and, with `input_device = ["sdl3_gamepad", "null"]` listed, gamepads
 ([ADR 0035](../docs/adr/0035-gamepads.md), and the [input guide](../docs/guides/input.md)).
 `runtime::Animation` plays skeletal animation on entities with an `Animator`, which needs
 `animation` listed ([ADR 0036](../docs/adr/0036-skeletal-animation.md), and the
-[animation guide](../docs/guides/animation.md)).
+[animation guide](../docs/guides/animation.md)). The `point_light` and `spot_light` components light
+the scene besides the sun; list `renderer = ["forward_plus", "forward", "null"]` for many of them
+([ADR 0037](../docs/adr/0037-point-and-spot-lights.md), and the
+[lighting guide](../docs/guides/lighting.md)).
 [samples/physics_demo](../samples/physics_demo/src/physics_demo.cpp) adds 3D and 2D physics with
 `runtime::Physics3D` and `runtime::Physics2D`, which need `physics3d` or `physics2d` listed under
 `[modules.<platform>]`.

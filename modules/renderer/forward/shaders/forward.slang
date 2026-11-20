@@ -54,6 +54,12 @@ Sampler2D occlusion_texture : register(t5) : register(s5);
 [[vk::binding(7, 0)]]
 Sampler2D emissive_texture : register(t6) : register(s6);
 
+// Point and spot lights and their clusters, as forward_renderer.cpp lays them out (ADR 0037), read
+// texel by texel, so without a sampler. Texture slot 1: binding 2 / register t1.
+[[vk::binding(2, 0)]]
+Texture2D<float4> light_data : register(t1);
+static const int k_light_texture_width = 256;
+
 static const float k_pi = 3.14159265;
 
 #if defined(DREAM_SKINNED)
@@ -245,6 +251,80 @@ float3 ambient_specular(float3 f0, float roughness, float n_dot_v) {
     return f0 * scale_bias.x + scale_bias.y;
 }
 
+float4 light_texel(int index) {
+    return light_data.Load(int3(index % k_light_texture_width, index / k_light_texture_width, 0));
+}
+
+// Adds the point and spot lights of the pixel's cluster: the box of the screen it is in, at its
+// depth. Their light falls off with the square of the distance, smoothly to nothing at their
+// range, and a spot's across the edge of its cone. They cast no shadows.
+void add_lights(float3 world_position, float3 normal, float3 to_camera, float n_dot_v, float3 f0,
+                float3 diffuse_color, float alpha, inout float3 diffuse_light,
+                inout float3 specular_light) {
+    const float4 counts = light_texel(0);
+    if (counts.x < 0.5) {
+        return;
+    }
+    const float4 setup = light_texel(1);
+    const float3 forward = light_texel(2).xyz;
+    const int tiles_x = int(counts.y + 0.5);
+    const int tiles_y = int(counts.z + 0.5);
+    const int slices = int(counts.w + 0.5);
+
+    // The cluster, found as the renderer filled them: by the point's place on screen, which every
+    // graphics API agrees on, and its depth along the camera's view.
+    const float4 clip = mul(frame.view_projection, float4(world_position, 1.0));
+    const float2 ndc = clip.xy / max(clip.w, 1e-5);
+    const int x = clamp(int((ndc.x * 0.5 + 0.5) * float(tiles_x)), 0, tiles_x - 1);
+    const int y = clamp(int((ndc.y * 0.5 + 0.5) * float(tiles_y)), 0, tiles_y - 1);
+    const float depth = dot(world_position - frame.camera_position.xyz, forward);
+    const int z = clamp(int(log(max(depth, setup.x) / setup.x) * setup.y), 0, slices - 1);
+    const int cluster = (z * tiles_y + y) * tiles_x + x;
+    const float4 entry = light_texel(int(setup.z + 0.5) + cluster / 2);
+    const float2 list = (cluster % 2) == 0 ? entry.xy : entry.zw;
+    const int first = int(list.x + 0.5);
+    const int count = int(list.y + 0.5);
+    const int index_start = int(setup.w + 0.5);
+
+    for (int item = 0; item < count; ++item) {
+        const int slot = first + item;
+        const float4 packed = light_texel(index_start + slot / 4);
+        const int light = int(packed[slot % 4] + 0.5);
+        const int base = 4 + light * 4;
+        const float4 position_range = light_texel(base);
+        const float4 color_type = light_texel(base + 1);
+
+        const float3 offset = position_range.xyz - world_position;
+        const float distance2 = dot(offset, offset);
+        const float range = position_range.w;
+        if (distance2 >= range * range) {
+            continue;
+        }
+        const float3 to_light = offset * rsqrt(max(distance2, 1e-8));
+        const float n_dot_l = saturate(dot(normal, to_light));
+        if (n_dot_l <= 0.0) {
+            continue;
+        }
+        const float ratio = distance2 / (range * range);
+        const float window = saturate(1.0 - ratio * ratio);
+        float falloff = window * window / max(distance2, 1e-4);
+        if (color_type.w > 0.5) {
+            const float4 direction_outer = light_texel(base + 2);
+            const float inner = light_texel(base + 3).x;
+            falloff *= smoothstep(direction_outer.w, inner, dot(-to_light, direction_outer.xyz));
+        }
+
+        const float3 halfway = normalize(to_light + to_camera);
+        const float n_dot_h = saturate(dot(normal, halfway));
+        const float3 f = fresnel(f0, saturate(dot(to_light, halfway)));
+        const float3 specular =
+            distribution(n_dot_h, alpha) * visibility(n_dot_v, n_dot_l, alpha) * f * k_pi;
+        const float3 lit = color_type.rgb * (n_dot_l * falloff);
+        diffuse_light += diffuse_color * (1.0 - f) * lit;
+        specular_light += specular * lit;
+    }
+}
+
 // Light's units: a white matte surface facing the sun reflects `light_color * intensity`, so the
 // usual 1/pi of the diffuse term and the pi of the light's irradiance cancel out.
 [shader("fragment")]
@@ -308,6 +388,9 @@ float4 fragment_main(VertexOutput input) : SV_Target {
         diffuse_light = diffuse * lit;
         specular_light = specular * lit;
     }
+
+    add_lights(input.world_position, normal, to_camera, n_dot_v, f0, diffuse_color, alpha,
+               diffuse_light, specular_light);
 
     // Ambient light, the same from every side, which occlusion darkens.
     diffuse_light += diffuse_color * (ambient * occlusion);

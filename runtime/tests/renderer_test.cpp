@@ -1,3 +1,4 @@
+#include "dream/core/math/quaternion.h"
 #include "dream/runtime/renderer.h"
 
 #include "dream/runtime/app.h"
@@ -476,4 +477,37 @@ TEST_CASE_FIXTURE(RenderFixture, "Renderer gives a skinned part its joints and i
     // Without an animator, the rest pose: the box is the vertices' box, lifted by the joint.
     CHECK(joints == 1);
     CHECK(posed_bottom == Approx(2.0f));
+}
+
+TEST_CASE_FIXTURE(RenderFixture, "Renderer gives point and spot lights where their entities are") {
+    World world;
+    in_frame([&](App&, Renderer& renderer, rhi::CommandList& commands) {
+        add_camera(world);
+        const Entity bulb = world.create_entity();
+        world.registry().get<Transform>(bulb).position = Vec3{1.0f, 2.0f, 3.0f};
+        world.registry().emplace<PointLight>(bulb, PointLight{.intensity = 4.0f, .range = 5.0f});
+        // A spot turned to point down: its -Z axis, a quarter turn about X.
+        const Entity torch = world.create_entity();
+        world.registry().get<Transform>(torch).rotation =
+            core::quat_from_axis_angle(Vec3{1.0f, 0.0f, 0.0f}, -1.5707963f);
+        world.registry().emplace<SpotLight>(torch, SpotLight{.inner_angle = 10.0f,
+                                                             .outer_angle = 20.0f});
+        world.update_transforms();
+        renderer.render(world, commands, k_size);
+        world.registry().clear();
+    });
+
+    const FakeFrame& frame = last_frame();
+    REQUIRE(frame.lights.size() == 2);
+    const auto point = std::ranges::find(frame.lights, renderer::LightType::Point,
+                                         &renderer::Light::type);
+    const auto spot = std::ranges::find(frame.lights, renderer::LightType::Spot,
+                                        &renderer::Light::type);
+    REQUIRE(point != frame.lights.end());
+    REQUIRE(spot != frame.lights.end());
+    CHECK(point->position.z == Approx(3.0f));
+    CHECK(point->intensity == Approx(4.0f));
+    CHECK(point->range == Approx(5.0f));
+    CHECK(spot->direction.y == Approx(-1.0f));
+    CHECK(spot->outer_angle == Approx(20.0f * 3.14159265f / 180.0f));
 }

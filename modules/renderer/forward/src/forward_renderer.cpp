@@ -4,6 +4,12 @@
 // (ADR 0031). Surfaces are lit with glTF's metallic-roughness model and normal maps (ADR 0033).
 // Opaque parts are drawn first, then cut-out ones, then blended ones, farthest first (ADR 0034).
 // Skinned parts are moved by their joints in the vertex shader, one draw each (ADR 0036).
+//
+// Point and spot lights (ADR 0037) go to the shaders in a float texture rewritten each frame: the
+// lights, then a list of them for each cluster of the view, a box of the screen at a range of
+// depths, which every pixel reads only its own of. Built with DREAM_FORWARD_PLUS, this is the
+// 'forward_plus' module, which splits the view into 16x9x24 clusters and takes 256 lights; without
+// it, 'forward' keeps one cluster of the 16 nearest lights.
 
 #include "dream/core/config.h"
 #include "dream/core/log.h"
@@ -234,6 +240,39 @@ using OwnedShader = Owned<rhi::ShaderHandle, &rhi::Device::destroy_shader>;
 using OwnedPipeline = Owned<rhi::PipelineHandle, &rhi::Device::destroy_pipeline>;
 
 // What the project's [renderer] table and the device choose (ADR 0028, 0029).
+// The lights' texture: 256 texels across, of four floats each, and as many rows as fit the
+// lights, the clusters and their lists (ADR 0037). Its first four texels describe the rest:
+//
+//   0: light count, clusters across, clusters down, depth slices
+//   1: the camera's near plane, the slices' logarithmic scale, where the clusters and the lists
+//      start
+//   2: the camera's forward direction
+//
+// From texel 4, each light takes four: position and range; color times intensity, and 1 for a
+// spot; the spot's direction and the cosine of its outer angle; the cosine of its inner one.
+// Each cluster has two floats, where its list starts and how many lights it has, two clusters a
+// texel, and the lists hold four light indices a texel.
+constexpr std::uint32_t k_light_texture_width = 256;
+constexpr std::uint32_t k_light_texture_height = 32;
+constexpr std::uint32_t k_light_header_texels = 4;
+constexpr std::uint32_t k_texels_per_light = 4;
+// Where forward.slang reads the lights: the slot the tone-mapping pass reads its input from, which
+// the scene's pass doesn't use.
+constexpr std::uint32_t k_light_slot = 1;
+
+#if defined(DREAM_FORWARD_PLUS)
+constexpr std::string_view k_module_name = "forward_plus";
+constexpr std::uint32_t k_max_lights = 256;
+constexpr std::array<std::uint32_t, 3> k_clusters{16, 9, 24};
+#else
+constexpr std::string_view k_module_name = "forward";
+constexpr std::uint32_t k_max_lights = 16;
+constexpr std::array<std::uint32_t, 3> k_clusters{1, 1, 1};
+#endif
+static_assert(k_light_header_texels + k_max_lights * k_texels_per_light +
+                  (k_clusters[0] * k_clusters[1] * k_clusters[2] + 1) / 2 <
+              k_light_texture_width * k_light_texture_height);
+
 struct Settings {
     std::optional<rhi::TextureFormat> hdr_format;
     ToneMapping tone_mapping = ToneMapping::PbrNeutral;
@@ -244,6 +283,8 @@ struct Settings {
     bool culling = true;
     // How many pixels a simpler version of a part may stray on screen; 0 always draws the full one.
     float lod_error = 1.0f;
+    // At most this many point and spot lights, the nearest, up to the module's own limit.
+    std::uint32_t max_lights = k_max_lights;
 };
 
 core::Result<Settings> read_settings(const core::Config& config, const rhi::Device& device) {
@@ -371,6 +412,16 @@ core::Result<Settings> read_settings(const core::Config& config, const rhi::Devi
     }
     if (settings.shadow_resolution == 0) {
         settings.shadow_cascades = 0;
+    }
+    if (config.contains("renderer.max_lights")) {
+        const std::optional<std::int64_t> max_lights = config.get_int("renderer.max_lights");
+        if (!max_lights.has_value() || *max_lights < 0 ||
+            *max_lights > static_cast<std::int64_t>(k_max_lights)) {
+            return setting_error(std::format("Setting 'renderer.max_lights' must be from 0 to {} "
+                                             "for the {} renderer",
+                                             k_max_lights, k_module_name));
+        }
+        settings.max_lights = static_cast<std::uint32_t>(*max_lights);
     }
     return settings;
 }
@@ -559,6 +610,7 @@ public:
         // Before the device's own objects, in no particular order: the device outlives this.
         m_pipelines.reset();
         m_shadow_map.reset();
+        m_light_texture.reset();
         m_flat_normal.reset();
         m_hdr_color.reset();
         m_hdr_depth.reset();
@@ -580,6 +632,25 @@ public:
             return flat.error();
         }
         m_flat_normal = OwnedTexture(device, flat.value());
+
+        // The lights' texture, rewritten each frame. Without it, only the sun lights the scene.
+        const rhi::TextureDesc light_desc{.width = k_light_texture_width,
+                                          .height = k_light_texture_height,
+                                          .format = rhi::TextureFormat::Rgba32Float,
+                                          .generate_mipmaps = false,
+                                          .dynamic = true};
+        m_light_data.assign(std::size_t{k_light_texture_width} * k_light_texture_height, Vec4{});
+        if (device.supports_texture_format(rhi::TextureFormat::Rgba32Float)) {
+            const core::Result<rhi::TextureHandle> lights =
+                device.create_texture(light_desc, std::as_bytes(std::span(m_light_data)));
+            if (lights.has_value()) {
+                m_light_texture = OwnedTexture(device, lights.value());
+            } else {
+                DREAM_LOG_WARNING("No point or spot lights: {}", lights.error().message);
+            }
+        } else {
+            DREAM_LOG_WARNING("No point or spot lights: the device has no float textures");
+        }
 
         std::string description;
         if (m_settings.hdr_format.has_value()) {
@@ -623,6 +694,14 @@ public:
                                          m_settings.lod_error)
                            : std::string("; parts are always drawn in full");
         description += "; materials are metallic-roughness PBR with normal maps";
+        if (m_light_texture.exists()) {
+            description += std::format(
+                "; up to {} point and spot lights{}", m_settings.max_lights,
+                k_clusters[0] * k_clusters[1] * k_clusters[2] > 1
+                    ? std::format(", in {}x{}x{} clusters", k_clusters[0], k_clusters[1],
+                                  k_clusters[2])
+                    : std::string());
+        }
         m_description = std::move(description);
         return {};
     }
@@ -666,6 +745,8 @@ private:
     // Works out what every part draws this frame: its box in the world, the version of it for its
     // size on screen, and its instance data.
     void prepare_meshes(const Frame& frame, bool boxes);
+    // Fills the lights' texture for this frame's view, and says whether any light reaches it.
+    bool prepare_lights(const Frame& frame, FrameStats& stats);
 
     // Draws the parts, or the shadow casters among them, that `view` sees, when one is given,
     // with one instanced draw for the parts that share a range of indices and a texture.
@@ -681,6 +762,19 @@ private:
     std::string m_description;
     std::unique_ptr<Pipelines> m_pipelines;
     OwnedTexture m_shadow_map;
+    // The point and spot lights of the frame, with their clusters (ADR 0037).
+    OwnedTexture m_light_texture;
+    std::vector<Vec4> m_light_data;
+    std::uint32_t m_light_rows_used = 0;
+    struct LightReach {
+        std::uint32_t light = 0;
+        std::array<std::uint32_t, 3> low{};
+        std::array<std::uint32_t, 3> high{};
+    };
+    std::vector<LightReach> m_light_reach;
+    std::vector<std::uint32_t> m_cluster_counts;
+    std::vector<std::uint32_t> m_cluster_starts;
+    std::vector<std::pair<float, std::uint32_t>> m_light_order;
     // One texel pointing straight out of the surface, for parts without a normal map.
     OwnedTexture m_flat_normal;
     OwnedTexture m_hdr_color;
@@ -704,6 +798,7 @@ private:
     std::vector<Vec4> m_joint_rows;
     Vec3 m_eye;
     bool m_warned_instances = false;
+    bool m_warned_light_lists = false;
 };
 
 core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_file) {
@@ -1160,6 +1255,188 @@ void ForwardRenderer::prepare_meshes(const Frame& frame, bool boxes) {
     }
 }
 
+bool ForwardRenderer::prepare_lights(const Frame& frame, FrameStats& stats) {
+    const View& view = *frame.view;
+    const core::Frustum bounds = core::frustum_from(view.view_projection);
+
+    // The camera's forward direction, through the middle of the near plane, which depth is
+    // measured along.
+    Vec3 forward{0.0f, 0.0f, -1.0f};
+    if (const std::optional<Mat4> clip_to_world = core::inverse(view.view_projection)) {
+        const Vec4 middle = *clip_to_world * Vec4{0.0f, 0.0f, 0.0f, 1.0f};
+        const Vec3 point = Vec3{middle.x, middle.y, middle.z} * (1.0f / middle.w);
+        if (core::length(point - view.eye) > 0.0f) {
+            forward = core::normalized(point - view.eye);
+        }
+    }
+
+    // The lights whose reach is in view, nearest first, up to the limit.
+    m_light_order.clear();
+    for (std::uint32_t index = 0; index < frame.lights.size(); ++index) {
+        const Light& light = frame.lights[index];
+        if (!(light.range > 0.0f) || !(light.intensity > 0.0f)) {
+            continue;
+        }
+        const Vec3 reach{light.range, light.range, light.range};
+        if (!core::intersects(bounds, core::Aabb{light.position - reach, light.position + reach})) {
+            continue;
+        }
+        const float distance =
+            std::max(core::length(light.position - view.eye) - light.range, 0.0f);
+        m_light_order.emplace_back(distance, index);
+    }
+    std::ranges::stable_sort(m_light_order, {}, &std::pair<float, std::uint32_t>::first);
+    const auto count = static_cast<std::uint32_t>(
+        std::min<std::size_t>(m_light_order.size(), m_settings.max_lights));
+    stats.lights = count;
+    stats.lights_dropped = static_cast<std::uint32_t>(m_light_order.size()) - count;
+
+    const std::uint32_t cluster_count = k_clusters[0] * k_clusters[1] * k_clusters[2];
+    const std::uint32_t cluster_start = k_light_header_texels + k_max_lights * k_texels_per_light;
+    const std::uint32_t index_start = cluster_start + (cluster_count + 1) / 2;
+    const float near = std::max(view.z_near, 0.001f);
+    const float far = std::max(view.z_far, near * 2.0f);
+    // Slices grow with depth, as the screen boxes do: slice = log(depth / near) * scale.
+    const float slice_scale = static_cast<float>(k_clusters[2]) / std::log(far / near);
+
+    // Each light's box of clusters, conservatively: its sphere's corners on screen and its depths.
+    m_light_reach.clear();
+    for (std::uint32_t order = 0; order < count; ++order) {
+        const Light& light = frame.lights[m_light_order[order].second];
+        LightReach reach{.light = order};
+        bool behind = false;
+        float low_x = 1.0f;
+        float low_y = 1.0f;
+        float high_x = -1.0f;
+        float high_y = -1.0f;
+        for (int corner = 0; corner < 8; ++corner) {
+            const Vec3 point = light.position + Vec3{(corner & 1) != 0 ? light.range : -light.range,
+                                                     (corner & 2) != 0 ? light.range : -light.range,
+                                                     (corner & 4) != 0 ? light.range : -light.range};
+            const Vec4 clip = view.view_projection * Vec4{point.x, point.y, point.z, 1.0f};
+            if (clip.w <= near * 0.5f) {
+                behind = true;
+                break;
+            }
+            low_x = std::min(low_x, clip.x / clip.w);
+            high_x = std::max(high_x, clip.x / clip.w);
+            low_y = std::min(low_y, clip.y / clip.w);
+            high_y = std::max(high_y, clip.y / clip.w);
+        }
+        const auto tile = [](float ndc, std::uint32_t tiles) {
+            const float at = (std::clamp(ndc, -1.0f, 1.0f) * 0.5f + 0.5f) * static_cast<float>(tiles);
+            return std::min(static_cast<std::uint32_t>(std::max(at, 0.0f)), tiles - 1);
+        };
+        // A light around or behind the camera may reach anywhere on screen.
+        reach.low[0] = behind ? 0 : tile(low_x, k_clusters[0]);
+        reach.high[0] = behind ? k_clusters[0] - 1 : tile(high_x, k_clusters[0]);
+        reach.low[1] = behind ? 0 : tile(low_y, k_clusters[1]);
+        reach.high[1] = behind ? k_clusters[1] - 1 : tile(high_y, k_clusters[1]);
+        const float depth = core::dot(light.position - view.eye, forward);
+        const auto slice = [&](float z) {
+            const float at = std::log(std::max(z, near) / near) * slice_scale;
+            return std::min(static_cast<std::uint32_t>(std::max(at, 0.0f)), k_clusters[2] - 1);
+        };
+        reach.low[2] = slice(depth - light.range);
+        reach.high[2] = slice(depth + light.range);
+        m_light_reach.push_back(reach);
+    }
+
+    // How many lights each cluster has, where its list starts, then the lists, as long as they
+    // fit in the texture.
+    const auto cluster_of = [](std::uint32_t x, std::uint32_t y, std::uint32_t z) {
+        return (z * k_clusters[1] + y) * k_clusters[0] + x;
+    };
+    m_cluster_counts.assign(cluster_count, 0);
+    for (const LightReach& reach : m_light_reach) {
+        for (std::uint32_t z = reach.low[2]; z <= reach.high[2]; ++z) {
+            for (std::uint32_t y = reach.low[1]; y <= reach.high[1]; ++y) {
+                for (std::uint32_t x = reach.low[0]; x <= reach.high[0]; ++x) {
+                    ++m_cluster_counts[cluster_of(x, y, z)];
+                }
+            }
+        }
+    }
+    const std::uint32_t index_room =
+        (k_light_texture_width * k_light_texture_height - index_start) * 4;
+    m_cluster_starts.assign(cluster_count, 0);
+    std::uint32_t total = 0;
+    for (std::uint32_t cluster = 0; cluster < cluster_count; ++cluster) {
+        m_cluster_starts[cluster] = total;
+        m_cluster_counts[cluster] = std::min(m_cluster_counts[cluster], index_room - total);
+        total += m_cluster_counts[cluster];
+    }
+    if (total == index_room && !m_warned_light_lists) {
+        DREAM_LOG_WARNING("The lights' cluster lists are full, so some clusters miss lights");
+        m_warned_light_lists = true;
+    }
+
+    std::ranges::fill(m_light_data, Vec4{});
+    m_light_data[0] = Vec4{static_cast<float>(count), static_cast<float>(k_clusters[0]),
+                           static_cast<float>(k_clusters[1]), static_cast<float>(k_clusters[2])};
+    m_light_data[1] = Vec4{near, slice_scale, static_cast<float>(cluster_start),
+                           static_cast<float>(index_start)};
+    m_light_data[2] = extend(forward, 0.0f);
+    for (std::uint32_t order = 0; order < count; ++order) {
+        const Light& light = frame.lights[m_light_order[order].second];
+        const bool spot = light.type == LightType::Spot;
+        const std::size_t at = k_light_header_texels + std::size_t{order} * k_texels_per_light;
+        m_light_data[at] = extend(light.position, light.range);
+        m_light_data[at + 1] = extend(light.color * light.intensity, spot ? 1.0f : 0.0f);
+        m_light_data[at + 2] = extend(spot ? core::normalized(light.direction) : Vec3{},
+                                      std::cos(std::max(light.outer_angle, light.inner_angle)));
+        m_light_data[at + 3] = Vec4{std::cos(light.inner_angle), 0.0f, 0.0f, 0.0f};
+    }
+    for (std::uint32_t cluster = 0; cluster < cluster_count; ++cluster) {
+        Vec4& entry = m_light_data[cluster_start + cluster / 2];
+        const auto start = static_cast<float>(m_cluster_starts[cluster]);
+        const auto lights = static_cast<float>(m_cluster_counts[cluster]);
+        if (cluster % 2 == 0) {
+            entry.x = start;
+            entry.y = lights;
+        } else {
+            entry.z = start;
+            entry.w = lights;
+        }
+    }
+    // The lists, filled in the order the counts were made, so each stays within its count.
+    std::vector<std::uint32_t>& filled = m_cluster_counts;
+    std::vector<std::uint32_t> limits = filled;
+    std::ranges::fill(filled, 0);
+    for (const LightReach& reach : m_light_reach) {
+        for (std::uint32_t z = reach.low[2]; z <= reach.high[2]; ++z) {
+            for (std::uint32_t y = reach.low[1]; y <= reach.high[1]; ++y) {
+                for (std::uint32_t x = reach.low[0]; x <= reach.high[0]; ++x) {
+                    const std::uint32_t cluster = cluster_of(x, y, z);
+                    if (filled[cluster] >= limits[cluster]) {
+                        continue;
+                    }
+                    const std::uint32_t slot = m_cluster_starts[cluster] + filled[cluster]++;
+                    Vec4& packed = m_light_data[index_start + slot / 4];
+                    const auto value = static_cast<float>(reach.light);
+                    switch (slot % 4) {
+                    case 0:
+                        packed.x = value;
+                        break;
+                    case 1:
+                        packed.y = value;
+                        break;
+                    case 2:
+                        packed.z = value;
+                        break;
+                    default:
+                        packed.w = value;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    const std::uint32_t texels_used = index_start + (total + 3) / 4;
+    m_light_rows_used = (texels_used + k_light_texture_width - 1) / k_light_texture_width;
+    return count > 0;
+}
+
 void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const MeshDraw> meshes,
                                   Pass pass, const core::Frustum* view, FrameStats& stats) {
     const bool casters = is_shadow(pass);
@@ -1450,6 +1727,15 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
             camera_bounds = core::frustum_from(frame.view->view_projection);
         }
     }
+    // Before any pass, as textures are only updated between them.
+    if (frame.view.has_value() && m_light_texture.exists()) {
+        DREAM_PROFILE_ZONE("Prepare lights");
+        prepare_lights(frame, stats);
+        commands.update_texture(
+            m_light_texture.get(), 0,
+            std::as_bytes(std::span(m_light_data).first(std::size_t{m_light_rows_used} *
+                                                        k_light_texture_width)));
+    }
 
     if (shadows) {
         // Each cascade into its own part of the map, kept there by a scissor.
@@ -1489,6 +1775,10 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
         commands.set_uniforms(uniform_bytes());
         if (shadows) {
             commands.bind_texture(rhi::k_shadow_slot, m_shadow_map.get());
+        }
+        // Without a lights' texture the slot keeps its default, which reads as no lights.
+        if (m_light_texture.exists()) {
+            commands.bind_texture(k_light_slot, m_light_texture.get());
         }
         // Opaque, then cut-out, then blended over both. Each pass binds its own pipelines.
         const core::Frustum* const bounds = camera_bounds ? &*camera_bounds : nullptr;
@@ -1538,6 +1828,7 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
     DREAM_PROFILE_VALUE("Simplified parts", stats.simplified);
     DREAM_PROFILE_VALUE("Debug lines", stats.lines);
     DREAM_PROFILE_VALUE("UI draw commands", stats.ui_commands);
+    DREAM_PROFILE_VALUE("Lights", stats.lights);
     return stats;
 }
 
@@ -1547,8 +1838,13 @@ core::Result<std::unique_ptr<SceneRenderer>> create(const core::Config& config) 
 
 } // namespace
 
+#if defined(DREAM_FORWARD_PLUS)
+[[nodiscard]] core::Result<void> register_renderer_forward_plus(core::ModuleRegistry& registry) {
+#else
 [[nodiscard]] core::Result<void> register_renderer_forward(core::ModuleRegistry& registry) {
-    return registry.add(core::ModuleDescriptor<SceneRenderer>{.name = "forward", .create = &create});
+#endif
+    return registry.add(
+        core::ModuleDescriptor<SceneRenderer>{.name = k_module_name, .create = &create});
 }
 
 } // namespace dream::modules

@@ -25,6 +25,7 @@ struct FakeFrame {
     std::optional<renderer::View> view;
     std::optional<renderer::Sunlight> sun;
     std::vector<renderer::MeshDraw> meshes;
+    std::vector<renderer::Light> lights;
     std::vector<renderer::LineVertex> lines;
     std::vector<FakeUiLayer> ui_layers;
 };
@@ -63,6 +64,7 @@ public:
                        .view = frame.view,
                        .sun = frame.sun,
                        .meshes = {frame.meshes.begin(), frame.meshes.end()},
+                       .lights = {frame.lights.begin(), frame.lights.end()},
                        .lines = {frame.lines.begin(), frame.lines.end()},
                        .ui_layers = {}};
         renderer::FrameStats stats;

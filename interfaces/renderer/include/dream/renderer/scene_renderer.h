@@ -145,6 +145,27 @@ struct Sunlight {
     bool casts_shadows = true;
 };
 
+// A light other than the sun (ADR 0037): a point that shines every way, or a spot that shines in a
+// cone. Neither casts shadows.
+enum class LightType : std::uint8_t { Point, Spot };
+
+struct Light {
+    LightType type = LightType::Point;
+    core::Vec3 position;
+    // Where a spot points. Unit length.
+    core::Vec3 direction{0.0f, 0.0f, -1.0f};
+    // Linear. With `intensity`, what a white matte surface facing it 1 m away reflects, in the
+    // sun's units, falling off with the square of the distance.
+    core::Vec3 color{1.0f, 1.0f, 1.0f};
+    float intensity = 1.0f;
+    // How far it reaches, in meters: its light fades smoothly to nothing there.
+    float range = 10.0f;
+    // A spot's cone, as angles from its direction, in radians: full inside the inner one, fading
+    // to nothing at the outer one.
+    float inner_angle = 0.35f;
+    float outer_angle = 0.6f;
+};
+
 // A layer of the game's interface, drawn over the scene in the order given, moved by `offset`
 // pixels.
 struct UiLayer {
@@ -159,6 +180,9 @@ struct Frame {
     // Without a view, only the interface layers are drawn, over the clear color.
     std::optional<View> view;
     std::optional<Sunlight> sun;
+    // Point and spot lights. A renderer may draw only some, such as the nearest, when there are
+    // more than it takes.
+    std::span<const Light> lights;
     std::span<const MeshDraw> meshes;
     std::span<const LineVertex> lines;
     std::span<const UiLayer> ui_layers;
@@ -184,6 +208,10 @@ struct FrameStats {
     std::uint32_t blended = 0;
     // Parts skinned by their joints, which `draws` also counts.
     std::uint32_t skinned = 0;
+    // Point and spot lights in view that the frame was lit with, and those left out for being
+    // more than the renderer takes.
+    std::uint32_t lights = 0;
+    std::uint32_t lights_dropped = 0;
 };
 
 // Reads one of the game's files, such as "assets:/shaders/forward.vert.spv".

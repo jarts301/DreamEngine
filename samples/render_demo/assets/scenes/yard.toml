@@ -1,6 +1,7 @@
 # A small yard: textured crates on a checkered ground, some spheres, a gold ball, a brick wall
-# with a normal map, a glass pane, a cut-out fence, a glowing lamp, an animated tentacle, and a low
-# sun.
+# with a normal map, a glass pane, a cut-out fence, a glowing lamp, an animated tentacle, a low sun,
+# and point and spot lights: the lamp's, a spot on the wall, and a ring of small colored lights
+# around the tentacle.
 
 [entities.camera.transform]
 position = [0.0, 5.0, 11.0]
@@ -91,6 +92,86 @@ scale = [0.25, 0.25, 0.25]
 [entities.lamp.mesh]
 model = "assets:/models/lamp.glb"
 casts_shadows = false
+
+[entities.lamp.point_light]
+color = [1.0, 0.45, 0.12]
+intensity = 2.5
+range = 4.0
+
+[entities.wall_spot.transform]
+position = [0.85, 3.2, -2.6]
+rotation = [-45.0, 0.0, 0.0]
+
+[entities.wall_spot.spot_light]
+color = [0.55, 0.75, 1.0]
+intensity = 20.0
+range = 8.0
+inner_angle = 14.0
+outer_angle = 26.0
+
+[entities.ring_light_0.transform]
+position = [1.00, 0.45, 2.90]
+
+[entities.ring_light_0.point_light]
+color = [1.0, 0.2, 0.2]
+intensity = 0.5
+range = 1.8
+
+[entities.ring_light_1.transform]
+position = [0.68, 0.45, 3.68]
+
+[entities.ring_light_1.point_light]
+color = [1.0, 0.6, 0.1]
+intensity = 0.5
+range = 1.8
+
+[entities.ring_light_2.transform]
+position = [-0.10, 0.45, 4.00]
+
+[entities.ring_light_2.point_light]
+color = [0.9, 0.9, 0.2]
+intensity = 0.5
+range = 1.8
+
+[entities.ring_light_3.transform]
+position = [-0.88, 0.45, 3.68]
+
+[entities.ring_light_3.point_light]
+color = [0.2, 1.0, 0.3]
+intensity = 0.5
+range = 1.8
+
+[entities.ring_light_4.transform]
+position = [-1.20, 0.45, 2.90]
+
+[entities.ring_light_4.point_light]
+color = [0.2, 0.8, 1.0]
+intensity = 0.5
+range = 1.8
+
+[entities.ring_light_5.transform]
+position = [-0.88, 0.45, 2.12]
+
+[entities.ring_light_5.point_light]
+color = [0.3, 0.3, 1.0]
+intensity = 0.5
+range = 1.8
+
+[entities.ring_light_6.transform]
+position = [-0.10, 0.45, 1.80]
+
+[entities.ring_light_6.point_light]
+color = [0.8, 0.3, 1.0]
+intensity = 0.5
+range = 1.8
+
+[entities.ring_light_7.transform]
+position = [0.68, 0.45, 2.12]
+
+[entities.ring_light_7.point_light]
+color = [1.0, 0.3, 0.7]
+intensity = 0.5
+range = 1.8
 
 [entities.tentacle.transform]
 position = [-0.1, 0.0, 2.9]

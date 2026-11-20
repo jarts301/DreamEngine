@@ -22,6 +22,7 @@ struct FakeDeviceState {
     platform::NativeWindow last_window;
     std::vector<std::byte> last_uniforms;
     std::vector<std::byte> last_draw_uniforms;
+    std::vector<std::byte> last_texture_update;
     std::vector<std::byte> last_vertices;
     std::vector<std::byte> last_instances;
     // What memory_usage reports. Nothing, like a backend that can't tell, unless a test sets it.
@@ -163,6 +164,13 @@ private:
     void set_draw_uniforms(std::span<const std::byte> data) override {
         m_state.last_draw_uniforms.assign(data.begin(), data.end());
         m_state.calls.push_back(std::format("draw_uniforms {}", data.size()));
+    }
+
+    void update_texture(rhi::TextureHandle texture, std::uint32_t first_row,
+                        std::span<const std::byte> rows) override {
+        m_state.last_texture_update.assign(rows.begin(), rows.end());
+        m_state.calls.push_back(std::format("update_texture {} {} {}", texture.index, first_row,
+                                            rows.size()));
     }
 
     void bind_texture(std::uint32_t slot, rhi::TextureHandle texture) override {

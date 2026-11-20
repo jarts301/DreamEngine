@@ -31,10 +31,11 @@ endif()
 if(STAGE STREQUAL "vertex")
     list(APPEND options --fixup-clipspace)
 endif()
-# Push constants become an ordinary uniform block.
+# Push constants become an ordinary uniform block. A texture read without a sampler, such as the
+# lights' data (ADR 0037), becomes a combined sampler that keeps the texture's binding.
 execute_process(
     COMMAND "${SPIRV_CROSS}" "${spirv}" ${options} --version ${VERSION}
-        --glsl-emit-push-constant-as-ubo
+        --glsl-emit-push-constant-as-ubo --combined-samplers-inherit-bindings
     OUTPUT_VARIABLE glsl
     RESULT_VARIABLE result)
 file(REMOVE "${spirv}")

@@ -52,6 +52,25 @@ struct DirectionalLight {
     bool casts_shadows = true;
 };
 
+// A light that shines every way from its entity's position, up to `range` meters (ADR 0037).
+struct PointLight {
+    core::Vec3 color{1.0f, 1.0f, 1.0f};
+    // What a white matte surface facing it 1 m away reflects, in the sun's units; it falls off with
+    // the square of the distance.
+    float intensity = 1.0f;
+    float range = 10.0f;
+};
+
+// A light that shines in a cone along its entity's -Z axis, as cameras look (ADR 0037).
+struct SpotLight {
+    core::Vec3 color{1.0f, 1.0f, 1.0f};
+    float intensity = 1.0f;
+    float range = 10.0f;
+    // From the cone's middle, in degrees: full inside the inner angle, fading out to the outer.
+    float inner_angle = 20.0f;
+    float outer_angle = 35.0f;
+};
+
 // The field of view to use so that `vertical_fov_radians` also fits on a narrow screen. On a
 // portrait screen this widens the view, so a scene framed for landscape isn't cropped at the sides.
 [[nodiscard]] float fitted_vertical_fov(float vertical_fov_radians, float aspect) noexcept;
@@ -110,6 +129,21 @@ struct RendererShaders {};
 //     intensity = 1.3
 //     ambient = 0.3
 //     casts_shadows = true
+//
+//     [entities.lamp.point_light]
+//     color = [1.0, 0.6, 0.3]           # All optional.
+//     intensity = 2.0
+//     range = 6.0
+//
+//     [entities.torch.spot_light]       # Points along the entity's -Z axis.
+//     color = [1.0, 1.0, 1.0]           # All optional.
+//     intensity = 8.0
+//     range = 12.0
+//     inner_angle = 20.0                # Degrees.
+//     outer_angle = 35.0
+//
+// How many point and spot lights are drawn depends on the renderer module: `forward` takes the 16
+// nearest, and `forward_plus` 256 (ADR 0037).
 class Renderer {
 public:
     Renderer();
@@ -140,6 +174,15 @@ public:
     // How many parts of models were drawn in the last call to render.
     [[nodiscard]] std::uint32_t last_draw_count() const noexcept {
         return m_last_stats.draws;
+    }
+
+    // How many point and spot lights the last frame was lit with, and how many in view were left
+    // out for being more than the renderer module takes (ADR 0037).
+    [[nodiscard]] std::uint32_t last_light_count() const noexcept {
+        return m_last_stats.lights;
+    }
+    [[nodiscard]] std::uint32_t last_dropped_light_count() const noexcept {
+        return m_last_stats.lights_dropped;
     }
 
     // How many parts of models the last call to render skipped, because they were out of view.
@@ -195,6 +238,7 @@ private:
     DebugLines m_debug_lines;
     // Reused every frame, so gathering the scene allocates nothing once it has grown.
     std::vector<renderer::MeshDraw> m_meshes;
+    std::vector<renderer::Light> m_lights;
     renderer::FrameStats m_last_stats;
 };
 

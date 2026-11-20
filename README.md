@@ -119,6 +119,22 @@ as for glass, and double-sided. [Materials](docs/guides/materials.md) explains h
 that look right, and [ADR 0033](docs/adr/0033-pbr-materials-and-normal-maps.md) and
 [ADR 0034](docs/adr/0034-transparency.md) record the design.
 
+## Lights
+
+Besides the sun, scenes can have point lights and spot lights, which move with their entities:
+
+```toml
+[entities.lamp.point_light]
+color = [1.0, 0.6, 0.3]
+intensity = 3.0
+range = 6.0
+```
+
+`forward_plus` sorts up to 256 of them into clusters of the view each frame, so each pixel lights
+itself only with the lights that reach it; `forward` takes the 16 nearest. They don't cast shadows
+yet. [Lighting](docs/guides/lighting.md) explains placing lights and how bright to make them, and
+[ADR 0037](docs/adr/0037-point-and-spot-lights.md) records the design.
+
 ## Animation
 
 Skinned glTF models load with their skeleton and animations, and are skinned on the GPU on every
@@ -265,7 +281,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 | Interface | Backends | Windows | Android | Notes |
 |---|---|---|---|---|
 | `rhi` | `vulkan`, `directx12`, `directx`, `opengl`, `opengles`, `null` | all | `vulkan`, `opengles`, `null` | `directx` is Direct3D 11. A game's shaders are compiled for whichever its list names. |
-| `renderer` | `forward`, `null` | all | all | `forward` brings its shaders; `null` only clears the window. |
+| `renderer` | `forward_plus`, `forward`, `null` | all | all | `forward_plus` takes up to 256 point and spot lights in clusters, `forward` the 16 nearest; both bring the same shaders. `null` only clears the window. |
 | `mesh_simplifier` | `meshoptimizer`, `null` | all | all | Makes the simpler versions of models that the renderer draws far away. Optional. |
 | `tangent_generator` | `mikktspace`, `null` | all | all | Makes tangents for normal maps on models exported without them. Optional. |
 | `input_device` | `sdl3_gamepad`, `null` | all | all | Gamepads, bound to the same actions as keys. Optional. |

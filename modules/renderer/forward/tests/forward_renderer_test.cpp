@@ -295,15 +295,14 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer draws the scene in HDR, then to
                                  rhi::TextureFormat::Depth32Float});
 
     // The model is drawn in the pass into the targets, and the tone mapping reads the color target
-    // in slot 1 afterwards.
+    // in slot 1 afterwards, where the scene's pass read the lights.
     const auto pass = first(calls, "render_targets");
     const auto model = first(calls, "draw 0+3");
     REQUIRE(pass < static_cast<std::ptrdiff_t>(calls.size()));
     CHECK(pass < model);
-    const auto read =
-        std::ranges::find_if(calls, [](const std::string& c) { return c.ends_with(" at 1"); });
+    const auto read = std::find_if(calls.begin() + model, calls.end(),
+                                   [](const std::string& c) { return c.ends_with(" at 1"); });
     REQUIRE(read != calls.end());
-    CHECK(read - calls.begin() > model);
 
     // The targets are kept while the size stays.
     const auto made = state.textures.size();
@@ -716,4 +715,87 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer draws skinned parts one each, w
     CHECK(rows[15] == 1.0f);
     CHECK(rows[19] == 2.0f);
     CHECK(rows[23] == 3.0f);
+}
+
+namespace {
+
+// The lights' texture as last updated, as floats.
+std::vector<float> light_texels(const FakeDeviceState& state) {
+    std::vector<float> floats(state.last_texture_update.size() / sizeof(float));
+    std::memcpy(floats.data(), state.last_texture_update.data(),
+                floats.size() * sizeof(float));
+    return floats;
+}
+
+Light point_at(Vec3 position, float range = 2.0f) {
+    return Light{.type = LightType::Point, .position = position, .intensity = 1.0f,
+                 .range = range};
+}
+
+} // namespace
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer sends the lights in view, before any pass") {
+    start();
+    const std::array meshes{mesh(0)};
+    // In view, and far behind the camera at z = 5.
+    const std::array lights{point_at(Vec3{0.0f, 0.0f, 0.0f}),
+                            // Farther from the camera than the point, so it comes second.
+                            Light{.type = LightType::Spot, .position = Vec3{1.0f, 0.0f, -2.0f},
+                                  .direction = Vec3{0.0f, -1.0f, 0.0f}, .range = 3.0f},
+                            point_at(Vec3{0.0f, 0.0f, 50.0f})};
+    FrameStats stats;
+    const Calls calls = draw(Frame{.size = k_size, .view = view_from({0, 0, 5}),
+                                   .lights = lights, .meshes = meshes},
+                             &stats);
+    CHECK(stats.lights == 2);
+    CHECK(stats.lights_dropped == 0);
+
+    const auto update = std::ranges::find_if(
+        calls, [](const std::string& call) { return call.starts_with("update_texture"); });
+    REQUIRE(update != calls.end());
+    CHECK(update < std::ranges::find(calls, "render_targets"));
+
+    // The header: two lights in one cluster, then the lights, each its four texels.
+    const std::vector<float> texels = light_texels(state);
+    REQUIRE(texels.size() >= 256 * 4);
+    CHECK(texels[0] == 2.0f);
+    CHECK(texels[1] == 1.0f);
+    CHECK(texels[2] == 1.0f);
+    CHECK(texels[3] == 1.0f);
+    const auto cluster_start = static_cast<std::size_t>(texels[6]);
+    CHECK(texels[cluster_start * 4 + 1] == 2.0f);
+    // The spot: its range, a type of 1, and its direction.
+    const std::size_t spot = (4 + 4) * 4;
+    CHECK(texels[spot + 3] == 3.0f);
+    CHECK(texels[spot + 7] == 1.0f);
+    CHECK(texels[spot + 9] == Approx(-1.0f));
+}
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer takes the 16 nearest lights") {
+    start();
+    const std::array meshes{mesh(0)};
+    std::vector<Light> lights;
+    for (int index = 0; index < 20; ++index) {
+        lights.push_back(point_at(Vec3{0.0f, 0.0f, -static_cast<float>(index)}, 1.0f));
+    }
+    FrameStats stats;
+    draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .lights = lights, .meshes = meshes},
+         &stats);
+    CHECK(stats.lights == 16);
+    CHECK(stats.lights_dropped == 4);
+    // The nearest first: the one at the origin is 5 from the camera, the farthest kept 20.
+    const std::vector<float> texels = light_texels(state);
+    CHECK(texels[4 * 4 + 2] == 0.0f);
+    CHECK(texels[(4 + 15 * 4) * 4 + 2] == -15.0f);
+}
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer's light limit comes from the configuration") {
+    start("[renderer]\nmax_lights = 1");
+    const std::array meshes{mesh(0)};
+    const std::array lights{point_at(Vec3{}), point_at(Vec3{1.0f, 0.0f, 0.0f})};
+    FrameStats stats;
+    draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .lights = lights, .meshes = meshes},
+         &stats);
+    CHECK(stats.lights == 1);
+    CHECK_FALSE(make("[renderer]\nmax_lights = 17").value()->start(device).has_value());
 }

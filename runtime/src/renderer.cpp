@@ -104,7 +104,81 @@ core::Result<void> read_directional_light(ComponentContext& context) {
     return {};
 }
 
-// The [lods] table, which says how simpler versions of models are made.
+// A point or spot light's color, intensity and range, which both share.
+struct LightFields {
+    Vec3 color{1.0f, 1.0f, 1.0f};
+    float intensity = 1.0f;
+    float range = 10.0f;
+};
+
+core::Result<LightFields> read_light_fields(const ComponentContext& context) {
+    LightFields fields;
+    const core::Result<Vec3> color = context.data.vec3("color", fields.color);
+    const core::Result<float> intensity = context.data.number("intensity", fields.intensity);
+    const core::Result<float> range = context.data.number("range", fields.range);
+    if (!color.has_value()) {
+        return color.error();
+    }
+    if (!intensity.has_value()) {
+        return intensity.error();
+    }
+    if (!range.has_value()) {
+        return range.error();
+    }
+    if (!(range.value() > 0.0f) || intensity.value() < 0.0f) {
+        return core::Error{core::ErrorCode::InvalidArgument,
+                           "A light's range must be above 0, and its intensity not below 0"};
+    }
+    return LightFields{color.value(), intensity.value(), range.value()};
+}
+
+core::Result<void> read_point_light(ComponentContext& context) {
+    if (core::Result<void> known = context.data.check_keys({"color", "intensity", "range"});
+        !known.has_value()) {
+        return known;
+    }
+    const core::Result<LightFields> fields = read_light_fields(context);
+    if (!fields.has_value()) {
+        return fields.error();
+    }
+    context.world.registry().emplace_or_replace<PointLight>(
+        context.entity, PointLight{.color = fields.value().color,
+                                   .intensity = fields.value().intensity,
+                                   .range = fields.value().range});
+    return {};
+}
+
+core::Result<void> read_spot_light(ComponentContext& context) {
+    if (core::Result<void> known = context.data.check_keys(
+            {"color", "intensity", "range", "inner_angle", "outer_angle"});
+        !known.has_value()) {
+        return known;
+    }
+    const core::Result<LightFields> fields = read_light_fields(context);
+    if (!fields.has_value()) {
+        return fields.error();
+    }
+    SpotLight light{.color = fields.value().color,
+                    .intensity = fields.value().intensity,
+                    .range = fields.value().range};
+    const core::Result<float> inner = context.data.number("inner_angle", light.inner_angle);
+    const core::Result<float> outer = context.data.number("outer_angle", light.outer_angle);
+    if (!inner.has_value()) {
+        return inner.error();
+    }
+    if (!outer.has_value()) {
+        return outer.error();
+    }
+    if (inner.value() < 0.0f || outer.value() <= inner.value() || outer.value() >= 90.0f) {
+        return core::Error{core::ErrorCode::InvalidArgument,
+                           "A spot light's angles must go 0 <= inner_angle < outer_angle < 90"};
+    }
+    light.inner_angle = inner.value();
+    light.outer_angle = outer.value();
+    context.world.registry().emplace_or_replace<SpotLight>(context.entity, light);
+    return {};
+}
+
 // Normal maps need tangents, which neither the file nor a tangent generator gave these parts.
 void warn_about_missing_tangents(const ModelData& data, std::string_view path) {
     const bool missing = std::ranges::any_of(data.parts, [&](const ModelPart& part) {
@@ -124,6 +198,7 @@ void warn_about_missing_tangents(const ModelData& data, std::string_view path) {
     }
 }
 
+// The [lods] table, which says how simpler versions of models are made.
 core::Result<LodOptions> read_lod_options(const core::Config& config) {
     LodOptions options;
     const std::int64_t levels = config.get_int("lods.levels").value_or(options.levels);
@@ -457,6 +532,8 @@ core::Result<void> Renderer::initialize(App& app,
     app.scenes().register_component("mesh", &read_mesh);
     app.scenes().register_component("camera", &read_camera);
     app.scenes().register_component("directional_light", &read_directional_light);
+    app.scenes().register_component("point_light", &read_point_light);
+    app.scenes().register_component("spot_light", &read_spot_light);
     return {};
 }
 
@@ -534,6 +611,34 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
             }
         }
         frame.meshes = m_meshes;
+
+        // Point and spot lights, where their entities are (ADR 0037).
+        m_lights.clear();
+        for (const auto [entity, transform, light] :
+             world.registry().view<const WorldTransform, const PointLight>().each()) {
+            m_lights.push_back(renderer::Light{
+                .type = renderer::LightType::Point,
+                .position = core::transform_point(transform.matrix, Vec3{}),
+                .color = light.color,
+                .intensity = light.intensity,
+                .range = light.range});
+        }
+        for (const auto [entity, transform, light] :
+             world.registry().view<const WorldTransform, const SpotLight>().each()) {
+            const Vec3 forward =
+                core::transform_direction(transform.matrix, Vec3{0.0f, 0.0f, -1.0f});
+            m_lights.push_back(renderer::Light{
+                .type = renderer::LightType::Spot,
+                .position = core::transform_point(transform.matrix, Vec3{}),
+                .direction = core::length(forward) > 0.0f ? core::normalized(forward)
+                                                          : Vec3{0.0f, 0.0f, -1.0f},
+                .color = light.color,
+                .intensity = light.intensity,
+                .range = light.range,
+                .inner_angle = core::radians(light.inner_angle),
+                .outer_angle = core::radians(light.outer_angle)});
+        }
+        frame.lights = m_lights;
         frame.lines = m_debug_lines.vertices();
     }
 
