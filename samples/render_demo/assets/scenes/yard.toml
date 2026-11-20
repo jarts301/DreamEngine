@@ -1,7 +1,7 @@
 # A small yard: textured crates on a checkered ground, some spheres, a gold ball, a brick wall
 # with a normal map, a glass pane, a cut-out fence, a glowing lamp, an animated tentacle, a low sun,
-# and point and spot lights: the lamp's, a spot on the wall, and a ring of small colored lights
-# around the tentacle.
+# point and spot lights: the lamp's, a spot on the wall, and a ring of small colored lights
+# around the tentacle, and particles: a campfire with sparks and smoke.
 
 [entities.camera.transform]
 position = [0.0, 5.0, 11.0]
@@ -191,3 +191,81 @@ model = "assets:/models/crate.glb"
 
 [entities.spinner.spin]
 speed = 1.2
+
+# A campfire made of particles (see docs/guides/particles.md): flames that add their light,
+# sparks thrown up and falling back, smoke rising and spreading above, and a point light for the
+# glow on the ground.
+[entities.campfire.transform]
+position = [2.3, 0.05, 5.0]
+
+[entities.campfire.point_light]
+color = [1.0, 0.5, 0.15]
+intensity = 2.0
+range = 3.5
+
+[entities.flames]
+parent = "campfire"
+
+[entities.flames.particle_emitter]
+blend = "additive"
+shape = "cone"
+radius = 0.22
+cone_angle = 15.0
+rate = 80.0
+max_particles = 128
+lifetime = [0.5, 0.9]
+speed = [0.6, 1.1]
+size = [0.4, 0.6]
+end_size = 0.2
+start_color = [1.6, 0.6, 0.16]
+end_color = [0.9, 0.12, 0.02]
+end_alpha = 0.0
+gravity = [0.0, 0.8, 0.0]
+seed = 1
+
+[entities.sparks]
+parent = "campfire"
+
+[entities.sparks.particle_emitter]
+blend = "additive"
+shape = "cone"
+radius = 0.15
+cone_angle = 25.0
+rate = 18.0
+lifetime = [0.9, 1.5]
+speed = [2.2, 3.2]
+size = [0.05, 0.08]
+end_size = 0.5
+start_color = [4.0, 2.0, 0.6]
+end_color = [2.0, 0.4, 0.05]
+end_alpha = 0.0
+gravity = [0.0, -3.0, 0.0]
+drag = 0.6
+seed = 2
+
+[entities.smoke]
+parent = "campfire"
+
+[entities.smoke.transform]
+position = [0.0, 0.7, 0.0]
+
+[entities.smoke.particle_emitter]
+texture = "assets:/textures/smoke.png"
+shape = "cone"
+radius = 0.15
+cone_angle = 12.0
+rate = 8.0
+max_particles = 64
+lifetime = [3.5, 4.5]
+speed = [0.5, 0.7]
+size = [0.6, 0.8]
+end_size = 4.0
+rotation = [0.0, 360.0]
+spin = [-25.0, 25.0]
+start_color = [0.22, 0.21, 0.2]
+start_alpha = 0.8
+end_color = [0.55, 0.55, 0.55]
+end_alpha = 0.0
+gravity = [0.3, 0.1, 0.0]
+drag = 0.3
+seed = 3

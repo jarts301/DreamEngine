@@ -166,6 +166,35 @@ struct Light {
     float outer_angle = 0.6f;
 };
 
+// How a batch of particles combines with what is behind it (ADR 0038).
+enum class ParticleBlend : std::uint8_t {
+    // Over what is behind them by their opacity: smoke, dust, leaves. Drawn farthest first.
+    Alpha,
+    // Adding their light to what is behind them: fire, sparks, magic. They never darken, and their
+    // order doesn't matter.
+    Additive,
+};
+
+// One particle, drawn as a square facing the camera.
+struct ParticleQuad {
+    // Its middle, in world space.
+    core::Vec3 position;
+    // Across, in meters.
+    float size = 0.0f;
+    // Linear, multiplying the texture, with its opacity in w. Not premultiplied.
+    core::Vec4 color{1.0f, 1.0f, 1.0f, 1.0f};
+    // In radians, turning it around the view direction.
+    float rotation = 0.0f;
+};
+
+// Particles drawn with one texture and one way of blending, such as one emitter's.
+struct ParticleBatch {
+    std::span<const ParticleQuad> particles;
+    // sRGB colors with straight alpha. Invalid draws each particle as a soft round dot.
+    rhi::TextureHandle texture;
+    ParticleBlend blend = ParticleBlend::Alpha;
+};
+
 // A layer of the game's interface, drawn over the scene in the order given, moved by `offset`
 // pixels.
 struct UiLayer {
@@ -184,6 +213,8 @@ struct Frame {
     // more than it takes.
     std::span<const Light> lights;
     std::span<const MeshDraw> meshes;
+    // Drawn over the scene's surfaces, blended ones included, and hidden behind opaque ones.
+    std::span<const ParticleBatch> particles;
     std::span<const LineVertex> lines;
     std::span<const UiLayer> ui_layers;
     // The texture an interface draw command names, by its id. Invalid draws as white.
@@ -212,6 +243,9 @@ struct FrameStats {
     // more than the renderer takes.
     std::uint32_t lights = 0;
     std::uint32_t lights_dropped = 0;
+    // Particles drawn, and those left out for being more than the renderer takes in a frame.
+    std::uint32_t particles = 0;
+    std::uint32_t particles_dropped = 0;
 };
 
 // Reads one of the game's files, such as "assets:/shaders/forward.vert.spv".

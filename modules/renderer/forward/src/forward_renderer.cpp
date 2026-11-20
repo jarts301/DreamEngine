@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <cstring>
 #include <format>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -150,6 +151,32 @@ struct UiConstants {
     float premultiplied = 0.0f;
 };
 
+// One particle, as particles.slang reads it per instance (ADR 0038): its middle and size, its color,
+// and the cosine and sine of its rotation, with 1 in z if it adds its light.
+struct ParticleInstance {
+    Vec4 position_size;
+    Vec4 color;
+    Vec4 turn;
+};
+
+struct ParticleConstants {
+    Vec4 right;
+    Vec4 up;
+    Vec4 settings;
+};
+
+// The most particles one frame draws: 1.5 MB of the frame's 4 MB of per-frame memory.
+constexpr std::size_t k_max_particles_per_frame = 32768;
+// How many particles one draw takes at most.
+constexpr std::size_t k_max_particles_per_draw = 8192;
+
+// The corners of a particle's square, and its two triangles, counter-clockwise from the camera.
+constexpr std::array<core::Vec2, 4> k_particle_corners{
+    core::Vec2{-0.5f, -0.5f}, core::Vec2{0.5f, -0.5f}, core::Vec2{0.5f, 0.5f},
+    core::Vec2{-0.5f, 0.5f}};
+constexpr std::array<std::uint32_t, 6> k_particle_indices{0, 1, 2, 0, 2, 3};
+
+static_assert(sizeof(ParticleInstance) == 48);
 static_assert(sizeof(FrameUniforms) <= rhi::k_max_uniform_size);
 static_assert(sizeof(FrameUniforms) == 496);
 static_assert(sizeof(InstanceData) == 160);
@@ -238,6 +265,7 @@ private:
 using OwnedTexture = Owned<rhi::TextureHandle, &rhi::Device::destroy_texture>;
 using OwnedShader = Owned<rhi::ShaderHandle, &rhi::Device::destroy_shader>;
 using OwnedPipeline = Owned<rhi::PipelineHandle, &rhi::Device::destroy_pipeline>;
+using OwnedBuffer = Owned<rhi::BufferHandle, &rhi::Device::destroy_buffer>;
 
 // What the project's [renderer] table and the device choose (ADR 0028, 0029).
 // The lights' texture: 256 texels across, of four floats each, and as many rows as fit the
@@ -590,6 +618,8 @@ struct Pipelines {
     SidedPipelines masked_skinned;
     SidedPipelines blended_skinned;
     OwnedPipeline lines;
+    // Particles: premultiplied alpha, testing depth without writing it (ADR 0038).
+    OwnedPipeline particles;
     OwnedPipeline ui;
     OwnedPipeline ui_premultiplied;
     OwnedPipeline shadow;        // Only with shadows.
@@ -612,6 +642,8 @@ public:
         m_shadow_map.reset();
         m_light_texture.reset();
         m_flat_normal.reset();
+        m_particle_corners.reset();
+        m_particle_indices.reset();
         m_hdr_color.reset();
         m_hdr_depth.reset();
     }
@@ -632,6 +664,20 @@ public:
             return flat.error();
         }
         m_flat_normal = OwnedTexture(device, flat.value());
+
+        // Every particle is this one square, placed and sized per instance.
+        const core::Result<rhi::BufferHandle> corners = device.create_buffer(
+            rhi::BufferUsage::Vertex, std::as_bytes(std::span(k_particle_corners)));
+        if (!corners.has_value()) {
+            return corners.error();
+        }
+        m_particle_corners = OwnedBuffer(device, corners.value());
+        const core::Result<rhi::BufferHandle> corner_indices = device.create_buffer(
+            rhi::BufferUsage::Index, std::as_bytes(std::span(k_particle_indices)));
+        if (!corner_indices.has_value()) {
+            return corner_indices.error();
+        }
+        m_particle_indices = OwnedBuffer(device, corner_indices.value());
 
         // The lights' texture, rewritten each frame. Without it, only the sun lights the scene.
         const rhi::TextureDesc light_desc{.width = k_light_texture_width,
@@ -754,6 +800,9 @@ private:
                      const core::Frustum* view, FrameStats& stats);
     void draw_lines(rhi::CommandList& commands, std::span<const LineVertex> lines,
                     FrameStats& stats);
+    // Draws the frame's particles over the scene: blended batches farthest first, each of their
+    // particles farthest first, then additive ones.
+    void draw_particles(rhi::CommandList& commands, const Frame& frame, FrameStats& stats);
     void draw_ui(rhi::CommandList& commands, const Frame& frame, FrameStats& stats);
 
     core::Config m_config;
@@ -777,6 +826,12 @@ private:
     std::vector<std::pair<float, std::uint32_t>> m_light_order;
     // One texel pointing straight out of the surface, for parts without a normal map.
     OwnedTexture m_flat_normal;
+    // The square every particle is drawn as, and what draw_particles reuses between frames.
+    OwnedBuffer m_particle_corners;
+    OwnedBuffer m_particle_indices;
+    std::vector<ParticleInstance> m_particle_instances;
+    std::vector<std::pair<float, std::uint32_t>> m_particle_order;
+    std::vector<std::pair<float, std::uint32_t>> m_batch_order;
     OwnedTexture m_hdr_color;
     OwnedTexture m_hdr_depth;
     platform::SurfaceSize m_hdr_size;
@@ -956,6 +1011,42 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
         return lines.error();
     }
     made.lines = std::move(lines).value();
+
+    const core::Result<rhi::ShaderHandle> particle_vertex =
+        shader("particles.vert", rhi::ShaderStage::Vertex);
+    if (!particle_vertex.has_value()) {
+        return particle_vertex.error();
+    }
+    const core::Result<rhi::ShaderHandle> particle_fragment =
+        shader("particles.frag", rhi::ShaderStage::Fragment);
+    if (!particle_fragment.has_value()) {
+        return particle_fragment.error();
+    }
+    constexpr std::array k_corner_attributes{
+        rhi::VertexAttribute{0, rhi::VertexFormat::Float2, 0},
+    };
+    constexpr std::array k_particle_attributes{
+        rhi::VertexAttribute{1, rhi::VertexFormat::Float4, offsetof(ParticleInstance, position_size)},
+        rhi::VertexAttribute{2, rhi::VertexFormat::Float4, offsetof(ParticleInstance, color)},
+        rhi::VertexAttribute{3, rhi::VertexFormat::Float4, offsetof(ParticleInstance, turn)},
+    };
+    core::Result<OwnedPipeline> particles = pipeline(rhi::PipelineDesc{
+        .vertex_shader = particle_vertex.value(),
+        .fragment_shader = particle_fragment.value(),
+        .vertex_stride = sizeof(core::Vec2),
+        .attributes = k_corner_attributes,
+        .instance_stride = sizeof(ParticleInstance),
+        .instance_attributes = k_particle_attributes,
+        .blend = rhi::BlendMode::PremultipliedAlpha,
+        .depth_write = false,
+        .cull = rhi::CullMode::None,
+        .color_target = hdr,
+        .depth_target = hdr.has_value() ? std::optional(k_depth_format) : std::nullopt,
+    });
+    if (!particles.has_value()) {
+        return particles.error();
+    }
+    made.particles = std::move(particles).value();
 
     const core::Result<rhi::ShaderHandle> ui_vertex = shader("ui.vert", rhi::ShaderStage::Vertex);
     if (!ui_vertex.has_value()) {
@@ -1621,6 +1712,103 @@ void ForwardRenderer::draw_lines(rhi::CommandList& commands, std::span<const Lin
     }
 }
 
+void ForwardRenderer::draw_particles(rhi::CommandList& commands, const Frame& frame,
+                                     FrameStats& stats) {
+    if (frame.particles.empty() || !frame.view.has_value() || !m_pipelines->particles.exists()) {
+        return;
+    }
+    DREAM_PROFILE_ZONE("Particles");
+    const View& view = *frame.view;
+    // The camera's right and up directions: the view-projection matrix's first two rows, as
+    // look_at's rows are the camera's axes and the projection only scales them.
+    const Mat4& matrix = view.view_projection;
+    const Vec3 right = core::normalized(
+        Vec3{matrix.columns[0].x, matrix.columns[1].x, matrix.columns[2].x});
+    const Vec3 up = core::normalized(
+        Vec3{matrix.columns[0].y, matrix.columns[1].y, matrix.columns[2].y});
+
+    // Blended batches farthest first, by their particles' middle, then the additive ones.
+    m_batch_order.clear();
+    std::size_t wanted = 0;
+    for (std::uint32_t index = 0; index < frame.particles.size(); ++index) {
+        const ParticleBatch& batch = frame.particles[index];
+        if (batch.particles.empty()) {
+            continue;
+        }
+        wanted += batch.particles.size();
+        float key = -1.0f;
+        if (batch.blend == ParticleBlend::Alpha) {
+            Vec3 middle{};
+            for (const ParticleQuad& particle : batch.particles) {
+                middle = middle + particle.position;
+            }
+            middle = middle / static_cast<float>(batch.particles.size());
+            key = core::length_squared(middle - view.eye);
+        }
+        m_batch_order.emplace_back(key, index);
+    }
+    std::ranges::stable_sort(m_batch_order, std::ranges::greater{},
+                             &std::pair<float, std::uint32_t>::first);
+
+    commands.bind_pipeline(m_pipelines->particles.get());
+    commands.bind_vertex_buffer(m_particle_corners.get());
+    commands.bind_index_buffer(m_particle_indices.get(), rhi::IndexFormat::UInt32);
+    std::size_t budget = k_max_particles_per_frame;
+    for (const auto& [key, index] : m_batch_order) {
+        const ParticleBatch& batch = frame.particles[index];
+        const bool additive = batch.blend == ParticleBlend::Additive;
+        // Blended particles farthest first, so nearer ones cover them.
+        m_particle_order.clear();
+        for (std::uint32_t particle = 0; particle < batch.particles.size(); ++particle) {
+            const float distance =
+                additive ? 0.0f
+                         : core::length_squared(batch.particles[particle].position - view.eye);
+            m_particle_order.emplace_back(distance, particle);
+        }
+        if (!additive) {
+            std::ranges::sort(m_particle_order, std::ranges::greater{},
+                              &std::pair<float, std::uint32_t>::first);
+        }
+        // Over the frame's limit, the nearest are kept.
+        const std::size_t taken = std::min(budget, m_particle_order.size());
+        const std::size_t skipped = m_particle_order.size() - taken;
+        budget -= taken;
+        m_particle_instances.clear();
+        for (std::size_t at = skipped; at < m_particle_order.size(); ++at) {
+            const ParticleQuad& particle = batch.particles[m_particle_order[at].second];
+            m_particle_instances.push_back(ParticleInstance{
+                .position_size = extend(particle.position, particle.size),
+                .color = particle.color,
+                .turn = Vec4{std::cos(particle.rotation), std::sin(particle.rotation),
+                             additive ? 1.0f : 0.0f, 0.0f}});
+        }
+        if (m_particle_instances.empty()) {
+            continue;
+        }
+        const ParticleConstants constants{
+            .right = extend(right, 0.0f),
+            .up = extend(up, 0.0f),
+            .settings = Vec4{batch.texture.is_valid() ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f}};
+        commands.push_constants(std::as_bytes(std::span(&constants, 1)));
+        commands.bind_texture(batch.texture);
+        for (std::size_t first = 0; first < m_particle_instances.size();
+             first += k_max_particles_per_draw) {
+            const std::span<const ParticleInstance> piece = std::span(m_particle_instances)
+                .subspan(first, std::min(k_max_particles_per_draw,
+                                         m_particle_instances.size() - first));
+            if (!commands.bind_instances(std::as_bytes(piece))) {
+                budget = 0;
+                break;
+            }
+            commands.draw_indexed_instanced(0, static_cast<std::uint32_t>(k_particle_indices.size()),
+                                            static_cast<std::uint32_t>(piece.size()));
+            ++stats.draw_calls;
+            stats.particles += static_cast<std::uint32_t>(piece.size());
+        }
+    }
+    stats.particles_dropped = static_cast<std::uint32_t>(wanted - stats.particles);
+}
+
 void ForwardRenderer::draw_ui(rhi::CommandList& commands, const Frame& frame, FrameStats& stats) {
     if (frame.size.width == 0 || frame.size.height == 0) {
         return;
@@ -1785,6 +1973,7 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
         draw_meshes(commands, frame.meshes, Pass::Opaque, bounds, stats);
         draw_meshes(commands, frame.meshes, Pass::Masked, bounds, stats);
         draw_meshes(commands, frame.meshes, Pass::Blend, bounds, stats);
+        draw_particles(commands, frame, stats);
     };
     if (hdr && m_hdr_color.exists()) {
         // The scene in HDR, then tone-mapped onto the window, with the lines and interface over it.

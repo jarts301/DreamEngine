@@ -5,6 +5,7 @@
 #include "dream/core/profile.h"
 #include "dream/runtime/animation.h"
 #include "dream/runtime/app.h"
+#include "dream/runtime/particles.h"
 #include "dream/runtime/texture.h"
 
 #include <algorithm>
@@ -482,6 +483,62 @@ core::Result<void> Renderer::initialize(App& app,
         m_tangents = std::move(tangents).value();
     }
 
+    // Textures drawn in the world, such as particles': the cooked one when the build made it.
+    app.assets().register_loader<TextureAsset>(
+        [device](AssetLoadContext& context) -> core::Result<TextureAsset> {
+            const std::string path(context.path);
+            if (!path.ends_with(".ktx2")) {
+                if (const auto cooked = context.files.read(cooked_texture_path(path));
+                    cooked.has_value()) {
+                    core::Result<TextureData> loaded = load_ktx2(cooked.value(), *device);
+                    if (!loaded.has_value()) {
+                        return loaded.error();
+                    }
+                    const core::Result<rhi::TextureHandle> texture =
+                        device->create_texture(loaded.value().desc, loaded.value().pixels);
+                    if (!texture.has_value()) {
+                        return texture.error();
+                    }
+                    return TextureAsset{.texture = GpuTexture(*device, texture.value()),
+                                        .width = loaded.value().desc.width,
+                                        .height = loaded.value().desc.height};
+                }
+            }
+            const auto file = context.files.read(path);
+            if (!file.has_value()) {
+                return file.error();
+            }
+            if (is_ktx2(file.value())) {
+                core::Result<TextureData> loaded = load_ktx2(file.value(), *device);
+                if (!loaded.has_value()) {
+                    return loaded.error();
+                }
+                const core::Result<rhi::TextureHandle> texture =
+                    device->create_texture(loaded.value().desc, loaded.value().pixels);
+                if (!texture.has_value()) {
+                    return texture.error();
+                }
+                return TextureAsset{.texture = GpuTexture(*device, texture.value()),
+                                    .width = loaded.value().desc.width,
+                                    .height = loaded.value().desc.height};
+            }
+            const core::Result<ImageData> image = decode_image(file.value());
+            if (!image.has_value()) {
+                return image.error();
+            }
+            const core::Result<rhi::TextureHandle> texture = device->create_texture(
+                rhi::TextureDesc{.width = image.value().width,
+                                 .height = image.value().height,
+                                 .format = rhi::TextureFormat::Rgba8Srgb},
+                image.value().pixels);
+            if (!texture.has_value()) {
+                return texture.error();
+            }
+            return TextureAsset{.texture = GpuTexture(*device, texture.value()),
+                                .width = image.value().width,
+                                .height = image.value().height};
+        });
+
     app.assets().register_loader<ModelAsset>(
         [device, simplifier = m_simplifier.get(), tangents = m_tangents.get(),
          options = lod_options.value()](
@@ -639,6 +696,19 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
                 .outer_angle = core::radians(light.outer_angle)});
         }
         frame.lights = m_lights;
+
+        // Particles, as Particles::update left them (ADR 0038).
+        m_particles.clear();
+        for (const auto [entity, emitter] : world.registry().view<const ParticleEmitter>().each()) {
+            if (!emitter.particles.empty()) {
+                m_particles.push_back(renderer::ParticleBatch{
+                    .particles = emitter.particles,
+                    .texture = emitter.texture ? emitter.texture->texture.get()
+                                               : rhi::TextureHandle{},
+                    .blend = emitter.blend});
+            }
+        }
+        frame.particles = m_particles;
         frame.lines = m_debug_lines.vertices();
     }
 
@@ -657,6 +727,7 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
     DREAM_PROFILE_VALUE("Shadow casters", m_last_stats.shadow_casters);
     DREAM_PROFILE_VALUE("Culled parts", m_last_stats.culled);
     DREAM_PROFILE_VALUE("Debug lines", m_last_stats.lines);
+    DREAM_PROFILE_VALUE("Particles", m_last_stats.particles);
     DREAM_PROFILE_VALUE("UI draw commands", m_last_stats.ui_commands);
 }
 

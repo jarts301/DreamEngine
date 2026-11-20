@@ -42,6 +42,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0035](0035-gamepads.md) | Gamepads through an `input_device` module, bound to the same actions as keys, with analog values |
 | [0036](0036-skeletal-animation.md) | Skeletal animation through an `animation` module (ozz-animation), with GPU skinning |
 | [0037](0037-point-and-spot-lights.md) | Point and spot lights, sorted into clusters on the CPU, in `forward` and `forward_plus` |
+| [0038](0038-particles.md) | Particles: a `particles` interface simulated on the CPU, drawn as camera-facing squares |
 
 ## Template
 

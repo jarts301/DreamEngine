@@ -8,6 +8,7 @@ height = 540
 
 [demo]
 animation_time = 0.5
+particle_time = 1.5
 quit_after_frames = 600
 spin = false
 
@@ -43,6 +44,7 @@ renderer = ["forward_plus"]
 mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
 animation = ["ozz"]
+particles = ["cpu"]
 
 [audio]
 muted = true

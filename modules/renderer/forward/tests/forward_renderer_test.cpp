@@ -799,3 +799,104 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer's light limit comes from the co
     CHECK(stats.lights == 1);
     CHECK_FALSE(make("[renderer]\nmax_lights = 17").value()->start(device).has_value());
 }
+
+// The instances a particle draw sent, as particles.slang reads them: middle and size, color, and
+// the rotation's cosine and sine with 1 in z if additive.
+std::vector<std::array<float, 12>> particle_instances(const FakeDeviceState& state) {
+    std::vector<std::array<float, 12>> instances(state.last_instances.size() /
+                                                 sizeof(std::array<float, 12>));
+    std::memcpy(instances.data(), state.last_instances.data(),
+                instances.size() * sizeof(std::array<float, 12>));
+    return instances;
+}
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer draws particles after the scene, farthest first") {
+    start();
+    const std::array smoke{
+        ParticleQuad{.position = {0.0f, 0.0f, 2.0f}, .size = 0.5f},
+        ParticleQuad{.position = {0.0f, 0.0f, -3.0f}, .size = 0.7f,
+                     .color = {1.0f, 0.5f, 0.25f, 0.5f}},
+        ParticleQuad{.position = {0.0f, 0.0f, 0.0f}, .size = 0.6f},
+    };
+    const std::array sparks{
+        ParticleQuad{.position = {1.0f, 0.0f, 0.0f}, .size = 0.1f, .rotation = 1.5707963f},
+    };
+    const std::array batches{
+        ParticleBatch{.particles = sparks, .blend = ParticleBlend::Additive},
+        ParticleBatch{.particles = smoke,
+                      .texture = rhi::TextureHandle{.index = 7, .generation = 1}},
+    };
+    const std::array meshes{part_with(0, AlphaMode::Blend, Vec3{0.0f, 0.0f, 0.0f})};
+    FrameStats stats;
+    const Calls calls = draw(Frame{.size = k_size,
+                                   .view = view_from({0, 0, 5}),
+                                   .meshes = meshes,
+                                   .particles = batches},
+                             &stats);
+    CHECK(stats.particles == 4);
+    CHECK(stats.particles_dropped == 0);
+
+    // The blended part, then the smoke with its texture, then the sparks without one.
+    std::vector<std::string> order;
+    for (const std::string& call : calls) {
+        if (call.starts_with("draw ") || (call.starts_with("bind_texture") &&
+                                         call.find(" at ") == std::string::npos)) {
+            order.push_back(call);
+        }
+    }
+    const auto smoke_draw = std::ranges::find(order, "draw 0+6 x3");
+    const auto sparks_draw = std::ranges::find(order, "draw 0+6 x1");
+    REQUIRE(smoke_draw != order.end());
+    REQUIRE(sparks_draw != order.end());
+    CHECK(std::ranges::find(order, "draw 0+3 x1") < smoke_draw);
+    CHECK(*(smoke_draw - 1) == "bind_texture 7");
+    CHECK(*(sparks_draw - 1) == "bind_texture 0");
+    CHECK(smoke_draw < sparks_draw);
+
+    // The last draw's instances: the spark, additive, turned a quarter.
+    const auto spark = particle_instances(state);
+    REQUIRE(spark.size() == 1);
+    CHECK(spark[0][0] == Approx(1.0f));
+    CHECK(spark[0][3] == Approx(0.1f));
+    CHECK(spark[0][8] == Approx(0.0f).epsilon(0.001));
+    CHECK(spark[0][9] == Approx(1.0f));
+    CHECK(spark[0][10] == Approx(1.0f));
+
+    // The particle pipeline blends premultiplied, tests depth without writing it, and draws both
+    // faces.
+    const auto particles = std::ranges::find_if(state.pipelines, [](const rhi::PipelineDesc& desc) {
+        return desc.instance_stride == 48;
+    });
+    REQUIRE(particles != state.pipelines.end());
+    CHECK(particles->blend == rhi::BlendMode::PremultipliedAlpha);
+    CHECK(particles->depth_test);
+    CHECK_FALSE(particles->depth_write);
+    CHECK(particles->cull == rhi::CullMode::None);
+}
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer sorts blended particles farthest first") {
+    start();
+    const std::array smoke{
+        ParticleQuad{.position = {0.0f, 0.0f, 2.0f}, .size = 0.5f},
+        ParticleQuad{.position = {0.0f, 0.0f, -3.0f}, .size = 0.7f},
+        ParticleQuad{.position = {0.0f, 0.0f, 0.0f}, .size = 0.6f},
+    };
+    const std::array batches{ParticleBatch{.particles = smoke}};
+    draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .particles = batches});
+    const auto instances = particle_instances(state);
+    REQUIRE(instances.size() == 3);
+    CHECK(instances[0][3] == Approx(0.7f));
+    CHECK(instances[1][3] == Approx(0.6f));
+    CHECK(instances[2][3] == Approx(0.5f));
+    CHECK(instances[0][10] == Approx(0.0f));
+}
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer draws no particles without a view") {
+    start();
+    const std::array smoke{ParticleQuad{.size = 1.0f}};
+    const std::array batches{ParticleBatch{.particles = smoke}};
+    FrameStats stats;
+    const Calls calls = draw(Frame{.size = k_size, .particles = batches}, &stats);
+    CHECK(stats.particles == 0);
+    CHECK(std::ranges::find(calls, "draw 0+6 x1") == calls.end());
+}

@@ -135,6 +135,26 @@ itself only with the lights that reach it; `forward` takes the 16 nearest. They 
 yet. [Lighting](docs/guides/lighting.md) explains placing lights and how bright to make them, and
 [ADR 0037](docs/adr/0037-point-and-spot-lights.md) records the design.
 
+## Particles
+
+With `particles = ["cpu", "null"]` listed and a `runtime::Particles` updated each frame, a
+`particle_emitter` gives off particles from its entity: fire, smoke, sparks, dust and magic.
+Additive particles glow; alpha ones cover what is behind them.
+
+```toml
+[entities.torch.particle_emitter]
+blend = "additive"
+shape = "cone"
+rate = 50.0
+lifetime = [0.4, 0.8]
+start_color = [1.6, 0.6, 0.16]
+end_alpha = 0.0
+```
+
+The render demo's yard has a campfire of flames, sparks and textured smoke.
+[Particles](docs/guides/particles.md) explains every setting and how to make common effects, and
+[ADR 0038](docs/adr/0038-particles.md) records the design.
+
 ## Animation
 
 Skinned glTF models load with their skeleton and animations, and are skinned on the GPU on every

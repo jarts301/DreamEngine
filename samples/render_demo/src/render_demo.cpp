@@ -7,6 +7,7 @@
 #include "dream/runtime/animation.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/game.h"
+#include "dream/runtime/particles.h"
 #include "dream/runtime/renderer.h"
 #include "dream/runtime/world.h"
 
@@ -49,6 +50,9 @@ public:
         if (core::Result<void> ready = m_renderer.initialize(app); !ready.has_value()) {
             return ready;
         }
+        if (core::Result<void> ready = m_particles.initialize(app); !ready.has_value()) {
+            return ready;
+        }
         if (core::Result<void> ready = m_animation.initialize(app); !ready.has_value()) {
             return ready;
         }
@@ -67,6 +71,17 @@ public:
                 animator.time = static_cast<float>(*held);
                 animator.speed = 0.0f;
             }
+        }
+        // And every particle effect: run for a while in fixed steps, then held.
+        m_world->update_transforms();
+        if (const std::optional<double> held = app.config().get_float("demo.particle_time")) {
+            m_particles.warm_up(*m_world, *held);
+            for (auto [entity, emitter] : m_world->registry().view<runtime::ParticleEmitter>().each()) {
+                emitter.time_scale = 0.0f;
+            }
+        } else {
+            // Already burning when the yard appears.
+            m_particles.warm_up(*m_world, 2.0);
         }
 
         // The camera orbits its target, starting where the scene put it.
@@ -107,6 +122,7 @@ public:
         }
         m_world->update_transforms();
         m_animation.update(*m_world, time.delta_seconds);
+        m_particles.update(*m_world, time.delta_seconds);
 
         if (app.input().was_pressed("quit") ||
             (m_quit_after_frames > 0 && m_frames >= m_quit_after_frames)) {
@@ -175,6 +191,7 @@ private:
 
     runtime::Renderer m_renderer;
     runtime::Animation m_animation;
+    runtime::Particles m_particles;
     runtime::Entity m_camera = runtime::k_no_entity;
     Vec3 m_target;
     float m_distance = 1.0f;

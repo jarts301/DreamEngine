@@ -13,6 +13,7 @@ dream_add_module(renderer forward
         shaders/shadow_masked_skinned.slang
         shaders/tonemap.slang
         shaders/debug_lines.slang
+        shaders/particles.slang
         shaders/ui.slang
 )
 

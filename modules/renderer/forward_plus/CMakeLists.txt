@@ -15,6 +15,7 @@ dream_add_module(renderer forward_plus
         ${forward_dir}/shaders/shadow_masked_skinned.slang
         ${forward_dir}/shaders/tonemap.slang
         ${forward_dir}/shaders/debug_lines.slang
+        ${forward_dir}/shaders/particles.slang
         ${forward_dir}/shaders/ui.slang
 )
 target_compile_definitions(dream_module_renderer_forward_plus PRIVATE DREAM_FORWARD_PLUS)

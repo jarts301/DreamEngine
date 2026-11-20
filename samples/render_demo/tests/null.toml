@@ -4,6 +4,7 @@ max_fps = 0
 
 [demo]
 animation_time = 0.5
+particle_time = 1.5
 quit_after_frames = 5
 
 [input.actions]
@@ -23,6 +24,7 @@ renderer = ["forward_plus"]
 mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
 animation = ["ozz"]
+particles = ["cpu"]
 
 [modules.android]
 platform = ["sdl3"]
@@ -32,6 +34,7 @@ renderer = ["forward_plus"]
 mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
 animation = ["ozz"]
+particles = ["cpu"]
 
 [modules.linux]
 platform = ["sdl3"]
@@ -41,6 +44,7 @@ renderer = ["forward_plus"]
 mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
 animation = ["ozz"]
+particles = ["cpu"]
 
 [audio]
 muted = true

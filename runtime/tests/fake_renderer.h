@@ -18,6 +18,13 @@ struct FakeUiLayer {
     std::vector<rhi::TextureHandle> textures;
 };
 
+// One batch of particles, copied.
+struct FakeParticleBatch {
+    std::vector<renderer::ParticleQuad> particles;
+    rhi::TextureHandle texture;
+    renderer::ParticleBlend blend = renderer::ParticleBlend::Alpha;
+};
+
 // A copy of one frame, which only lives during render.
 struct FakeFrame {
     platform::SurfaceSize size;
@@ -26,6 +33,7 @@ struct FakeFrame {
     std::optional<renderer::Sunlight> sun;
     std::vector<renderer::MeshDraw> meshes;
     std::vector<renderer::Light> lights;
+    std::vector<FakeParticleBatch> particles;
     std::vector<renderer::LineVertex> lines;
     std::vector<FakeUiLayer> ui_layers;
 };
@@ -65,8 +73,15 @@ public:
                        .sun = frame.sun,
                        .meshes = {frame.meshes.begin(), frame.meshes.end()},
                        .lights = {frame.lights.begin(), frame.lights.end()},
+                       .particles = {},
                        .lines = {frame.lines.begin(), frame.lines.end()},
                        .ui_layers = {}};
+        for (const renderer::ParticleBatch& batch : frame.particles) {
+            copy.particles.push_back(
+                FakeParticleBatch{.particles = {batch.particles.begin(), batch.particles.end()},
+                                  .texture = batch.texture,
+                                  .blend = batch.blend});
+        }
         renderer::FrameStats stats;
         stats.draws = static_cast<std::uint32_t>(frame.meshes.size());
         stats.lines = static_cast<std::uint32_t>(frame.lines.size() / 2);

@@ -38,7 +38,9 @@ pointers and, with `input_device = ["sdl3_gamepad", "null"]` listed, gamepads
 [animation guide](../docs/guides/animation.md)). The `point_light` and `spot_light` components light
 the scene besides the sun; list `renderer = ["forward_plus", "forward", "null"]` for many of them
 ([ADR 0037](../docs/adr/0037-point-and-spot-lights.md), and the
-[lighting guide](../docs/guides/lighting.md)).
+[lighting guide](../docs/guides/lighting.md)). `runtime::Particles` moves particle effects on
+entities with a `ParticleEmitter`, which needs `particles` listed
+([ADR 0038](../docs/adr/0038-particles.md), and the [particles guide](../docs/guides/particles.md)).
 [samples/physics_demo](../samples/physics_demo/src/physics_demo.cpp) adds 3D and 2D physics with
 `runtime::Physics3D` and `runtime::Physics2D`, which need `physics3d` or `physics2d` listed under
 `[modules.<platform>]`.

@@ -33,6 +33,16 @@ struct Camera {
     std::optional<core::Vec3> target;
 };
 
+// A texture from an image file, drawn in the world, such as particles' (ADR 0038). Load it with
+// `app.assets().load<TextureAsset>("assets:/textures/smoke.png")` after Renderer::initialize, which
+// registers its loader. Colors are sRGB. A cooked KTX2 file is used in place of the PNG when the
+// build made one, which it does for images in a "textures" folder.
+struct TextureAsset {
+    GpuTexture texture;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+};
+
 // Draws a model at its entity's position. `tint` multiplies the model's own colors.
 struct MeshRenderer {
     AssetRef<ModelAsset> model;
@@ -142,6 +152,8 @@ struct RendererShaders {};
 //     inner_angle = 20.0                # Degrees.
 //     outer_angle = 35.0
 //
+// Entities with a ParticleEmitter, which runtime::Particles moves on, are drawn too (ADR 0038).
+//
 // How many point and spot lights are drawn depends on the renderer module: `forward` takes the 16
 // nearest, and `forward_plus` 256 (ADR 0037).
 class Renderer {
@@ -183,6 +195,15 @@ public:
     }
     [[nodiscard]] std::uint32_t last_dropped_light_count() const noexcept {
         return m_last_stats.lights_dropped;
+    }
+
+    // How many particles the last frame drew, and how many it left out for being more than the
+    // renderer module takes in a frame (ADR 0038).
+    [[nodiscard]] std::uint32_t last_particle_count() const noexcept {
+        return m_last_stats.particles;
+    }
+    [[nodiscard]] std::uint32_t last_dropped_particle_count() const noexcept {
+        return m_last_stats.particles_dropped;
     }
 
     // How many parts of models the last call to render skipped, because they were out of view.
@@ -239,6 +260,7 @@ private:
     // Reused every frame, so gathering the scene allocates nothing once it has grown.
     std::vector<renderer::MeshDraw> m_meshes;
     std::vector<renderer::Light> m_lights;
+    std::vector<renderer::ParticleBatch> m_particles;
     renderer::FrameStats m_last_stats;
 };
 
