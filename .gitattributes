@@ -3,3 +3,4 @@
 *.bat text eol=crlf
 gradlew text eol=lf
 *.jar binary
+tools/git-hooks/* text eol=lf
