@@ -1,0 +1,39 @@
+[app]
+window = "hidden"
+title = "Dream Platformer OpenGL Check"
+width = 960
+height = 540
+
+[demo]
+hold_animation = true
+quit_after_frames = 70
+
+[rhi.opengl]
+debug = true
+
+[input.actions]
+move_left = ["key:a"]
+move_right = ["key:d"]
+jump = ["key:space"]
+touch = ["touch"]
+quit = ["key:escape"]
+
+# Compares frame 60 with the reference image, within a tolerance. See docs/adr/0021.
+[screenshot]
+frame = 60
+save = "platformer_opengl_screenshot.png"
+reference = "assets:/screenshots/platformer.png"
+tolerance = 24
+max_differing = 0.01
+quit = false
+
+# Only built on Windows, so only its table is listed.
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["opengl"]
+renderer = ["forward"]
+physics2d = ["box2d"]
+
+[audio]
+muted = true

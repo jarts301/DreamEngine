@@ -6,6 +6,7 @@
 #include "dream/runtime/animation.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/particles.h"
+#include "dream/runtime/sprites.h"
 #include "dream/runtime/texture.h"
 
 #include <algorithm>
@@ -591,6 +592,7 @@ core::Result<void> Renderer::initialize(App& app,
     app.scenes().register_component("directional_light", &read_directional_light);
     app.scenes().register_component("point_light", &read_point_light);
     app.scenes().register_component("spot_light", &read_spot_light);
+    register_sprite_components(app.scenes());
     return {};
 }
 
@@ -712,6 +714,19 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
         frame.lines = m_debug_lines.vertices();
     }
 
+    // 2D sprites and tile maps, through the first 2D camera (ADR 0039).
+    frame.sprite_view = camera_2d_view(world, size);
+    m_sprite_quads.clear();
+    m_sprite_batches.clear();
+    if (frame.sprite_view.has_value()) {
+        gather_sprites(world, *frame.sprite_view, m_sprite_quads, m_sprite_batches);
+        frame.sprites = m_sprite_batches;
+    }
+    // Lines need a camera: the 3D one, or else the 2D one.
+    if (!frame.view.has_value() && frame.sprite_view.has_value()) {
+        frame.lines = m_debug_lines.vertices();
+    }
+
     std::array<renderer::UiLayer, static_cast<std::size_t>(UiLayer::Count)> layers{};
     for (std::size_t layer = 0; layer < layers.size(); ++layer) {
         layers[layer] = renderer::UiLayer{.list = &m_ui_layers[layer], .offset = m_ui_offsets[layer]};
@@ -728,6 +743,7 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
     DREAM_PROFILE_VALUE("Culled parts", m_last_stats.culled);
     DREAM_PROFILE_VALUE("Debug lines", m_last_stats.lines);
     DREAM_PROFILE_VALUE("Particles", m_last_stats.particles);
+    DREAM_PROFILE_VALUE("Sprites", m_last_stats.sprites);
     DREAM_PROFILE_VALUE("UI draw commands", m_last_stats.ui_commands);
 }
 

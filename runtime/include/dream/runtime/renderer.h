@@ -152,7 +152,9 @@ struct RendererShaders {};
 //     inner_angle = 20.0                # Degrees.
 //     outer_angle = 35.0
 //
-// Entities with a ParticleEmitter, which runtime::Particles moves on, are drawn too (ADR 0038).
+// Entities with a ParticleEmitter, which runtime::Particles moves on, are drawn too (ADR 0038), and
+// 2D sprites and tile maps through a Camera2D, over the 3D scene (ADR 0039, dream/runtime/sprites.h):
+// initialize also adds the components "camera_2d", "sprite", "sprite_animator" and "tile_map".
 //
 // How many point and spot lights are drawn depends on the renderer module: `forward` takes the 16
 // nearest, and `forward_plus` 256 (ADR 0037).
@@ -204,6 +206,11 @@ public:
     }
     [[nodiscard]] std::uint32_t last_dropped_particle_count() const noexcept {
         return m_last_stats.particles_dropped;
+    }
+
+    // How many sprites the last frame drew, tiles of tile maps included (ADR 0039).
+    [[nodiscard]] std::uint32_t last_sprite_count() const noexcept {
+        return m_last_stats.sprites;
     }
 
     // How many parts of models the last call to render skipped, because they were out of view.
@@ -261,6 +268,8 @@ private:
     std::vector<renderer::MeshDraw> m_meshes;
     std::vector<renderer::Light> m_lights;
     std::vector<renderer::ParticleBatch> m_particles;
+    std::vector<renderer::SpriteQuad> m_sprite_quads;
+    std::vector<renderer::SpriteBatch> m_sprite_batches;
     renderer::FrameStats m_last_stats;
 };
 

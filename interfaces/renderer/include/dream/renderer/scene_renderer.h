@@ -195,6 +195,43 @@ struct ParticleBatch {
     ParticleBlend blend = ParticleBlend::Alpha;
 };
 
+// How a sprite's texture is read (ADR 0039).
+enum class SpriteFilter : std::uint8_t {
+    // Each screen pixel takes the nearest texel, so pixel art stays crisp at any size.
+    Pixel,
+    // Blended between texels, with mipmaps, for painted or high-resolution art.
+    Smooth,
+};
+
+// One sprite: a rectangle of a texture, placed in the 2D world's XY plane, +Y up.
+struct SpriteQuad {
+    // Where its pivot is, in world units.
+    core::Vec2 position;
+    // Across and up, in world units.
+    core::Vec2 size{1.0f, 1.0f};
+    // The point it is placed and turned by, from {0, 0} at its bottom left to {1, 1} at its top
+    // right.
+    core::Vec2 pivot{0.5f, 0.5f};
+    // In radians, counter-clockwise.
+    float rotation = 0.0f;
+    // The part of the texture it shows, as texture coordinates from the top left: left, top,
+    // right, bottom. A rectangle given right to left, or bottom to top, flips the sprite.
+    core::Vec4 uv{0.0f, 0.0f, 1.0f, 1.0f};
+    // Linear, multiplying the texture, with its opacity in w.
+    core::Vec4 color{1.0f, 1.0f, 1.0f, 1.0f};
+};
+
+// Sprites drawn with one texture, in the order given.
+struct SpriteBatch {
+    std::span<const SpriteQuad> sprites;
+    // sRGB colors with straight alpha. Invalid draws white rectangles.
+    rhi::TextureHandle texture;
+    // In pixels, for the Pixel filter.
+    std::uint32_t texture_width = 1;
+    std::uint32_t texture_height = 1;
+    SpriteFilter filter = SpriteFilter::Pixel;
+};
+
 // A layer of the game's interface, drawn over the scene in the order given, moved by `offset`
 // pixels.
 struct UiLayer {
@@ -215,6 +252,12 @@ struct Frame {
     std::span<const MeshDraw> meshes;
     // Drawn over the scene's surfaces, blended ones included, and hidden behind opaque ones.
     std::span<const ParticleBatch> particles;
+    // The 2D camera, from the 2D world's XY plane to clip space (ADR 0039). Without one, no sprites
+    // are drawn.
+    std::optional<core::Mat4> sprite_view;
+    // Drawn over the 3D scene, if there is one, batch after batch and each in its order, without
+    // depth: later ones cover earlier ones. Debug lines use the 2D camera when there is no 3D one.
+    std::span<const SpriteBatch> sprites;
     std::span<const LineVertex> lines;
     std::span<const UiLayer> ui_layers;
     // The texture an interface draw command names, by its id. Invalid draws as white.
@@ -246,6 +289,8 @@ struct FrameStats {
     // Particles drawn, and those left out for being more than the renderer takes in a frame.
     std::uint32_t particles = 0;
     std::uint32_t particles_dropped = 0;
+    // Sprites drawn, tiles of tile maps included.
+    std::uint32_t sprites = 0;
 };
 
 // Reads one of the game's files, such as "assets:/shaders/forward.vert.spv".

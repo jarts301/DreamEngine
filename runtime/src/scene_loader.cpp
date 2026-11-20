@@ -117,6 +117,43 @@ core::Result<std::string> ComponentData::text(std::string_view key,
     return text(key);
 }
 
+core::Result<std::vector<std::string>> ComponentData::strings(std::string_view key) const {
+    const auto values = m_config.get_string_list(full_key(key));
+    if (!values.has_value()) {
+        return scene_error(std::format("'{}' must be a list of strings", key));
+    }
+    return std::vector<std::string>(values->begin(), values->end());
+}
+
+core::Result<std::vector<float>> ComponentData::numbers(std::string_view key) const {
+    const auto values = m_config.get_float_list(full_key(key));
+    if (!values.has_value()) {
+        return scene_error(std::format("'{}' must be a list of numbers", key));
+    }
+    std::vector<float> numbers;
+    numbers.reserve(values->size());
+    for (const double value : *values) {
+        numbers.push_back(static_cast<float>(value));
+    }
+    return numbers;
+}
+
+std::vector<std::string> ComponentData::tables() const {
+    std::vector<std::string> names;
+    for (const std::string_view name : m_config.tables_in(m_prefix)) {
+        names.emplace_back(name);
+    }
+    return names;
+}
+
+std::vector<std::string> ComponentData::keys() const {
+    std::vector<std::string> names;
+    for (const std::string_view name : m_config.keys_in(m_prefix)) {
+        names.emplace_back(name);
+    }
+    return names;
+}
+
 core::Result<void>
 ComponentData::check_keys(std::initializer_list<std::string_view> known) const {
     for (const std::string_view key : m_config.keys_in(m_prefix)) {
@@ -124,8 +161,11 @@ ComponentData::check_keys(std::initializer_list<std::string_view> known) const {
             return scene_error(std::format("unknown setting '{}'", key));
         }
     }
-    if (const std::vector<std::string_view> tables = m_config.tables_in(m_prefix); !tables.empty()) {
-        return scene_error(std::format("unexpected table '{}'", tables.front()));
+    // Tables inside the component, such as an animator's clips, only where it names them.
+    for (const std::string_view table : m_config.tables_in(m_prefix)) {
+        if (std::find(known.begin(), known.end(), table) == known.end()) {
+            return scene_error(std::format("unexpected table '{}'", table));
+        }
     }
     return {};
 }

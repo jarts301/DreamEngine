@@ -176,7 +176,24 @@ constexpr std::array<core::Vec2, 4> k_particle_corners{
     core::Vec2{-0.5f, 0.5f}};
 constexpr std::array<std::uint32_t, 6> k_particle_indices{0, 1, 2, 0, 2, 3};
 
+// One sprite, as sprites.slang reads it per instance (ADR 0039): position and size, texture
+// rectangle, color, and pivot with the rotation's cosine and sine.
+struct SpriteInstance {
+    Vec4 position_size;
+    Vec4 uv_rect;
+    Vec4 color;
+    Vec4 pivot_turn;
+};
+
+struct SpriteConstants {
+    Vec4 settings;
+};
+
+// How many sprites one draw takes at most.
+constexpr std::size_t k_max_sprites_per_draw = 8192;
+
 static_assert(sizeof(ParticleInstance) == 48);
+static_assert(sizeof(SpriteInstance) == 64);
 static_assert(sizeof(FrameUniforms) <= rhi::k_max_uniform_size);
 static_assert(sizeof(FrameUniforms) == 496);
 static_assert(sizeof(InstanceData) == 160);
@@ -620,6 +637,8 @@ struct Pipelines {
     OwnedPipeline lines;
     // Particles: premultiplied alpha, testing depth without writing it (ADR 0038).
     OwnedPipeline particles;
+    // Sprites: straight alpha, into the window without depth (ADR 0039).
+    OwnedPipeline sprites;
     OwnedPipeline ui;
     OwnedPipeline ui_premultiplied;
     OwnedPipeline shadow;        // Only with shadows.
@@ -800,6 +819,8 @@ private:
                      const core::Frustum* view, FrameStats& stats);
     void draw_lines(rhi::CommandList& commands, std::span<const LineVertex> lines,
                     FrameStats& stats);
+    // Draws the frame's sprites with the 2D camera, batch after batch, into the window.
+    void draw_sprites(rhi::CommandList& commands, const Frame& frame, FrameStats& stats);
     // Draws the frame's particles over the scene: blended batches farthest first, each of their
     // particles farthest first, then additive ones.
     void draw_particles(rhi::CommandList& commands, const Frame& frame, FrameStats& stats);
@@ -832,6 +853,7 @@ private:
     std::vector<ParticleInstance> m_particle_instances;
     std::vector<std::pair<float, std::uint32_t>> m_particle_order;
     std::vector<std::pair<float, std::uint32_t>> m_batch_order;
+    std::vector<SpriteInstance> m_sprite_instances;
     OwnedTexture m_hdr_color;
     OwnedTexture m_hdr_depth;
     platform::SurfaceSize m_hdr_size;
@@ -1047,6 +1069,38 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
         return particles.error();
     }
     made.particles = std::move(particles).value();
+
+    const core::Result<rhi::ShaderHandle> sprite_vertex =
+        shader("sprites.vert", rhi::ShaderStage::Vertex);
+    if (!sprite_vertex.has_value()) {
+        return sprite_vertex.error();
+    }
+    const core::Result<rhi::ShaderHandle> sprite_fragment =
+        shader("sprites.frag", rhi::ShaderStage::Fragment);
+    if (!sprite_fragment.has_value()) {
+        return sprite_fragment.error();
+    }
+    constexpr std::array k_sprite_attributes{
+        rhi::VertexAttribute{1, rhi::VertexFormat::Float4, offsetof(SpriteInstance, position_size)},
+        rhi::VertexAttribute{2, rhi::VertexFormat::Float4, offsetof(SpriteInstance, uv_rect)},
+        rhi::VertexAttribute{3, rhi::VertexFormat::Float4, offsetof(SpriteInstance, color)},
+        rhi::VertexAttribute{4, rhi::VertexFormat::Float4, offsetof(SpriteInstance, pivot_turn)},
+    };
+    core::Result<OwnedPipeline> sprites = pipeline(rhi::PipelineDesc{
+        .vertex_shader = sprite_vertex.value(),
+        .fragment_shader = sprite_fragment.value(),
+        .vertex_stride = sizeof(core::Vec2),
+        .attributes = k_corner_attributes,
+        .instance_stride = sizeof(SpriteInstance),
+        .instance_attributes = k_sprite_attributes,
+        .blend = rhi::BlendMode::Alpha,
+        .depth_test = false,
+        .cull = rhi::CullMode::None,
+    });
+    if (!sprites.has_value()) {
+        return sprites.error();
+    }
+    made.sprites = std::move(sprites).value();
 
     const core::Result<rhi::ShaderHandle> ui_vertex = shader("ui.vert", rhi::ShaderStage::Vertex);
     if (!ui_vertex.has_value()) {
@@ -1712,6 +1766,53 @@ void ForwardRenderer::draw_lines(rhi::CommandList& commands, std::span<const Lin
     }
 }
 
+void ForwardRenderer::draw_sprites(rhi::CommandList& commands, const Frame& frame,
+                                   FrameStats& stats) {
+    if (frame.sprites.empty() || !m_pipelines->sprites.exists()) {
+        return;
+    }
+    DREAM_PROFILE_ZONE("Sprites");
+    FrameUniforms camera{};
+    camera.view_projection = *frame.sprite_view;
+    commands.bind_pipeline(m_pipelines->sprites.get());
+    commands.set_uniforms(std::as_bytes(std::span(&camera, 1)));
+    commands.bind_vertex_buffer(m_particle_corners.get());
+    commands.bind_index_buffer(m_particle_indices.get(), rhi::IndexFormat::UInt32);
+    for (const SpriteBatch& batch : frame.sprites) {
+        if (batch.sprites.empty()) {
+            continue;
+        }
+        const SpriteConstants constants{
+            .settings = Vec4{batch.filter == SpriteFilter::Pixel ? 1.0f : 0.0f,
+                             static_cast<float>(std::max(batch.texture_width, 1u)),
+                             static_cast<float>(std::max(batch.texture_height, 1u)), 0.0f}};
+        commands.push_constants(std::as_bytes(std::span(&constants, 1)));
+        commands.bind_texture(batch.texture);
+        for (std::size_t first = 0; first < batch.sprites.size(); first += k_max_sprites_per_draw) {
+            const std::span<const SpriteQuad> piece = batch.sprites.subspan(
+                first, std::min(k_max_sprites_per_draw, batch.sprites.size() - first));
+            m_sprite_instances.clear();
+            for (const SpriteQuad& sprite : piece) {
+                m_sprite_instances.push_back(SpriteInstance{
+                    .position_size = Vec4{sprite.position.x, sprite.position.y, sprite.size.x,
+                                          sprite.size.y},
+                    .uv_rect = sprite.uv,
+                    .color = sprite.color,
+                    .pivot_turn = Vec4{sprite.pivot.x, sprite.pivot.y, std::cos(sprite.rotation),
+                                       std::sin(sprite.rotation)}});
+            }
+            if (!commands.bind_instances(std::as_bytes(std::span(m_sprite_instances)))) {
+                return;
+            }
+            commands.draw_indexed_instanced(0, static_cast<std::uint32_t>(k_particle_indices.size()),
+                                            static_cast<std::uint32_t>(piece.size()));
+            ++stats.draw_calls;
+            stats.sprites += static_cast<std::uint32_t>(piece.size());
+        }
+    }
+    DREAM_PROFILE_VALUE("Sprites", stats.sprites);
+}
+
 void ForwardRenderer::draw_particles(rhi::CommandList& commands, const Frame& frame,
                                      FrameStats& stats) {
     if (frame.particles.empty() || !frame.view.has_value() || !m_pipelines->particles.exists()) {
@@ -1951,7 +2052,10 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
         commands.end_render_pass();
     }
 
-    const bool hdr = m_settings.hdr_format.has_value() && m_pipelines->tone_map.exists();
+    // Without a 3D view, as in a 2D game, the window is cleared and drawn into directly, so the
+    // clear color isn't tone-mapped.
+    const bool hdr = m_settings.hdr_format.has_value() && m_pipelines->tone_map.exists() &&
+                     frame.view.has_value();
     if (hdr) {
         fit_hdr_targets(frame.size);
     }
@@ -2004,7 +2108,20 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
         draw_lit_scene();
     }
 
+    if (frame.sprite_view.has_value()) {
+        draw_sprites(commands, frame, stats);
+    }
     if (uniforms.has_value()) {
+        // The sprites' camera replaced the scene's.
+        if (frame.sprite_view.has_value() && !frame.sprites.empty()) {
+            commands.set_uniforms(uniform_bytes());
+        }
+        draw_lines(commands, frame.lines, stats);
+    } else if (frame.sprite_view.has_value()) {
+        // A 2D game's lines, such as Physics2D's, in its 2D camera's view.
+        FrameUniforms flat{};
+        flat.view_projection = *frame.sprite_view;
+        commands.set_uniforms(std::as_bytes(std::span(&flat, 1)));
         draw_lines(commands, frame.lines, stats);
     }
     draw_ui(commands, frame, stats);

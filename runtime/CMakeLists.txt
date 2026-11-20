@@ -27,6 +27,7 @@ add_library(dream_runtime STATIC
     src/resource_monitor.cpp
     src/scene_loader.cpp
     src/screenshot.cpp
+    src/sprites.cpp
     src/texture.cpp
     src/ui.cpp
     src/virtual_file_system.cpp
@@ -61,6 +62,7 @@ if(DREAM_BUILD_TESTS)
             tests/heap_counting_test.cpp
             tests/input_actions_test.cpp
             tests/particles_test.cpp
+            tests/sprites_test.cpp
             tests/memory_budget_test.cpp
             tests/model_loader_test.cpp
             tests/physics_test.cpp

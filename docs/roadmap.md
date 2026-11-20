@@ -126,7 +126,7 @@ saved progress, music and settings, built this way and played on PC and phones.
 | Area | Available now |
 |---|---|
 | Platforms | Windows, and Android phones (arm64, Android 10 and up). Linux builds but is untested. |
-| Graphics | Five graphics APIs; the same picture on each. glTF models, static or skinned and animated, with metallic-roughness PBR materials, normal, occlusion and emissive maps, and opaque, cut-out, blended and double-sided surfaces; one directional light with soft cascaded shadows, and point and spot lights, up to 256 with `forward_plus`; HDR with PBR Neutral tone mapping; frustum culling, instancing and levels of detail made as models load; debug lines. |
+| Graphics | Five graphics APIs; the same picture on each. glTF models, static or skinned and animated, with metallic-roughness PBR materials, normal, occlusion and emissive maps, and opaque, cut-out, blended and double-sided surfaces; one directional light with soft cascaded shadows, and point and spot lights, up to 256 with `forward_plus`; HDR with PBR Neutral tone mapping; frustum culling, instancing and levels of detail made as models load; particles; 2D sprites, sprite-sheet animation and tile maps, with crisp pixel art; debug lines. |
 | Textures | PNG cooked to KTX2, sent to the GPU as BC7 on PC and ASTC on phones. |
 | Physics | 3D (Jolt or the engine's own impulse solver): bodies, joints, triggers, ray casts. 2D (Box2D or Chipmunk). |
 | Audio | WAV, MP3 and FLAC; streamed music; buses with volumes; sounds placed in 3D. |
@@ -136,7 +136,8 @@ saved progress, music and settings, built this way and played on PC and phones.
 | Workflow | Hot reload of shaders, models and textures; profiling; memory budgets; crash reports with stack traces and minidumps; screenshot tests. |
 | Shipping | A PC folder with the executable and `assets.pak`; an Android APK signed with the debug key. |
 
-Good fits today: puzzle and physics games, arcade and casual mobile games, small 3D scenes with
+Good fits today: puzzle and physics games, arcade and casual mobile games, 2D platformers and
+pixel-art games, small 3D scenes with
 static props, prototypes and game jams.
 
 Not yet possible without writing engine code first:
@@ -144,8 +145,9 @@ Not yet possible without writing engine code first:
   targets and ragdolls (skeletal animation with fades between clips exists).
 - **Rendering:** environment lighting (materials are PBR, but reflect only the sun and a flat
   ambient), bloom, shadows from point and spot lights, visual effects beyond particles, very
-  large worlds (culling, instancing and LODs exist, but no streaming or spatial structures), 2D
-  sprite games (no sprite renderer).
+  large worlds (culling, instancing and LODs exist, but no streaming or spatial structures).
+- **2D:** levels from Tiled, parallax backgrounds, animated tiles and lit sprites (sprites, sprite
+  sheets, tile maps and tile collisions exist).
 - **Input:** menus driven by a gamepad (no focus navigation in `ui`), and rebinding while the game runs.
 - **Online:** any online play.
 
@@ -157,7 +159,6 @@ Not yet possible without writing engine code first:
 |---|---|---|
 | Environment lighting and bloom | Shiny metals and glass reflect their surroundings, and glowing surfaces glow | In `forward`: image-based lighting, reflection probes and a bloom pass |
 | Spatial structures and streaming | Very large worlds | A `visibility` interface, with `asset_source` streaming below |
-| 2D sprites and tile maps | 2D games, which the 2D physics already supports | `sprite_renderer`: `batch`, `null` |
 | Localization | Stores expect several languages; Play and the App Store list them | `localization`: `fluent` or `gettext`-style files, `null` |
 | Accessibility | Platform reviews and players ask for it: text size, colour-blind modes, subtitles, remapping | Settings over existing modules |
 | Settings menu and display modes | Resolution, fullscreen and borderless, frame cap, quality presets | A `settings` service in the runtime spine, with values from each module |
@@ -169,7 +170,8 @@ maps, tangents from `tangent_generator` (ADR 0033); transparent, cut-out and dou
 (ADR 0034); frustum culling (ADR 0031); instancing and levels of detail from `mesh_simplifier`
 (ADR 0032); gamepads through `input_device` (ADR 0035); skeletal animation through `animation`:
 `ozz`, `null`, with GPU skinning (ADR 0036); point and spot lights in `forward` and
-`forward_plus` (ADR 0037); particles through `particles`: `cpu`, `null` (ADR 0038).
+`forward_plus` (ADR 0037); particles through `particles`: `cpu`, `null` (ADR 0038); 2D sprites,
+sprite-sheet animation and tile maps with collisions, drawn by `forward` (ADR 0039).
 
 ### 3.2 Tools
 
@@ -236,10 +238,13 @@ and the remaining platforms.
   maps (ADR 0033, with a [guide](guides/materials.md)), transparent, cut-out and double-sided
   materials (ADR 0034), gamepads (ADR 0035, with a [guide](guides/input.md)), skeletal
   animation (ADR 0036, with a [guide](guides/animation.md)), and point and spot lights with
-  `forward_plus` (ADR 0037, with a [guide](guides/lighting.md)), and particles (ADR 0038, with a
-  [guide](guides/particles.md)).
+  `forward_plus` (ADR 0037, with a [guide](guides/lighting.md)), particles (ADR 0038, with a
+  [guide](guides/particles.md)), and 2D sprites and tile maps (ADR 0039, with a
+  [guide](guides/sprites.md) and `samples/platformer`).
 - **Next, in order:**
-  1. 2D sprites (`sprite_renderer`).
+  1. 2D, after ADR 0039: tile maps from Tiled files (a JSON reader), animated tiles, parallax
+     backgrounds, 9-slice sprites, atlases packed at build time, sorting by Y for top-down games,
+     and a renderer module for 2D alone.
   2. Particles, after ADR 0038: soft particles, sprite-sheet animation, curves for color and
      size, trails, effect files shared between scenes, then a `gpu` module once compute shaders
      exist.
