@@ -1,5 +1,7 @@
 # DreamEngine — offline Linux web build
 
+> **Never merge this branch into `main`.** See [OFFLINE_WEB_BRANCH.md](OFFLINE_WEB_BRANCH.md).
+
 A modular C++20 game engine, on the `offline-web` branch: a version of DreamEngine for a Linux
 machine with **no internet, no GPU, no display, no sound card, no Docker and no package manager**.
 Everything it needs is in this repository, and every game, tool and test is used from a **web
