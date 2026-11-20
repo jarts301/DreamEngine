@@ -10,48 +10,22 @@ fixed_rate = 120
 [demo]
 scripted = true
 
-[audio.miniaudio]
-device = false
-
 [input.actions]
 throw = ["mouse:left"]
 menu = ["key:escape"]
 
-[modules.windows]
-platform = ["sdl3"]
-input_device = ["null"]
-rhi = ["null"]
-renderer = ["forward"]
-mesh_simplifier = ["meshoptimizer"]
-tangent_generator = ["mikktspace"]
-animation = ["ozz"]
-physics3d = ["jolt"]
-audio = ["miniaudio"]
-ui = ["rmlui"]
-
-[modules.android]
-platform = ["sdl3"]
-input_device = ["null"]
-rhi = ["null"]
-renderer = ["forward"]
-mesh_simplifier = ["meshoptimizer"]
-tangent_generator = ["mikktspace"]
-animation = ["ozz"]
-physics3d = ["jolt"]
-audio = ["miniaudio"]
-ui = ["rmlui"]
-
-[modules.linux]
-platform = ["sdl3"]
-input_device = ["null"]
-rhi = ["null"]
-renderer = ["forward"]
-mesh_simplifier = ["meshoptimizer"]
-tangent_generator = ["mikktspace"]
-animation = ["ozz"]
-physics3d = ["jolt"]
-audio = ["miniaudio"]
-ui = ["rmlui"]
-
 [audio]
 muted = true
+
+# Automated: the window is hidden, so no page is served, and frames are drawn on the CPU.
+[modules.linux]
+platform = ["web"]
+input_device = ["null"]
+rhi = ["software"]
+renderer = ["software"]
+mesh_simplifier = ["meshoptimizer"]
+tangent_generator = ["mikktspace"]
+animation = ["ozz"]
+physics3d = ["impulse"]
+audio = ["null"]
+ui = ["markup"]

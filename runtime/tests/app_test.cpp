@@ -337,13 +337,13 @@ TEST_CASE("App gives up the surface in the background and takes the new one on r
 
 TEST_CASE("App passes the current native window to the device") {
     RenderRun run;
-    run.state.native_window = AndroidWindow{&run};
+    run.state.native_window = WebWindow{&run};
 
     REQUIRE(run.go({}).has_value());
 
-    const auto* const window = std::get_if<AndroidWindow>(&run.device.last_window);
+    const auto* const window = std::get_if<WebWindow>(&run.device.last_window);
     REQUIRE(window != nullptr);
-    CHECK(window->window == &run);
+    CHECK(window->canvas == &run);
 }
 
 TEST_CASE("App fails if the first surface can't be attached") {

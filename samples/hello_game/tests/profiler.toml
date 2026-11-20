@@ -15,16 +15,10 @@ quit = ["key:escape"]
 [profiler.timeline]
 path = "dream_hello_game_profiler_trace.json"
 
-# Profiling targets PC for now, so this test is not built for Android.
-[modules.windows]
-platform = ["null"]
-input_device = ["null"]
-profiler = ["timeline"]
+[audio]
+muted = true
 
 [modules.linux]
 platform = ["null"]
 input_device = ["null"]
 profiler = ["timeline"]
-
-[audio]
-muted = true

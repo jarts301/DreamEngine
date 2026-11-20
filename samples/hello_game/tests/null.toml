@@ -9,19 +9,10 @@ frame_limit = 3
 confirm = ["key:space"]
 quit = ["key:escape"]
 
-[modules.windows]
-platform = ["null"]
-input_device = ["null"]
-profiler = ["null"]
-
-[modules.android]
-platform = ["null"]
-input_device = ["null"]
+[audio]
+muted = true
 
 [modules.linux]
 platform = ["null"]
 input_device = ["null"]
 profiler = ["null"]
-
-[audio]
-muted = true

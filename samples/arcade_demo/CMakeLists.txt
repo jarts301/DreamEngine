@@ -2,79 +2,24 @@ dream_add_game(dream_arcade_demo
     SOURCES src/arcade_demo.cpp
     CONFIG dream.toml
     ASSETS assets ../assets
-    APPLICATION_ID org.dreamengine.arcade
-    DISPLAY_NAME "Dream Arcade"
 )
 
 if(DREAM_BUILD_TESTS)
-    # RmlUi, ImGui, miniaudio (mixing without sound hardware) and Jolt, with no display or GPU. The
-    # scripted run throws balls, pauses, changes the music volume and resumes.
+    # The scripted run throws balls, pauses, changes the music volume and resumes, drawn by the
+    # software renderer with every interface.
     dream_add_game(dream_arcade_demo_check SOURCES src/arcade_demo.cpp CONFIG tests/check.toml
         ASSETS assets ../assets)
+    dream_add_sample_test(dream_arcade_demo_check
+        "score=[1-9] hits_heard=[1-9][0-9]* menu_opened=1 music_volume=0.25 debug_drawn=yes ui_commands=some")
 
     # The same with every null backend.
     dream_add_game(dream_arcade_demo_null SOURCES src/arcade_demo.cpp CONFIG tests/null.toml
         ASSETS assets ../assets)
+    dream_add_sample_test(dream_arcade_demo_null
+        "menu_opened=1 music_volume=0.25 debug_drawn=yes ui_commands=none")
 
-    # The scripted run on the real GPU and sound hardware, with validation. Not a CTest, because
-    # build servers have neither.
-    dream_add_game(dream_arcade_demo_vulkan_check SOURCES src/arcade_demo.cpp
-        CONFIG tests/vulkan.toml ASSETS assets ../assets tests/reference)
-
-    # The same run on DirectX, which only Windows can build.
-    if(WIN32)
-        dream_add_game(dream_arcade_demo_directx_check SOURCES src/arcade_demo.cpp
-            CONFIG tests/directx.toml ASSETS assets ../assets tests/reference)
-        dream_add_game(dream_arcade_demo_directx12_check SOURCES src/arcade_demo.cpp
-            CONFIG tests/directx12.toml ASSETS assets ../assets tests/reference)
-        dream_add_game(dream_arcade_demo_opengl_check SOURCES src/arcade_demo.cpp
-            CONFIG tests/opengl.toml ASSETS assets ../assets tests/reference)
-        dream_add_game(dream_arcade_demo_opengles_check SOURCES src/arcade_demo.cpp
-            CONFIG tests/opengles.toml ASSETS assets ../assets tests/reference)
-    endif()
-
-    # The check run with the other physics, audio and interface backends. Only its configuration
-    # differs, and the outcome must not.
-    if(WIN32)
-        dream_add_game(dream_arcade_demo_alternatives_check SOURCES src/arcade_demo.cpp
-            CONFIG tests/alternatives.toml ASSETS assets ../assets)
-    endif()
-
-    if(NOT CMAKE_CROSSCOMPILING)
-        add_test(NAME dream_arcade_demo_check COMMAND dream_arcade_demo_check)
-        set_tests_properties(dream_arcade_demo_check PROPERTIES
-            PASS_REGULAR_EXPRESSION
-                "score=[1-9] hits_heard=[1-9][0-9]* menu_opened=1 music_volume=0.25 debug_drawn=yes ui_commands=some"
-            ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
-
-        if(WIN32)
-            add_test(NAME dream_arcade_demo_alternatives_check
-                COMMAND dream_arcade_demo_alternatives_check)
-            set_tests_properties(dream_arcade_demo_alternatives_check PROPERTIES
-                PASS_REGULAR_EXPRESSION
-                    "score=[1-9] hits_heard=[1-9][0-9]* menu_opened=1 music_volume=0.25 debug_drawn=yes ui_commands=some"
-                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
-        endif()
-
-        add_test(NAME dream_arcade_demo_null COMMAND dream_arcade_demo_null)
-        set_tests_properties(dream_arcade_demo_null PROPERTIES
-            PASS_REGULAR_EXPRESSION "menu_opened=1 music_volume=0.25 debug_drawn=yes ui_commands=none"
-            ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
-    endif()
-
-    # The DirectX check on WARP, Windows' software rasterizer, compares its picture with the
-    # reference image, so build servers without a GPU check it too. See docs/adr/0021.
-    if(WIN32 AND NOT CMAKE_CROSSCOMPILING)
-        dream_add_game(dream_arcade_demo_warp_check SOURCES src/arcade_demo.cpp CONFIG tests/warp.toml
-            ASSETS assets ../assets tests/reference)
-        add_test(NAME dream_arcade_demo_warp_check COMMAND dream_arcade_demo_warp_check)
-        set_tests_properties(dream_arcade_demo_warp_check PROPERTIES
-            PASS_REGULAR_EXPRESSION "Screenshot matches")
-        dream_add_game(dream_arcade_demo_directx12_warp_check SOURCES src/arcade_demo.cpp
-            CONFIG tests/warp_directx12.toml ASSETS assets ../assets tests/reference)
-        add_test(NAME dream_arcade_demo_directx12_warp_check
-            COMMAND dream_arcade_demo_directx12_warp_check)
-        set_tests_properties(dream_arcade_demo_directx12_warp_check PROPERTIES
-            PASS_REGULAR_EXPRESSION "Screenshot matches")
-    endif()
+    # Compares a frame of the software renderer with the reference image. See docs/adr/0021.
+    dream_add_game(dream_arcade_demo_screenshot SOURCES src/arcade_demo.cpp
+        CONFIG tests/screenshot.toml ASSETS assets ../assets tests/reference)
+    dream_add_sample_test(dream_arcade_demo_screenshot "Screenshot matches")
 endif()

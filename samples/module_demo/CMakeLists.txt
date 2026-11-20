@@ -6,7 +6,7 @@ function(dream_add_module_demo name config expected_output)
     dream_configure_target(${name})
     dream_link_modules(${name} CONFIG ${config})
 
-    if(DREAM_BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
+    if(DREAM_BUILD_TESTS)
         add_test(NAME ${name} COMMAND ${name})
         set_tests_properties(${name} PROPERTIES PASS_REGULAR_EXPRESSION "${expected_output}")
     endif()

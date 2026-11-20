@@ -2,65 +2,22 @@ dream_add_game(dream_toppler
     SOURCES src/toppler.cpp
     CONFIG dream.toml
     ASSETS assets ../assets
-    APPLICATION_ID org.dreamengine.toppler
-    DISPLAY_NAME "Toppler"
 )
 
 if(DREAM_BUILD_TESTS)
-    # The scripted run plays every level in turn, with no display, GPU or sound hardware, and checks
-    # what it saved by reading it back.
-    set(toppler_result "cleared=10 stars=[1-3][0-9] saved_stars=[1-3]+ saved_music=0.30 menu_opened=1")
-
+    # Plays every level, drawn by the software renderer.
     dream_add_game(dream_toppler_check SOURCES src/toppler.cpp CONFIG tests/check.toml
         ASSETS assets ../assets)
+    dream_add_sample_test(dream_toppler_check
+        "cleared=10 stars=[1-3][0-9] saved_stars=[1-3]+ saved_music=0.30 menu_opened=1")
+    # Its saved progress goes to a folder of its own, not the player's.
+    set_tests_properties(dream_toppler_check PROPERTIES
+        ENVIRONMENT "DREAM_USER_DIR=${CMAKE_CURRENT_BINARY_DIR}/dream_toppler_check_user")
 
-    # The scripted run on the real GPU and sound hardware. Not a CTest, because build servers have
-    # neither.
-    dream_add_game(dream_toppler_vulkan_check SOURCES src/toppler.cpp CONFIG tests/vulkan.toml
+    # Compares a frame of the software renderer with the reference image. See docs/adr/0021.
+    dream_add_game(dream_toppler_screenshot SOURCES src/toppler.cpp CONFIG tests/screenshot.toml
         ASSETS assets ../assets tests/reference)
-
-    if(WIN32)
-        dream_add_game(dream_toppler_directx_check SOURCES src/toppler.cpp
-            CONFIG tests/directx.toml ASSETS assets ../assets tests/reference)
-        dream_add_game(dream_toppler_directx12_check SOURCES src/toppler.cpp
-            CONFIG tests/directx12.toml ASSETS assets ../assets tests/reference)
-        dream_add_game(dream_toppler_opengl_check SOURCES src/toppler.cpp
-            CONFIG tests/opengl.toml ASSETS assets ../assets tests/reference)
-        dream_add_game(dream_toppler_opengles_check SOURCES src/toppler.cpp
-            CONFIG tests/opengles.toml ASSETS assets ../assets tests/reference)
-
-        # The check run with the other physics, audio and interface backends.
-        dream_add_game(dream_toppler_alternatives_check SOURCES src/toppler.cpp
-            CONFIG tests/alternatives.toml ASSETS assets ../assets)
-    endif()
-
-    if(NOT CMAKE_CROSSCOMPILING)
-        add_test(NAME dream_toppler_check COMMAND dream_toppler_check)
-        set_tests_properties(dream_toppler_check PROPERTIES
-            PASS_REGULAR_EXPRESSION "${toppler_result}"
-            ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
-
-        if(WIN32)
-            add_test(NAME dream_toppler_alternatives_check COMMAND dream_toppler_alternatives_check)
-            set_tests_properties(dream_toppler_alternatives_check PROPERTIES
-                PASS_REGULAR_EXPRESSION "${toppler_result}"
-                ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
-        endif()
-    endif()
-
-    # The DirectX check on WARP, Windows' software rasterizer, compares its picture with the
-    # reference image, so build servers without a GPU check it too. See docs/adr/0021.
-    if(WIN32 AND NOT CMAKE_CROSSCOMPILING)
-        dream_add_game(dream_toppler_warp_check SOURCES src/toppler.cpp CONFIG tests/warp.toml
-            ASSETS assets ../assets tests/reference)
-        add_test(NAME dream_toppler_warp_check COMMAND dream_toppler_warp_check)
-        set_tests_properties(dream_toppler_warp_check PROPERTIES
-            PASS_REGULAR_EXPRESSION "Screenshot matches")
-        dream_add_game(dream_toppler_directx12_warp_check SOURCES src/toppler.cpp
-            CONFIG tests/warp_directx12.toml ASSETS assets ../assets tests/reference)
-        add_test(NAME dream_toppler_directx12_warp_check
-            COMMAND dream_toppler_directx12_warp_check)
-        set_tests_properties(dream_toppler_directx12_warp_check PROPERTIES
-            PASS_REGULAR_EXPRESSION "Screenshot matches")
-    endif()
+    dream_add_sample_test(dream_toppler_screenshot "Screenshot matches")
+    set_tests_properties(dream_toppler_screenshot PROPERTIES
+        ENVIRONMENT "DREAM_USER_DIR=${CMAKE_CURRENT_BINARY_DIR}/dream_toppler_screenshot_user")
 endif()

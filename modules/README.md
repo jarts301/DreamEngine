@@ -12,7 +12,7 @@ A module depends only on interfaces and Core. See
 1. A `CMakeLists.txt` that calls `dream_add_module`, which is the only build setup required:
 
    ```cmake
-   dream_add_module(physics3d jolt SOURCES src/jolt_physics.cpp LIBRARIES Jolt::Jolt)
+   dream_add_module(physics2d box2d SOURCES src/box2d_physics.cpp LIBRARIES box2d::box2d)
    ```
 
 2. A source file that defines the registration function, named after the interface and backend:
@@ -20,9 +20,9 @@ A module depends only on interfaces and Core. See
    ```cpp
    namespace dream::modules {
 
-   core::Result<void> register_physics3d_jolt(core::ModuleRegistry& registry) {
-       return registry.add(core::ModuleDescriptor<physics3d::PhysicsWorld>{
-           .name = "jolt",
+   core::Result<void> register_physics2d_box2d(core::ModuleRegistry& registry) {
+       return registry.add(core::ModuleDescriptor<physics2d::PhysicsWorld>{
+           .name = "box2d",
            .create = &create,
            .is_supported = &is_supported, // Optional.
        });
@@ -33,29 +33,10 @@ A module depends only on interfaces and Core. See
 
 Then list it in a project's TOML file. Nothing else needs to change.
 
-A graphics backend also declares the compiled shader format it loads, and `dream_add_game` compiles
-each game's shaders for every format its selected backends need:
-
-```cmake
-dream_add_module(rhi directx SOURCES src/directx_device.cpp LIBRARIES d3d11 d3dcompiler dxguid
-    SHADER_SUFFIX .dxbc SHADER_TARGET dxbc SHADER_PROFILE sm_5_0)
-```
-
-Backends that load the same format, such as `directx` and `directx12`, declare it alike, and the
-shaders are compiled once. The targets `glsl` and `essl`, with the GLSL version as the profile, go
-through SPIR-V and SPIRV-Cross instead of straight from Slang
-([ADR 0026](../docs/adr/0026-opengl.md)). See [ADR 0013](../docs/adr/0013-directx-and-shader-formats.md) for the
-shader bindings every backend shares.
-
-A module that draws brings its own Slang shaders with `SHADERS`. Every game that links the module
-gets them compiled with its own, for each of its graphics backends:
-
-```cmake
-dream_add_module(renderer forward SOURCES src/forward_renderer.cpp
-    SHADERS shaders/forward.slang shaders/shadow.slang shaders/tonemap.slang)
-```
-
-The `renderer` interface works this way ([ADR 0030](../docs/adr/0030-renderer-module.md)).
+On this branch (ADR 0039) there are no shaders: the `software` rhi module draws nothing itself,
+and the `software` renderer draws on the CPU through `Device::software_access()`. A third-party
+library a backend needs goes, as source, into `third_party/`, with its license, so the build never
+downloads anything.
 
 Third-party code must be under a permissive license: MIT, Apache 2.0, BSD, zlib or public domain
 ([ADR 0022](../docs/adr/0022-licenses-and-frozen-libraries.md)). A backend can also build on one

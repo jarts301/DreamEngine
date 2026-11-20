@@ -3,14 +3,8 @@ window = "hidden"
 
 # A backend that isn't listed is not linked.
 
-[modules.windows]
-greeter = ["english"]
-
-[modules.android]
-greeter = ["english"]
+[audio]
+muted = true
 
 [modules.linux]
 greeter = ["english"]
-
-[audio]
-muted = true

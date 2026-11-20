@@ -1,9 +1,4 @@
-# GLOBAL because every game's build needs EnTT's headers, and those are in other directories.
-find_package(EnTT CONFIG REQUIRED GLOBAL)
-find_package(Stb REQUIRED)
-find_path(DREAM_CGLTF_INCLUDE_DIR cgltf.h REQUIRED)
-# Reads cooked KTX2 textures and transcodes them for the device. Apache 2.0.
-find_package(Ktx CONFIG REQUIRED)
+# Header-only libraries from third_party/ (ADR 0039).
 
 add_library(dream_runtime STATIC
     src/app.cpp
@@ -35,8 +30,7 @@ add_library(dream_runtime STATIC
 add_library(dream::runtime ALIAS dream_runtime)
 
 target_include_directories(dream_runtime PUBLIC include)
-target_include_directories(dream_runtime SYSTEM PRIVATE
-    ${Stb_INCLUDE_DIR} ${DREAM_CGLTF_INCLUDE_DIR})
+target_link_libraries(dream_runtime PRIVATE dream::third_party_stb dream::third_party_cgltf)
 target_link_libraries(dream_runtime PUBLIC
     dream::core dream::interface_platform dream::interface_rhi dream::interface_physics2d
     dream::interface_physics3d dream::interface_audio dream::interface_ui
@@ -44,7 +38,6 @@ target_link_libraries(dream_runtime PUBLIC
     dream::interface_mesh_simplifier dream::interface_tangent_generator
     dream::interface_input_device dream::interface_animation dream::interface_particles
     EnTT::EnTT)
-target_link_libraries(dream_runtime PRIVATE KTX::ktx)
 dream_configure_target(dream_runtime)
 
 if(DREAM_BUILD_TESTS)
@@ -76,7 +69,6 @@ if(DREAM_BUILD_TESTS)
             entry/heap_counting.cpp
         LIBRARIES
             dream::runtime
-            KTX::ktx
     )
 
     # Runs a game out of memory under a limit the program sets on itself, which can't be lifted,

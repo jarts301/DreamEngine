@@ -1,0 +1,40 @@
+# Plays the scripted run with the software renderer and compares one frame with the reference
+# image, within a tolerance, on any machine: no GPU, display or sound card (ADR 0021, ADR 0039).
+[app]
+window = "hidden"
+title = "Screenshot Check"
+width = 960
+height = 540
+fixed_rate = 120
+
+[demo]
+scripted = true
+
+[input.actions]
+throw = ["key:space"]
+menu = ["key:escape"]
+debug = ["key:f1"]
+
+[screenshot]
+frame = 30
+save = "arcade_screenshot.png"
+reference = "assets:/screenshots/arcade.png"
+tolerance = 24
+max_differing = 0.01
+quit = true
+
+[audio]
+muted = true
+
+[modules.linux]
+platform = ["web"]
+input_device = ["null"]
+rhi = ["software"]
+renderer = ["software"]
+mesh_simplifier = ["meshoptimizer"]
+tangent_generator = ["mikktspace"]
+animation = ["ozz"]
+physics3d = ["impulse"]
+audio = ["null"]
+ui = ["markup"]
+debug_ui = ["imgui"]

@@ -1,429 +1,150 @@
-# DreamEngine
+# DreamEngine — offline Linux web build
 
-A modular C++20 game engine for PC and Android, designed so platforms and subsystems can be swapped
-through configuration.
+A modular C++20 game engine, on the `offline-web` branch: a version of DreamEngine for a Linux
+machine with **no internet, no GPU, no display, no sound card, no Docker and no package manager**.
+Everything it needs is in this repository, and every game, tool and test is used from a **web
+browser**. See [ADR 0039](docs/adr/0039-offline-linux-web-build.md) for why and how, and the `main`
+branch for the full engine (Windows, Android, Vulkan, Direct3D, OpenGL).
 
 Architecture rules and conventions are in [docs/adr](docs/adr/README.md).
 
-## Requirements
+## What it needs
 
-| Tool | Version | Needed for |
+| Tool | Version | Notes |
 |---|---|---|
-| CMake | 3.25 or newer | All builds |
-| Ninja | Any recent | All builds |
-| [vcpkg](https://github.com/microsoft/vcpkg) | Any; `VCPKG_ROOT` must point to it | All builds |
-| Visual Studio C++ tools | 2022 or newer | Windows builds |
-| [Android NDK](https://developer.android.com/ndk/downloads) | r30; `ANDROID_NDK_HOME` must point to it | Android builds |
-| [Android SDK](https://developer.android.com/tools/releases/cmdline-tools) | Platform 35, build-tools 35.0.0; `ANDROID_HOME` must point to it | Android APKs |
-| JDK | 17 or newer; `JAVA_HOME` must point to it | Android APKs |
+| Linux | x86-64 or arm64 | Tested on Ubuntu 24.04 |
+| A C and C++20 compiler | GCC 11+ or Clang 14+ | Tested with GCC 13 |
+| CMake | 3.22 or newer | Tested with 3.28; uses `make`, Ninja is optional |
+| A web browser | Any recent one | On the same machine, or on another one that can reach it |
 
-## Build
+Nothing is downloaded at any point: no vcpkg, apt-get, Docker, Go modules, NuGet, Ruby gems or
+Gradle. The third-party libraries are kept, with their licenses, in
+[third_party/](third_party/README.md). Python is not needed.
 
-Windows builds must run from a **x64 Native Tools Command Prompt**. CLion and Visual Studio set this
-environment up for you and list the presets automatically.
-
-Build and run the tests on Windows:
+## Build and test
 
 ```bash
-cmake --workflow --preset windows-debug
+cmake -S . -B build
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure --parallel 8
 ```
 
-Build for Android (tests are compiled but not run):
+A build without `CMAKE_BUILD_TYPE` is a release build, since the software renderer is slow
+unoptimized. `cmake --preset linux-release` (or `linux-debug`) does the same with a preset.
+
+## Use it from the browser: the hub
 
 ```bash
-cmake --workflow --preset android-arm64-debug
+build/tools/hub/dream_hub
 ```
 
-Each preset also has a `-release` version. Output goes to `build/<preset>/`.
+Then open <http://127.0.0.1:8000/>. The hub's page has four tabs:
 
-## Run the cube
+- **Games**: start any sample game, open its page to play it, stop it, read its log.
+- **Tests**: run the whole test suite (or the tests matching a filter), follow its output, and read
+  each test's result and output.
+- **Screenshots**: the frames the screenshot tests captured, beside their reference images.
+- **Build**: rebuild everything after changing the code, and read the compiler's output.
 
-After building, run the cube on Windows. Space or a click toggles the spin, and Escape quits:
+`dream_hub --host 0.0.0.0 --port 8000` lets other machines on a trusted network open it. The hub has
+no login: anyone who can reach it can build, start the listed games and run the tests, and nothing
+else.
+
+## Play a game without the hub
+
+Each game serves its own page. Run it from its folder and open the address it prints:
 
 ```bash
-build/windows-debug/samples/cube/dream_cube/dream_cube.exe
+build/samples/toppler/dream_toppler/dream_toppler
+# Open http://127.0.0.1:8080/ in a web browser to see and play Toppler
 ```
 
-It draws with Vulkan, or on a PC without a Vulkan driver with Direct3D 12, then Direct3D 11, as its
-`dream.toml` lists. To see the same fixed view on each API, run `dream_cube_vulkan_check`,
-`dream_cube_directx12_check` and `dream_cube_directx_check` from their own folders next to it.
+Click the picture to give it the keyboard. The mouse, wheel, keyboard and touch work as on a
+desktop. *Stop game* ends the program. `DREAM_WEB_PORT` and `DREAM_WEB_HOST`, or
+`[platform.web] port` and `host` in the game's `dream.toml`, choose where it listens.
 
-To check the Vulkan backend with the Khronos validation layers, configure a build folder of its own
-with `-DVCPKG_MANIFEST_FEATURES=vulkan-validation`, and set `VK_LAYER_PATH` to the folder that holds
-`VkLayer_khronos_validation.json`, which is `vcpkg_installed/x64-windows/bin` in that build folder:
+| Sample | What it shows |
+|---|---|
+| `toppler` | A 10-level knockdown puzzle game: physics, interface, saved progress |
+| `arcade_demo` | Throwing balls at targets: physics, interface, debug tools (F1) |
+| `physics_demo` | 3D physics with impulse, and 2D physics with Box2D (Tab switches) |
+| `render_demo` | Materials, normal maps, shadows, point and spot lights, skinned animation, particles |
+| `hello_game` | The smallest game: a window, input actions and saved files |
+| `module_demo` | Choosing a module from a list, without a game loop |
 
-```powershell
-cmake --preset windows-debug -B build/check-validation -DVCPKG_MANIFEST_FEATURES=vulkan-validation
-cmake --build build/check-validation
-$env:VK_LAYER_PATH = "$PWD\build\check-validation\vcpkg_installed\x64-windows\bin"
-```
+## How a game is drawn and shown
 
-Debug builds then turn validation on, and log "Vulkan validation is on". Its messages appear in
-the engine log as warnings and errors starting with `Vulkan:`. The samples' `_vulkan_check`
-programs run clean under it.
+The engine's interfaces are unchanged; this branch only adds and removes backends (modules), as a
+project's `dream.toml` selects them:
 
-There are two DirectX backends, `directx` on Direct3D 11 and `directx12` on Direct3D 12. They load
-the same compiled shaders and need nothing installed. Debug builds turn their debug layers on when
-Windows' "Graphics Tools" feature is present, and the messages appear in the engine log. See
-[ADR 0023](docs/adr/0023-direct3d-12.md).
+| Interface | Backends here | Notes |
+|---|---|---|
+| `platform` | **`web`**, `null` | The window is a web page the game serves itself; input comes back from it |
+| `rhi` | **`software`**, `null` | Resources live in memory; frames go to the web page and to screenshot tests |
+| `renderer` | **`software`**, `null` | Draws the scene on the CPU, on every core |
+| `physics3d` | `impulse`, `null` | |
+| `physics2d` | `box2d`, `null` | |
+| `animation` | `ozz`, `null` | |
+| `ui` | `markup`, `null` | |
+| `debug_ui` | `imgui`, `null` | |
+| `audio` | `null` | No sound card: sounds are tracked but never heard |
+| `input_device` | `null` | No gamepads |
+| `particles` | `cpu`, `null` | |
+| `mesh_simplifier`, `tangent_generator` | `meshoptimizer`, `mikktspace`, `null` | |
+| `profiler` | `timeline`, `null` | Profiles open at <https://ui.perfetto.dev>, or any Chrome trace viewer |
 
-The OpenGL backends are the widest fallback: `opengl` is OpenGL 4.3 on Windows, and `opengles` is
-OpenGL ES 3.1 on Android, and on Windows where the GPU driver offers ES contexts, as NVIDIA's does.
-Their shaders are compiled from the same Slang files, through SPIR-V and SPIRV-Cross. Each sample
-has `_opengl_check` and `_opengles_check` programs on Windows. See
-[ADR 0026](docs/adr/0026-opengl.md).
-
-Every backend can draw into textures and read them in later passes: float color targets for HDR,
-depth targets for shadow maps, seven texture slots, one with a shadow comparison sampler, and
-depth-only pipelines. `samples/render_targets` uses them all, and its picture matches one reference on every
-backend. See [ADR 0027](docs/adr/0027-render-targets.md).
-
-The renderer is a module: a game lists `renderer = ["forward", "null"]` beside its graphics
-backends, and the `forward` module's shaders are compiled for it. `null` only clears the window. See
-[ADR 0030](docs/adr/0030-renderer-module.md).
-
-The forward renderer draws its scene in HDR, into R11G11B10 float where the device takes it and RGBA16 float
-where only that works, and tone-maps it onto the window with Khronos PBR Neutral. Debug lines and
-the interface are drawn after, at their exact colors. A `[renderer]` table sets it:
+The software renderer draws what the GPU renderer of the main branch draws, with the same lighting:
+metallic-roughness materials, normal maps, the sun with a shadow map, point and spot lights,
+masked and blended surfaces, skinned parts, particles, debug lines and the interface, then exposure
+and PBR Neutral tone mapping. Its settings, in `dream.toml`:
 
 ```toml
 [renderer]
-hdr = "auto"              # "auto", "r11g11b10", "rgba16f" or "off".
-tone_mapping = "neutral"  # "neutral" or "none".
 exposure = 1.0
+tone_mapping = "neutral"     # or "none"
+max_lights = 16
+culling = true
+
+[renderer.software]
+threads = 8                  # default: one per core, up to 16
+
+[renderer.shadows]
+mode = "auto"                # or "off"
+resolution = 1024
+distance = 40.0
 ```
 
-See [ADR 0028](docs/adr/0028-hdr-and-tone-mapping.md).
-
-The sun casts shadows, in cascades: four of 2048x2048 on PCs, and three of 1024x1024 on phones with at
-least 4 GB of memory, with soft edges. `[renderer.shadows]` sets `mode` (`auto`, `on` or `off`),
-`resolution`, `cascades` and `distance`, and lights and meshes take `casts_shadows = false`. See
-[ADR 0029](docs/adr/0029-directional-shadows.md).
-
-Parts of models out of the camera's view are skipped, and so are shadow casters outside each
-cascade, by boxes worked out when a model loads. `culling = false` under `[renderer]` turns it off.
-See [ADR 0031](docs/adr/0031-frustum-culling.md).
-
-Parts that draw the same mesh with the same texture are drawn together, as instances of one draw,
-in the scene and in each shadow cascade. When a project lists a `mesh_simplifier`, models get
-simpler versions as they load, and the renderer draws the simplest one whose error stays within
-`lod_error` pixels on screen (1 by default). `[lods]` sets how many versions are made. See
-[ADR 0032](docs/adr/0032-instancing-and-lods.md).
-
-Surfaces use glTF's metallic-roughness materials: base color, metallic, roughness, normal,
-occlusion and emissive maps, lit with a physically based model. Normal maps need tangents, which a
-model's file may have; listing `tangent_generator = ["mikktspace", "null"]` makes them for models
-that don't. Textures named like `rock_normal.png` or `rock_orm.png` are cooked as data rather than
-colors. Materials can be opaque, cut out by their alpha, as for leaves and fences, or blended,
-as for glass, and double-sided. [Materials](docs/guides/materials.md) explains how to make models
-that look right, and [ADR 0033](docs/adr/0033-pbr-materials-and-normal-maps.md) and
-[ADR 0034](docs/adr/0034-transparency.md) record the design.
-
-## Lights
-
-Besides the sun, scenes can have point lights and spot lights, which move with their entities:
-
-```toml
-[entities.lamp.point_light]
-color = [1.0, 0.6, 0.3]
-intensity = 3.0
-range = 6.0
-```
-
-`forward_plus` sorts up to 256 of them into clusters of the view each frame, so each pixel lights
-itself only with the lights that reach it; `forward` takes the 16 nearest. They don't cast shadows
-yet. [Lighting](docs/guides/lighting.md) explains placing lights and how bright to make them, and
-[ADR 0037](docs/adr/0037-point-and-spot-lights.md) records the design.
-
-## Particles
-
-With `particles = ["cpu", "null"]` listed and a `runtime::Particles` updated each frame, a
-`particle_emitter` gives off particles from its entity: fire, smoke, sparks, dust and magic.
-Additive particles glow; alpha ones cover what is behind them.
-
-```toml
-[entities.torch.particle_emitter]
-blend = "additive"
-shape = "cone"
-rate = 50.0
-lifetime = [0.4, 0.8]
-start_color = [1.6, 0.6, 0.16]
-end_alpha = 0.0
-```
-
-The render demo's yard has a campfire of flames, sparks and textured smoke.
-[Particles](docs/guides/particles.md) explains every setting and how to make common effects, and
-[ADR 0038](docs/adr/0038-particles.md) records the design.
-
-## Animation
-
-Skinned glTF models load with their skeleton and animations, and are skinned on the GPU on every
-graphics backend. With `animation = ["ozz", "null"]` listed and a `runtime::Animation` updated each
-frame, an `animator` in a scene file plays a clip, and `Animation::play` fades between clips:
-
-```toml
-[entities.hero.animator]
-clip = "walk"
-```
-
-ozz-animation (MIT) comes from an overlay port in `cmake/ports`, which the presets list. The render
-demo's tentacle has two clips; N or a gamepad's north button fades between them.
-[Animation](docs/guides/animation.md) explains how to export animated models from Blender and play
-them, and [ADR 0036](docs/adr/0036-skeletal-animation.md) records the design.
-
-## Input and gamepads
-
-Games read named actions, which `[input.actions]` in `dream.toml` binds to keys, mouse buttons,
-touch and gamepad buttons, sticks and triggers. Listing `input_device = ["sdl3_gamepad", "null"]`
-brings gamepads, through SDL3, on Windows and Android:
-
-```toml
-[input.actions]
-jump = ["key:space", "touch", "gamepad:south"]
-move_left = ["key:a", "gamepad:left_stick_left", "gamepad:dpad_left"]
-move_right = ["key:d", "gamepad:left_stick_right", "gamepad:dpad_right"]
-```
-
-Sticks and triggers are analog: `app.input().axis("move_left", "move_right")` goes from -1 to 1
-with keys and sticks alike. In the render demo, the left stick, the d-pad or WASD orbit the camera,
-and the triggers zoom. [Input](docs/guides/input.md) explains bindings, deadzones, several
-players and rumble, and [ADR 0035](docs/adr/0035-gamepads.md) records the design.
-
-## Screenshot tests
-
-A `[screenshot]` table in a game's `dream.toml` captures one frame, saves it next to the program,
-and compares it with a reference image, failing the run if they differ by more than a tolerance:
-
-```toml
-[screenshot]
-frame = 60                                    # Counting from 0.
-reference = "assets:/screenshots/title.png"   # Optional. Without it, the frame is only saved.
-```
-
-The cube, the render demo, the arcade and Toppler have `_warp_check` and `_directx12_warp_check`
-programs that do this on Windows' software rasterizer with Direct3D 11 and 12, which CTest runs, and
-their Vulkan and DirectX checks do it on the GPU. To update a reference, run the check and copy the capture it saves into the sample's
-`tests/reference/screenshots/`. See [ADR 0021](docs/adr/0021-screenshot-tests.md).
-
-Checks run unattended, so every sample's test configuration hides its window and mutes its audio:
-
-```toml
-[app]
-window = "hidden"   # "normal" (the default), "background" or "hidden".
-
-[audio]
-muted = true        # Every bus plays at 0.
-```
-
-`hidden` never shows the window, and drawing and captures still work on all five PC graphics
-backends. `background` shows it without taking the keyboard or coming to the front, for watching
-a run without being interrupted. While muted, a game still reads back the bus volumes it sets, so
-a game that saves its player's volumes doesn't save silence. Both settings are ignored on Android,
-where the game fills the screen.
-
-## Cooked textures and packages
-
-PNG files in a `textures` folder among a game's assets are cooked at build time into KTX2 files,
-which the game transcodes to BC7 on PCs and ASTC on phones, with their mipmaps made in advance. A
-model that names `textures/crate.png` loads the cooked `textures/crate.ktx2`. Configure with
-`-DDREAM_COOK_TEXTURES=OFF` to ship the PNGs instead.
-
-On PC, `cmake --build <folder> --target <game>_package` puts the program and an `assets.pak`
-holding all its assets in `<game>_package/`, ready to hand out. See
-[ADR 0024](docs/adr/0024-texture-cooking.md).
-
-## Hot reload
-
-In debug builds on PC, a running game reloads its shaders, models and textures when their files
-change. Edit the source, then build only the game's assets while it keeps running:
-
-```bash
-cmake --build build/windows-debug --target dream_render_demo_assets
-```
-
-The game logs each asset it reloads. `[hot_reload] enabled = false` turns it off. See
-[ADR 0025](docs/adr/0025-hot-reload.md).
-
-## Play Toppler
-
-Toppler is a small physics puzzle built on the engine: knock every gold crate down within each
-level's throws, by tapping or clicking where a ball should land. Escape, Back on Android, or Start
-on a gamepad pauses.
-After building, run it on Windows:
-
-```bash
-build/windows-debug/samples/toppler/dream_toppler/dream_toppler.exe
-```
-
-On Android, its APK target is `dream_toppler_apk`. Its levels are scene files in
-`samples/toppler/assets/levels/`, and its progress is saved in the engine's user storage. See
-[ADR 0020](docs/adr/0020-first-game.md).
-
-## Android APK
-
-The targets are `dream_cube_apk`, `dream_hello_game_apk` and `dream_toppler_apk`, among others.
-Build a game's APK, then install it on a phone connected by USB with debugging enabled:
-
-```bash
-cmake --build --preset android-arm64-debug --target dream_hello_game_apk
-```
-
-```bash
-adb install -r build/android-arm64-debug/samples/hello_game/dream_hello_game_apk/app/outputs/apk/debug/app-debug.apk
-```
-
-Engine messages appear in Logcat:
-
-```bash
-adb logcat DreamEngine:V SDL:V *:S
-```
-
-The APK contains only `arm64-v8a` code, so it needs a real device rather than an x86-64 emulator.
-
-## Choosing modules
-
-A project picks its backends in a TOML file, with one priority list per interface and platform.
-[samples/module_demo/dream.toml](samples/module_demo/dream.toml) is an example:
-
-```toml
-[modules.windows]
-greeter = ["english", "spanish"]
-```
-
-Only the listed backends are compiled, and the first one that starts is used. To build your own
-program with them, call `dream_link_modules(<target> CONFIG <file>)` in CMake and
-`core::ModuleProject::load` at startup. See [ADR 0006](docs/adr/0006-module-system.md).
-
-Graphics, physics, audio and the game interface each have two real backends, switched by
-editing a list. Each one below runs the arcade sample to the same result on the platforms marked,
-checked on a PC and a phone as described in [Backends](docs/reports/backends.md):
-
-| Interface | Backends | Windows | Android | Notes |
-|---|---|---|---|---|
-| `rhi` | `vulkan`, `directx12`, `directx`, `opengl`, `opengles`, `null` | all | `vulkan`, `opengles`, `null` | `directx` is Direct3D 11. A game's shaders are compiled for whichever its list names. |
-| `renderer` | `forward_plus`, `forward`, `null` | all | all | `forward_plus` takes up to 256 point and spot lights in clusters, `forward` the 16 nearest; both bring the same shaders. `null` only clears the window. |
-| `mesh_simplifier` | `meshoptimizer`, `null` | all | all | Makes the simpler versions of models that the renderer draws far away. Optional. |
-| `tangent_generator` | `mikktspace`, `null` | all | all | Makes tangents for normal maps on models exported without them. Optional. |
-| `input_device` | `sdl3_gamepad`, `null` | all | all | Gamepads, bound to the same actions as keys. Optional. |
-| `animation` | `ozz`, `null` | all | all | Plays skeletal animation; `null` leaves models at rest. Optional. |
-| `physics3d` | `jolt`, `impulse`, `null` | all | all | `impulse` is the engine's own library. |
-| `physics2d` | `box2d`, `chipmunk`, `null` | all | all | `chipmunk` has no continuous collision. |
-| `audio` | `miniaudio`, `portaudio`, `null` | all | `miniaudio`, `null` | PortAudio has no Android output. |
-| `ui` | `rmlui`, `markup`, `null` | all | all | Both read the same RML and RCSS files. `markup` is the engine's own library. |
-| `debug_ui` | `imgui`, `null` | all | all | |
-| `platform` | `sdl3`, `null` | all | all | |
-| `profiler` | `timeline`, `null` | all | all | `timeline` saves a trace to open in Perfetto; see [Profiling](#profiling). |
-
-```toml
-[modules.windows]
-rhi = ["directx12", "vulkan", "null"]
-physics3d = ["impulse"]
-ui = ["markup"]
-```
-
-Shaders declare their bindings for both graphics APIs; see
-[ADR 0013](docs/adr/0013-directx-and-shader-formats.md). The engine's own backends are built on
-[libraries](libraries/README.md) of their own; see
-[ADR 0014](docs/adr/0014-more-backends-and-libraries.md).
-
-## Profiling
-
-List a profiler for a platform, and the game saves a trace of each run when it ends. Open the file
-at [ui.perfetto.dev](https://ui.perfetto.dev) or in Chrome's `chrome://tracing`:
-
-```toml
-[modules.windows]
-profiler = ["timeline"]
-
-[profiler.timeline]
-path = "trace.json"   # Relative to the starting folder; on Android, the app's files folder.
-start_frame = 0       # Frames to skip before recording, such as while loading.
-frames = 0            # How many frames to record. 0 means until the end.
-```
-
-The engine already measures its main loop, physics, rendering, audio, loading and jobs. Games and
-backends add their own zones with the macros in `dream/core/profile.h`:
-
-```cpp
-#include "dream/core/profile.h"
-
-void Enemies::update() {
-    DREAM_PROFILE_ZONE("Enemies");               // Measures the rest of the scope.
-    DREAM_PROFILE_VALUE("Enemies alive", count); // Drawn as a graph over time.
-}
-```
-
-Profiles also record frame time, the main thread's CPU work and the GPU's time per frame, heap
-allocations per frame, process memory, CPU usage, video memory and counts such as draw calls and
-physics bodies. When the
-game ends, the log sums each one up with its minimum, mean, 95th and 99th percentile, and maximum.
-[Reading profiles](docs/reports/reading-profiles.md) explains what each value means and how to read
-it.
-
-`samples/arcade_demo` saves `dream_arcade_trace.json` this way on Windows and Linux. Configuring
-with `-DDREAM_PROFILING=OFF` removes the zones from the build entirely. See
-[ADR 0015](docs/adr/0015-profiling.md) and [ADR 0016](docs/adr/0016-profiling-resources.md).
-
-## Running out of memory
-
-Every game watches its memory and the system's. When memory runs low, `Game::on_low_memory` is
-called so the game can free some, new assets are refused while it is critically low, and an
-emergency reserve lets an allocation that fails succeed, instead of the game crashing. A game can
-also give itself a budget:
-
-```toml
-[memory]
-budget_mb = 2048   # The most private memory the game means to use.
-```
-
-[Memory budgets](docs/reports/memory-budgets.md) describes the strategy and what a game should do.
-See [ADR 0018](docs/adr/0018-memory-budgets.md).
-
-## Crash reports
-
-When a game or the engine crashes on Windows or Linux, a report is written to `crash_reports/`
-with the reason, the frame, the modules in use, memory, the last log lines and the stack, and on
-Windows a minidump beside it that Visual Studio opens at the crash. To try it, crash on purpose:
-
-```toml
-[crash_report]
-simulate = "null_pointer"    # Or "stack_overflow", "abort", "assert", ... "none" turns it off.
-simulate_after_frames = 300
-```
-
-[Crash reports](docs/reports/crash-reports.md) explains how to read them. See
-[ADR 0019](docs/adr/0019-crash-reports.md).
-
-To check the layer rules locally (needs Python 3):
-
-```bash
-python tools/check_layers.py
-```
-
-## CLion
-
-Use a preset profile, because CLion's default `Debug` profile does not use vcpkg. In
-**Settings > Build, Execution, Deployment > CMake**, enable a preset profile and disable `Debug`.
-
-If `VCPKG_ROOT` and `ANDROID_NDK_HOME` are not set on your system, create a `CMakeUserPresets.json`
-(ignored by Git) with presets that set them under `environment` and inherit from the presets above.
-
-## Non-English Visual Studio
-
-Ninja finds a source file's headers by matching the compiler's "including file" message. In a
-non-English Visual Studio that text can contain accented letters, and their bytes depend on the
-console code page. If the console differs between configuring and building, as it can in an IDE,
-editing a header silently stops rebuilding the files that use it, which can cause strange crashes.
-
-To avoid this, install Visual Studio's English language pack (**Visual Studio Installer > Modify >
-Language packs**). The Windows presets set `VSLANG=1033`, which makes the compiler use it. CLion
-doesn't apply that setting when building, so with CLion also remove the other language, leaving
-English as the only one. Then reconfigure from scratch and rebuild.
-
-To check a build folder, this should print no lines:
-
-```bash
-ninja -C build/windows-debug -t deps | grep "#deps 0,"
-```
-
-Without the language pack, rebuild the project after editing a header.
+The samples draw at 960x540 and at most 30 frames a second, which a few cores keep up with. Raise
+`[app] width`, `height` and `max_fps` on a faster machine.
+
+## Tests
+
+`ctest` runs the engine's unit tests, each library's and backend's tests, and the samples run
+start to finish without a person: Toppler plays all ten levels, the arcade and physics demos play
+scripted runs, and the screenshot tests compare frames of the software renderer with the reference
+images in `samples/*/tests/reference/screenshots` (ADR 0021). A screenshot test that fails saves
+its capture in its build folder, and the hub shows it beside the reference. To accept a new picture
+after a deliberate change, copy the capture over the reference.
+
+The web page itself is tested by `dream_platform_web_tests`, which serves it, posts input to it
+and reads frames from it, as a browser does.
+
+## Packaging
+
+`cmake --build build --target dream_toppler_package` puts the game and its assets, packed into
+`assets.pak`, in `build/samples/toppler/dream_toppler_package/`, ready to copy to another Linux
+machine.
+
+## Layout
+
+| Folder | Contents |
+|---|---|
+| `core/` | Logging, results, handles, allocators, math, configuration, jobs, crash reports |
+| `interfaces/` | What each kind of module provides |
+| `modules/` | The backends, one folder each |
+| `libraries/` | In-house libraries the backends build on: `impulse`, `markup`, `mixer`, `timeline`, `webserve` |
+| `runtime/` | The game loop, world, assets, scenes, renderer front end |
+| `samples/` | The games above |
+| `third_party/` | Everything from outside, with licenses |
+| `tools/` | `hub` (the web page) and `pack` (asset archives) |
+| `docs/` | Decisions (ADRs), guides and reports |

@@ -4,23 +4,18 @@ function(dream_configure_target target)
     target_compile_features(${target} PUBLIC cxx_std_20)
     set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
 
-    if(MSVC)
-        target_compile_options(${target} PRIVATE
-            /W4 /permissive- /utf-8 /Zc:__cplusplus /Zc:preprocessor /EHs-c- /GR-)
-        target_compile_definitions(${target} PRIVATE
-            _HAS_EXCEPTIONS=0 NOMINMAX WIN32_LEAN_AND_MEAN)
-        if(DREAM_WARNINGS_AS_ERRORS)
-            target_compile_options(${target} PRIVATE /WX)
-        endif()
+    # GCC or Clang on Linux (ADR 0039).
+    target_compile_options(${target} PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -fno-exceptions -fno-rtti)
+    # Engine structs give every field a default, so designated initializers name only the fields
+    # that differ, which compilers would otherwise warn about.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(${target} PRIVATE -Wno-missing-field-initializers)
     else()
-        # Engine structs give every field a default, so designated initializers name only the
-        # fields that differ, which Clang would otherwise warn about.
-        target_compile_options(${target} PRIVATE
-            -Wall -Wextra -Wpedantic -Wconversion -Wshadow -fno-exceptions -fno-rtti
-            -Wno-missing-designated-field-initializers)
-        if(DREAM_WARNINGS_AS_ERRORS)
-            target_compile_options(${target} PRIVATE -Werror)
-        endif()
+        target_compile_options(${target} PRIVATE -Wno-missing-designated-field-initializers)
+    endif()
+    if(DREAM_WARNINGS_AS_ERRORS)
+        target_compile_options(${target} PRIVATE -Werror)
     endif()
 endfunction()
 

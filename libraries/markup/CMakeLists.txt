@@ -1,5 +1,4 @@
-# stb_truetype rasterizes the glyphs. stb is MIT or public domain, and the runtime already uses it.
-find_package(Stb REQUIRED)
+# stb_truetype rasterizes the glyphs. stb is MIT or public domain, and kept in third_party/.
 
 dream_add_library(markup
     SOURCES
@@ -10,7 +9,7 @@ dream_add_library(markup
         src/render.cpp
         src/style.cpp
 )
-target_include_directories(dream_library_markup SYSTEM PRIVATE ${Stb_INCLUDE_DIR})
+target_link_libraries(dream_library_markup PRIVATE dream::third_party_stb)
 
 if(DREAM_BUILD_TESTS)
     dream_add_test(dream_library_markup_tests

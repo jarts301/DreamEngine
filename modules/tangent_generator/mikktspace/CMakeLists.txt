@@ -1,6 +1,4 @@
-# GLOBAL because the game's final link needs this target, and it happens in another directory.
-find_package(mikktspace CONFIG REQUIRED GLOBAL)
-
+# Built from the sources in third_party/ (ADR 0039).
 dream_add_module(tangent_generator mikktspace
     SOURCES src/mikktspace_tangent_generator.cpp
     LIBRARIES mikktspace::mikktspace

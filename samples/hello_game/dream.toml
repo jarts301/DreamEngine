@@ -2,21 +2,20 @@
 organization = "DreamEngine"
 name = "DreamHello"
 title = "Dream Hello"
-width = 1280
-height = 720
+# Drawn on the CPU (ADR 0039), so a smaller picture and a frame-rate cap keep it smooth and
+# leave the machine some room.
+width = 960
+height = 540
+max_fps = 30
 
 [input.actions]
 confirm = ["key:space", "key:enter", "mouse:left", "touch", "gamepad:south"]
 quit = ["key:escape", "gamepad:back"]
 
-[modules.windows]
-platform = ["sdl3"]
-input_device = ["sdl3_gamepad", "null"]
-
-[modules.android]
-platform = ["sdl3"]
-input_device = ["sdl3_gamepad", "null"]
-
+# The web platform shows the game in a browser, drawn on the CPU by the software renderer
+# (ADR 0039). Open the address it logs, or start it from the hub.
 [modules.linux]
-platform = ["sdl3"]
-input_device = ["sdl3_gamepad", "null"]
+platform = ["web"]
+input_device = ["null"]
+rhi = ["software"]
+renderer = ["software"]

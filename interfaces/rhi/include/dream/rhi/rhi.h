@@ -21,6 +21,7 @@ struct BufferTag;
 struct ShaderTag;
 struct PipelineTag;
 struct TextureTag;
+class SoftwareAccess;
 
 using BufferHandle = core::Handle<BufferTag>;
 using ShaderHandle = core::Handle<ShaderTag>;
@@ -523,6 +524,12 @@ public:
     // The frame capture_next_frame asked for, once it has been presented, given once.
     [[nodiscard]] virtual std::optional<CapturedFrame> take_captured_frame() {
         return std::nullopt;
+    }
+
+    // An optional capability, for devices that draw on the CPU (ADR 0039): see software.h. Null
+    // for a device that draws on a GPU, which is the default.
+    [[nodiscard]] virtual SoftwareAccess* software_access() {
+        return nullptr;
     }
 };
 

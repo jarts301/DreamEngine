@@ -1,6 +1,4 @@
-# GLOBAL because the game's final link needs this target, and it happens in another directory.
-find_package(box2d CONFIG REQUIRED GLOBAL)
-
+# Built from the sources in third_party/ (ADR 0039).
 dream_add_module(physics2d box2d SOURCES src/box2d_physics.cpp LIBRARIES box2d::box2d)
 
 if(DREAM_BUILD_TESTS)

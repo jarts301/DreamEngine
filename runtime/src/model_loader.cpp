@@ -376,7 +376,7 @@ core::Mat4 node_local(const cgltf_node& node) {
     std::array<cgltf_float, 16> values{};
     cgltf_node_transform_local(&node, values.data());
     core::Mat4 local;
-    std::memcpy(&local, values.data(), sizeof(local));
+    std::memcpy(static_cast<void*>(&local), values.data(), sizeof(local));
     return local;
 }
 
@@ -384,7 +384,7 @@ core::Mat4 node_world(const cgltf_node& node) {
     std::array<cgltf_float, 16> values{};
     cgltf_node_transform_world(&node, values.data());
     core::Mat4 world;
-    std::memcpy(&world, values.data(), sizeof(world));
+    std::memcpy(static_cast<void*>(&world), values.data(), sizeof(world));
     return world;
 }
 

@@ -3,20 +3,8 @@
 
 include(${CMAKE_CURRENT_LIST_DIR}/DreamModuleConfig.cmake)
 
-if(ANDROID)
-    set(dream_default_platform android)
-elseif(IOS)
-    set(dream_default_platform ios)
-elseif(WIN32)
-    set(dream_default_platform windows)
-elseif(APPLE)
-    set(dream_default_platform macos)
-elseif(UNIX)
-    set(dream_default_platform linux)
-else()
-    set(dream_default_platform "")
-endif()
-set(DREAM_PLATFORM "${dream_default_platform}" CACHE STRING
+# This branch builds for Linux only (ADR 0039).
+set(DREAM_PLATFORM "linux" CACHE STRING
     "The [modules.<platform>] table used from project configurations")
 
 # Usage: dream_add_interface(<name>)
@@ -28,23 +16,12 @@ function(dream_add_interface name)
     target_compile_features(dream_interface_${name} INTERFACE cxx_std_20)
 endfunction()
 
-# Usage: dream_add_module(<interface> <backend> SOURCES <files...> [LIBRARIES <third-party...>]
-#                         [SHADER_SUFFIX <suffix> SHADER_TARGET <target> SHADER_PROFILE <profile>])
+# Usage: dream_add_module(<interface> <backend> SOURCES <files...> [LIBRARIES <libraries...>])
 #
 # The sources must define dream::modules::register_<interface>_<backend>, which the generated
 # registration code calls.
-#
-# A graphics backend loads one compiled shader format, and declares it with the three SHADER_
-# options: the suffix its Device::shader_file_suffix returns, and the slangc target and profile that
-# produce that format. dream_add_game compiles a game's shaders once for every format that the
-# game's selected backends load, so a project switches graphics backends by editing only its module
-# lists. See docs/adr/0013-directx-and-shader-formats.md.
-#
-# A backend that draws with its own shaders, such as a renderer, lists their Slang files in SHADERS,
-# and every game that links it compiles them with its own (ADR 0030).
 function(dream_add_module interface backend)
-    cmake_parse_arguments(PARSE_ARGV 2 ARG "" "SHADER_SUFFIX;SHADER_TARGET;SHADER_PROFILE"
-        "SOURCES;LIBRARIES;SHADERS")
+    cmake_parse_arguments(PARSE_ARGV 2 ARG "" "" "SOURCES;LIBRARIES")
 
     set(target dream_module_${interface}_${backend})
     add_library(${target} STATIC ${ARG_SOURCES})
@@ -53,46 +30,6 @@ function(dream_add_module interface backend)
         PUBLIC dream::core dream::interface_${interface}
         PRIVATE ${ARG_LIBRARIES})
     dream_configure_target(${target})
-
-    if(ARG_SHADER_SUFFIX OR ARG_SHADER_TARGET OR ARG_SHADER_PROFILE)
-        if(NOT (ARG_SHADER_SUFFIX AND ARG_SHADER_TARGET AND ARG_SHADER_PROFILE))
-            message(FATAL_ERROR "dream_add_module(${interface} ${backend}) needs SHADER_SUFFIX, "
-                                "SHADER_TARGET and SHADER_PROFILE together.")
-        endif()
-        set_target_properties(${target} PROPERTIES
-            DREAM_SHADER_SUFFIX "${ARG_SHADER_SUFFIX}"
-            DREAM_SHADER_TARGET "${ARG_SHADER_TARGET}"
-            DREAM_SHADER_PROFILE "${ARG_SHADER_PROFILE}")
-    endif()
-
-    set(shaders "")
-    foreach(shader IN LISTS ARG_SHADERS)
-        cmake_path(ABSOLUTE_PATH shader BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" NORMALIZE)
-        list(APPEND shaders "${shader}")
-    endforeach()
-    set_target_properties(${target} PROPERTIES DREAM_MODULE_SHADERS "${shaders}")
-endfunction()
-
-# Usage: dream_module_shader_formats(<target> <out-var>)
-#
-# Lists the shader formats that the modules linked into <target> by dream_link_modules load. Each
-# entry is "<suffix>|<slangc target>|<slangc profile>", and each format appears once even when
-# several backends share it.
-function(dream_module_shader_formats target out_var)
-    get_target_property(module_targets ${target} DREAM_MODULE_TARGETS)
-    set(formats "")
-    if(module_targets)
-        foreach(module_target IN LISTS module_targets)
-            get_target_property(suffix ${module_target} DREAM_SHADER_SUFFIX)
-            if(suffix)
-                get_target_property(slang_target ${module_target} DREAM_SHADER_TARGET)
-                get_target_property(profile ${module_target} DREAM_SHADER_PROFILE)
-                list(APPEND formats "${suffix}|${slang_target}|${profile}")
-            endif()
-        endforeach()
-        list(REMOVE_DUPLICATES formats)
-    endif()
-    set(${out_var} "${formats}" PARENT_SCOPE)
 endfunction()
 
 # Usage: dream_link_modules(<target> CONFIG <toml-file>)

@@ -1,6 +1,4 @@
-# GLOBAL because the game's final link needs this target, and it happens in another directory.
-find_package(meshoptimizer CONFIG REQUIRED GLOBAL)
-
+# Built from the sources in third_party/ (ADR 0039).
 dream_add_module(mesh_simplifier meshoptimizer
     SOURCES src/meshoptimizer_simplifier.cpp
     LIBRARIES meshoptimizer::meshoptimizer

@@ -1,6 +1,4 @@
-# GLOBAL because the game's final link needs this target, and it happens in another directory.
-find_package(imgui CONFIG REQUIRED GLOBAL)
-
+# Built from the sources in third_party/ (ADR 0039).
 dream_add_module(debug_ui imgui SOURCES src/imgui_debug_ui.cpp LIBRARIES imgui::imgui)
 
 if(DREAM_BUILD_TESTS)

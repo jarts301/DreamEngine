@@ -2,8 +2,11 @@
 organization = "DreamEngine"
 name = "DreamPhysics"
 title = "Dream Physics"
-width = 1280
-height = 720
+# Drawn on the CPU (ADR 0039), so a smaller picture and a frame-rate cap keep it smooth and
+# leave the machine some room.
+width = 960
+height = 540
+max_fps = 30
 
 [demo]
 mode = "3d"           # Or "2d".
@@ -15,35 +18,15 @@ switch = ["key:tab", "gamepad:north"]
 shapes = ["key:d", "gamepad:west"]
 quit = ["key:escape", "gamepad:back"]
 
-[modules.windows]
-platform = ["sdl3"]
-input_device = ["sdl3_gamepad", "null"]
-rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
-renderer = ["forward", "null"]
-mesh_simplifier = ["meshoptimizer", "null"]
-tangent_generator = ["mikktspace", "null"]
-animation = ["ozz", "null"]
-physics3d = ["jolt", "impulse"]
-physics2d = ["box2d", "chipmunk"]
-
-[modules.android]
-platform = ["sdl3"]
-input_device = ["sdl3_gamepad", "null"]
-rhi = ["vulkan", "opengles", "null"]
-renderer = ["forward", "null"]
-mesh_simplifier = ["meshoptimizer", "null"]
-tangent_generator = ["mikktspace", "null"]
-animation = ["ozz", "null"]
-physics3d = ["jolt"]
-physics2d = ["box2d"]
-
+# The web platform shows the game in a browser, drawn on the CPU by the software renderer
+# (ADR 0039). Open the address it logs, or start it from the hub.
 [modules.linux]
-platform = ["sdl3"]
-input_device = ["sdl3_gamepad", "null"]
-rhi = ["vulkan", "null"]
-renderer = ["forward", "null"]
+platform = ["web"]
+input_device = ["null"]
+rhi = ["software"]
+renderer = ["software"]
 mesh_simplifier = ["meshoptimizer", "null"]
 tangent_generator = ["mikktspace", "null"]
 animation = ["ozz", "null"]
-physics3d = ["jolt"]
+physics3d = ["impulse"]
 physics2d = ["box2d"]

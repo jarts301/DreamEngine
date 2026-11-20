@@ -1,14 +1,12 @@
 find_package(Threads REQUIRED)
 
-# Header-only use of toml++, private to src/config.cpp. See the comment in that file.
-find_path(DREAM_TOMLPLUSPLUS_INCLUDE_DIR toml++/toml.hpp REQUIRED)
+# toml++ is header-only, private to src/config.cpp, and kept in third_party/.
 
 add_library(dream_core STATIC
     src/archive.cpp
     src/assert.cpp
     src/config.cpp
     src/crash_handler_linux.cpp
-    src/crash_handler_windows.cpp
     src/crash_report.cpp
     src/job_system.cpp
     src/linear_allocator.cpp
@@ -25,14 +23,8 @@ add_library(dream_core STATIC
 add_library(dream::core ALIAS dream_core)
 
 target_include_directories(dream_core PUBLIC include)
-target_include_directories(dream_core SYSTEM PRIVATE ${DREAM_TOMLPLUSPLUS_INCLUDE_DIR})
+target_link_libraries(dream_core PRIVATE dream::third_party_tomlplusplus)
 target_link_libraries(dream_core PUBLIC Threads::Threads)
-if(ANDROID)
-    target_link_libraries(dream_core PRIVATE log)
-elseif(WIN32)
-    # GetProcessMemoryInfo, for process_stats.cpp, and stack walks and minidumps for crash reports.
-    target_link_libraries(dream_core PRIVATE psapi dbghelp)
-endif()
 target_compile_definitions(dream_core PRIVATE
     DREAM_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     DREAM_VERSION_MINOR=${PROJECT_VERSION_MINOR}
@@ -75,21 +67,15 @@ if(DREAM_BUILD_TESTS)
     target_include_directories(dream_core_tests PRIVATE src)
 
     # Real crashes happen in a program of their own, which crashes the way it is told, and a
-    # script checks the report each one leaves. On Android the probe is built to be run on a phone
-    # by hand, since CTest can't run it there.
-    if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR ANDROID)
+    # script checks the report each one leaves.
+    if(NOT CMAKE_CROSSCOMPILING)
         add_executable(dream_crash_probe tests/crash_probe.cpp)
         target_link_libraries(dream_crash_probe PRIVATE dream::core)
         dream_configure_target(dream_crash_probe)
 
         if(NOT CMAKE_CROSSCOMPILING)
-            if(WIN32)
-                set(reason_null_pointer "Access violation, writing address 0x0000000000000000")
-                set(reason_stack_overflow "Stack overflow")
-            else()
-                set(reason_null_pointer "Segmentation fault (SIGSEGV)")
-                set(reason_stack_overflow "most likely a stack overflow")
-            endif()
+            set(reason_null_pointer "Segmentation fault (SIGSEGV)")
+            set(reason_stack_overflow "most likely a stack overflow")
             set(reason_divide_by_zero "division by zero")
             set(reason_abort "abort() was called")
             set(reason_assert "DREAM_VERIFY|A simulated assertion failure")
@@ -111,7 +97,7 @@ if(DREAM_BUILD_TESTS)
                         "-DARGUMENTS=${kind}|${folder}"
                         "-DDIRECTORY=${folder}"
                         "-DEXPECT=${expected}"
-                        "-DMINIDUMP=${WIN32}"
+                        "-DMINIDUMP=OFF"
                         -P "${PROJECT_SOURCE_DIR}/cmake/tests/check_crash_report.cmake")
             endforeach()
         endif()
