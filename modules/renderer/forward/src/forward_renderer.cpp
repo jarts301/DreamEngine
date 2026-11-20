@@ -3,6 +3,7 @@
 // layers over the result. Parts out of the camera's view, or out of a shadow cascade, are skipped
 // (ADR 0031). Surfaces are lit with glTF's metallic-roughness model and normal maps (ADR 0033).
 // Opaque parts are drawn first, then cut-out ones, then blended ones, farthest first (ADR 0034).
+// Skinned parts are moved by their joints in the vertex shader, one draw each (ADR 0036).
 
 #include "dream/core/config.h"
 #include "dream/core/log.h"
@@ -533,11 +534,17 @@ struct Pipelines {
     SidedPipelines masked;
     // Blended materials: premultiplied alpha, testing depth without writing it.
     SidedPipelines blended;
+    // The same three, for skinned parts.
+    SidedPipelines forward_skinned;
+    SidedPipelines masked_skinned;
+    SidedPipelines blended_skinned;
     OwnedPipeline lines;
     OwnedPipeline ui;
     OwnedPipeline ui_premultiplied;
     OwnedPipeline shadow;        // Only with shadows.
     OwnedPipeline shadow_masked; // Only with shadows.
+    OwnedPipeline shadow_skinned;        // Only with shadows.
+    OwnedPipeline shadow_masked_skinned; // Only with shadows.
     OwnedPipeline tone_map;      // Only with HDR.
 };
 
@@ -693,6 +700,8 @@ private:
     std::vector<InstanceData> m_batch;
     // Each blended part's squared distance from the eye, for drawing the farthest first.
     std::vector<float> m_distances;
+    // A skinned part's joints, as the per-draw block takes them.
+    std::vector<Vec4> m_joint_rows;
     Vec3 m_eye;
     bool m_warned_instances = false;
 };
@@ -751,14 +760,37 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
     if (!masked_fragment.has_value()) {
         return masked_fragment.error();
     }
-    // One-sided and double-sided versions of a lit pipeline (ADR 0034).
-    const auto sided = [&](rhi::ShaderHandle fragment_shader, rhi::BlendMode blend,
+    // Skinned parts' vertices also have their joints and weights, after the instance's inputs.
+    static constexpr std::array k_skinned_attributes{
+        k_attributes[0], k_attributes[1], k_attributes[2], k_attributes[3],
+        rhi::VertexAttribute{14, rhi::VertexFormat::UByte4Norm, offsetof(MeshVertex, joints)},
+        rhi::VertexAttribute{15, rhi::VertexFormat::UByte4Norm, offsetof(MeshVertex, weights)},
+    };
+    const core::Result<rhi::ShaderHandle> skinned_vertex =
+        shader("forward_skinned.vert", rhi::ShaderStage::Vertex);
+    if (!skinned_vertex.has_value()) {
+        return skinned_vertex.error();
+    }
+    const core::Result<rhi::ShaderHandle> skinned_fragment =
+        shader("forward_skinned.frag", rhi::ShaderStage::Fragment);
+    if (!skinned_fragment.has_value()) {
+        return skinned_fragment.error();
+    }
+    const core::Result<rhi::ShaderHandle> masked_skinned_fragment =
+        shader("forward_masked_skinned.frag", rhi::ShaderStage::Fragment);
+    if (!masked_skinned_fragment.has_value()) {
+        return masked_skinned_fragment.error();
+    }
+    // One-sided and double-sided versions of a lit pipeline (ADR 0034), for static or skinned
+    // parts.
+    const auto sided = [&](rhi::ShaderHandle fragment_shader, rhi::BlendMode blend, bool skinned,
                            SidedPipelines& out) -> core::Result<void> {
         rhi::PipelineDesc desc{
-            .vertex_shader = vertex.value(),
+            .vertex_shader = skinned ? skinned_vertex.value() : vertex.value(),
             .fragment_shader = fragment_shader,
             .vertex_stride = sizeof(MeshVertex),
-            .attributes = k_attributes,
+            .attributes = skinned ? std::span<const rhi::VertexAttribute>(k_skinned_attributes)
+                                  : std::span<const rhi::VertexAttribute>(k_attributes),
             .instance_stride = sizeof(InstanceData),
             .instance_attributes = k_instance_attributes,
             .blend = blend,
@@ -780,18 +812,26 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
         out.double_sided = std::move(double_sided).value();
         return {};
     };
-    if (auto made_forward = sided(fragment.value(), rhi::BlendMode::Opaque, made.forward);
-        !made_forward.has_value()) {
-        return made_forward.error();
-    }
-    if (auto made_masked = sided(masked_fragment.value(), rhi::BlendMode::Opaque, made.masked);
-        !made_masked.has_value()) {
-        return made_masked.error();
-    }
-    if (auto made_blended =
-            sided(fragment.value(), rhi::BlendMode::PremultipliedAlpha, made.blended);
-        !made_blended.has_value()) {
-        return made_blended.error();
+    struct LitKind {
+        rhi::ShaderHandle fragment;
+        rhi::BlendMode blend;
+        bool skinned;
+        SidedPipelines* out;
+    };
+    for (const LitKind& kind : {
+             LitKind{fragment.value(), rhi::BlendMode::Opaque, false, &made.forward},
+             LitKind{masked_fragment.value(), rhi::BlendMode::Opaque, false, &made.masked},
+             LitKind{fragment.value(), rhi::BlendMode::PremultipliedAlpha, false, &made.blended},
+             LitKind{skinned_fragment.value(), rhi::BlendMode::Opaque, true, &made.forward_skinned},
+             LitKind{masked_skinned_fragment.value(), rhi::BlendMode::Opaque, true,
+                     &made.masked_skinned},
+             LitKind{skinned_fragment.value(), rhi::BlendMode::PremultipliedAlpha, true,
+                     &made.blended_skinned},
+         }) {
+        if (auto made_kind = sided(kind.fragment, kind.blend, kind.skinned, *kind.out);
+            !made_kind.has_value()) {
+            return made_kind.error();
+        }
     }
 
     const core::Result<rhi::ShaderHandle> line_vertex =
@@ -924,6 +964,66 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
             return shadow_masked.error();
         }
         made.shadow_masked = std::move(shadow_masked).value();
+
+        // Both again for skinned casters, with the vertices' joints and weights after the
+        // instance's inputs.
+        const core::Result<rhi::ShaderHandle> skinned_shadow_vertex =
+            shader("shadow_skinned.vert", rhi::ShaderStage::Vertex);
+        if (!skinned_shadow_vertex.has_value()) {
+            return skinned_shadow_vertex.error();
+        }
+        static constexpr std::array k_shadow_skinned_attributes{
+            k_attributes[0],
+            rhi::VertexAttribute{5, rhi::VertexFormat::UByte4Norm, offsetof(MeshVertex, joints)},
+            rhi::VertexAttribute{6, rhi::VertexFormat::UByte4Norm, offsetof(MeshVertex, weights)},
+        };
+        core::Result<OwnedPipeline> shadow_skinned = pipeline(rhi::PipelineDesc{
+            .vertex_shader = skinned_shadow_vertex.value(),
+            .vertex_stride = sizeof(MeshVertex),
+            .attributes = k_shadow_skinned_attributes,
+            .instance_stride = sizeof(InstanceData),
+            .instance_attributes = std::span(k_shadow_instance_attributes).first(4),
+            .cull = rhi::CullMode::None,
+            .depth_bias = 1.0f,
+            .slope_depth_bias = 1.5f,
+            .depth_target = k_depth_format,
+        });
+        if (!shadow_skinned.has_value()) {
+            return shadow_skinned.error();
+        }
+        made.shadow_skinned = std::move(shadow_skinned).value();
+
+        const core::Result<rhi::ShaderHandle> masked_skinned_shadow_vertex =
+            shader("shadow_masked_skinned.vert", rhi::ShaderStage::Vertex);
+        if (!masked_skinned_shadow_vertex.has_value()) {
+            return masked_skinned_shadow_vertex.error();
+        }
+        const core::Result<rhi::ShaderHandle> masked_skinned_shadow_fragment =
+            shader("shadow_masked_skinned.frag", rhi::ShaderStage::Fragment);
+        if (!masked_skinned_shadow_fragment.has_value()) {
+            return masked_skinned_shadow_fragment.error();
+        }
+        static constexpr std::array k_masked_skinned_attributes{
+            k_masked_attributes[0], k_masked_attributes[1],
+            rhi::VertexAttribute{8, rhi::VertexFormat::UByte4Norm, offsetof(MeshVertex, joints)},
+            rhi::VertexAttribute{9, rhi::VertexFormat::UByte4Norm, offsetof(MeshVertex, weights)},
+        };
+        core::Result<OwnedPipeline> shadow_masked_skinned = pipeline(rhi::PipelineDesc{
+            .vertex_shader = masked_skinned_shadow_vertex.value(),
+            .fragment_shader = masked_skinned_shadow_fragment.value(),
+            .vertex_stride = sizeof(MeshVertex),
+            .attributes = k_masked_skinned_attributes,
+            .instance_stride = sizeof(InstanceData),
+            .instance_attributes = k_masked_instance_attributes,
+            .cull = rhi::CullMode::None,
+            .depth_bias = 1.0f,
+            .slope_depth_bias = 1.5f,
+            .depth_target = k_depth_format,
+        });
+        if (!shadow_masked_skinned.has_value()) {
+            return shadow_masked_skinned.error();
+        }
+        made.shadow_masked_skinned = std::move(shadow_masked_skinned).value();
     }
 
     if (hdr.has_value()) {
@@ -1087,9 +1187,11 @@ void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const Me
         const auto texture = [&](rhi::TextureHandle handle) {
             return casters ? rhi::TextureHandle{} : handle;
         };
+        // A skinned part has its own pose, so it is never drawn with another.
+        const std::uint32_t own = mesh.joint_matrices.empty() ? 0 : index + 1;
         return std::make_tuple(
-            !casters && material.double_sided, mesh.vertices, mesh.indices, chosen.first_index,
-            chosen.index_count,
+            !casters && material.double_sided, own, mesh.vertices, mesh.indices,
+            chosen.first_index, chosen.index_count,
             pass == Pass::Shadow ? rhi::TextureHandle{} : material.base_color_texture,
             texture(material.normal_texture), texture(material.metallic_roughness_texture),
             texture(material.occlusion_texture), texture(material.emissive_texture));
@@ -1115,11 +1217,29 @@ void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const Me
                                  [&](std::uint32_t a, std::uint32_t b) { return key(a) < key(b); });
     }
 
-    const SidedPipelines* const sided = pass == Pass::Opaque   ? &m_pipelines->forward
-                                        : pass == Pass::Masked ? &m_pipelines->masked
-                                        : pass == Pass::Blend  ? &m_pipelines->blended
-                                                               : nullptr;
-    std::optional<bool> bound_double_sided;
+    // The pass's pipeline for a part: skinned or not, and for lit passes, one- or double-sided.
+    const auto pipeline_for = [&](const MeshDraw& mesh) {
+        const bool skinned = !mesh.joint_matrices.empty();
+        const Pipelines& made = *m_pipelines;
+        const SidedPipelines* sided = nullptr;
+        switch (pass) {
+        case Pass::Shadow:
+            return (skinned ? made.shadow_skinned : made.shadow).get();
+        case Pass::ShadowMasked:
+            return (skinned ? made.shadow_masked_skinned : made.shadow_masked).get();
+        case Pass::Opaque:
+            sided = skinned ? &made.forward_skinned : &made.forward;
+            break;
+        case Pass::Masked:
+            sided = skinned ? &made.masked_skinned : &made.masked;
+            break;
+        case Pass::Blend:
+            sided = skinned ? &made.blended_skinned : &made.blended;
+            break;
+        }
+        return (mesh.material.double_sided ? sided->double_sided : sided->one_sided).get();
+    };
+    rhi::PipelineHandle bound_pipeline;
     rhi::BufferHandle bound_vertices;
     rhi::BufferHandle bound_indices;
     for (std::size_t first = 0; first < m_order.size();) {
@@ -1137,10 +1257,29 @@ void ForwardRenderer::draw_meshes(rhi::CommandList& commands, std::span<const Me
         const auto count = static_cast<std::uint32_t>(last - first);
         first = last;
 
-        if (sided != nullptr && bound_double_sided != mesh.material.double_sided) {
-            bound_double_sided = mesh.material.double_sided;
-            commands.bind_pipeline(*bound_double_sided ? sided->double_sided.get()
-                                                       : sided->one_sided.get());
+        if (const rhi::PipelineHandle wanted = pipeline_for(mesh); wanted != bound_pipeline) {
+            commands.bind_pipeline(wanted);
+            bound_pipeline = wanted;
+        }
+        if (!mesh.joint_matrices.empty()) {
+            // Each joint as three rows of a 3x4 matrix, as skinning.slang reads them.
+            const std::size_t joints = std::min(mesh.joint_matrices.size(), k_max_joints);
+            m_joint_rows.resize(joints * 3);
+            for (std::size_t joint = 0; joint < joints; ++joint) {
+                const Mat4& matrix = mesh.joint_matrices[joint];
+                for (std::size_t row = 0; row < 3; ++row) {
+                    const auto element = [&](std::size_t column) {
+                        const Vec4& values = matrix.columns[column];
+                        return row == 0 ? values.x : row == 1 ? values.y : values.z;
+                    };
+                    m_joint_rows[joint * 3 + row] = Vec4{element(0), element(1), element(2),
+                                                         element(3)};
+                }
+            }
+            commands.set_draw_uniforms(std::as_bytes(std::span(m_joint_rows)));
+            if (!casters) {
+                ++stats.skinned;
+            }
         }
         if (mesh.vertices != bound_vertices) {
             commands.bind_vertex_buffer(mesh.vertices);

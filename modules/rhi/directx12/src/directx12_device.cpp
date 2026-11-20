@@ -41,12 +41,15 @@ using Microsoft::WRL::ComPtr;
 // Slot n reads register tn with sampler sn (ADR 0027).
 constexpr UINT k_uniform_register = 0;
 constexpr UINT k_push_constant_register = 1;
+// The block of set_draw_uniforms (ADR 0036).
+constexpr UINT k_draw_uniform_register = 2;
 constexpr UINT k_texture_register = 0;
 constexpr UINT k_sampler_register = 0;
 
 constexpr UINT k_root_uniforms = 0;
 constexpr UINT k_root_push_constants = 1;
 constexpr UINT k_root_texture = 2; // Slot n's table is k_root_texture + n.
+constexpr UINT k_root_draw_uniforms = k_root_texture + k_texture_slots;
 
 // Textures not being drawn into wait in this state, ready for any shader to read.
 constexpr D3D12_RESOURCE_STATES k_shader_read =
@@ -76,6 +79,11 @@ constexpr UINT64 k_constant_block_bytes =
     (k_max_uniform_size + D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1) /
     D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT * D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
 static_assert(k_max_uniform_size <= k_constant_block_bytes);
+// The per-draw block's space, likewise: shaders may read all of it.
+constexpr UINT64 k_draw_block_bytes =
+    (k_max_draw_uniform_size + D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1) /
+    D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT * D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
+static_assert(k_draw_block_bytes <= k_constant_chunk_bytes);
 
 // How many measured frames are kept for take_gpu_frame_seconds before the oldest are dropped.
 constexpr std::size_t k_kept_gpu_frame_times = 16;
@@ -1039,7 +1047,10 @@ private:
                 .OffsetInDescriptorsFromTableStart = 0};
         }
 
-        std::array<D3D12_ROOT_PARAMETER, k_root_texture + k_texture_slots> parameters{};
+        std::array<D3D12_ROOT_PARAMETER, k_root_draw_uniforms + 1> parameters{};
+        parameters[k_root_draw_uniforms].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        parameters[k_root_draw_uniforms].Descriptor = {k_draw_uniform_register, 0};
+        parameters[k_root_draw_uniforms].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         parameters[k_root_uniforms].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         parameters[k_root_uniforms].Descriptor = {k_uniform_register, 0};
         parameters[k_root_uniforms].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
@@ -1282,12 +1293,19 @@ private:
                                                    "are allowed",
                                                    name, buffer.Size, k_max_push_constant_size));
                     }
+                } else if (binding.BindPoint == k_draw_uniform_register) {
+                    if (buffer.Size > k_max_draw_uniform_size) {
+                        return invalid(std::format("Per-draw block '{}' is {} bytes; at most {} "
+                                                   "are allowed",
+                                                   name, buffer.Size, k_max_draw_uniform_size));
+                    }
                 } else {
                     return invalid(std::format(
                         "Constant buffer '{}' is at register b{}; DirectX shaders must put the "
-                        "uniform block at register(b{}) and push constants at register(b{}), "
-                        "see ADR 0013",
-                        name, binding.BindPoint, k_uniform_register, k_push_constant_register));
+                        "uniform block at register(b{}), push constants at register(b{}) and the "
+                        "per-draw block at register(b{}), see ADR 0013 and 0036",
+                        name, binding.BindPoint, k_uniform_register, k_push_constant_register,
+                        k_draw_uniform_register));
                 }
                 break;
             }
@@ -1780,10 +1798,12 @@ private:
     }
 
     // Writes the uniform block to this frame's upload memory and points the root signature at it.
-    void upload_uniforms() {
+    // Copies `data` into this frame's constant memory, keeping `reserved` bytes from where it
+    // starts, and binds it at a root parameter.
+    void upload_constants(std::span<const std::byte> data, UINT64 reserved, UINT root_parameter) {
         FrameSlot& frame = m_frames[m_frame_index];
         if (frame.constant_chunk < frame.constant_chunks.size() &&
-            frame.constant_offset + k_constant_block_bytes > k_constant_chunk_bytes) {
+            frame.constant_offset + reserved > k_constant_chunk_bytes) {
             ++frame.constant_chunk;
             frame.constant_offset = 0;
         }
@@ -1799,10 +1819,21 @@ private:
             frame.constant_offset = 0;
         }
         const UploadBuffer& chunk = frame.constant_chunks[frame.constant_chunk];
-        std::memcpy(chunk.mapped + frame.constant_offset, m_uniforms.data(), m_uniforms.size());
-        m_list->SetGraphicsRootConstantBufferView(k_root_uniforms,
+        std::memcpy(chunk.mapped + frame.constant_offset, data.data(), data.size());
+        m_list->SetGraphicsRootConstantBufferView(root_parameter,
                                                   chunk.address + frame.constant_offset);
-        frame.constant_offset += k_constant_block_bytes;
+        frame.constant_offset += reserved;
+    }
+
+    void upload_uniforms() {
+        upload_constants(m_uniforms, k_constant_block_bytes, k_root_uniforms);
+    }
+
+    // Only what was last set is copied, but the block's whole size is kept, as shaders may read
+    // all of it.
+    void upload_draw_uniforms() {
+        upload_constants(std::span(m_draw_uniforms).first(m_draw_uniform_size), k_draw_block_bytes,
+                         k_root_draw_uniforms);
     }
 
     // Copies data into this frame's vertex memory, four-byte aligned. Returns the offset, or
@@ -1920,6 +1951,7 @@ private:
         // The constants keep their last values, as Direct3D 11's buffers do, so a game that set them
         // once still finds them in later passes and frames.
         upload_uniforms();
+        upload_draw_uniforms();
         m_list->SetGraphicsRoot32BitConstants(k_root_push_constants, k_push_constant_values,
                                               m_push_constants.data(), 0);
         for (std::uint32_t slot = 0; slot < k_texture_slots; ++slot) {
@@ -1998,6 +2030,13 @@ private:
         DREAM_VERIFY(data.size() <= k_max_uniform_size, "Too many uniforms");
         std::memcpy(m_uniforms.data(), data.data(), data.size());
         upload_uniforms();
+    }
+
+    void set_draw_uniforms(std::span<const std::byte> data) override {
+        DREAM_VERIFY(data.size() <= k_max_draw_uniform_size, "Too many per-draw uniforms");
+        std::memcpy(m_draw_uniforms.data(), data.data(), data.size());
+        m_draw_uniform_size = data.size();
+        upload_draw_uniforms();
     }
 
     void bind_texture(std::uint32_t slot, TextureHandle handle) override {
@@ -2197,6 +2236,8 @@ private:
     UINT m_bound_instance_stride = 0;
     std::optional<D3D12_VERTEX_BUFFER_VIEW> m_instance_view;
     std::array<std::byte, k_constant_block_bytes> m_uniforms{};
+    std::array<std::byte, k_max_draw_uniform_size> m_draw_uniforms{};
+    std::size_t m_draw_uniform_size = 0;
     std::array<std::byte, k_max_push_constant_size> m_push_constants{};
 
     core::HandlePool<TextureResource> m_textures;

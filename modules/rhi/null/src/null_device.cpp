@@ -202,6 +202,10 @@ private:
         DREAM_VERIFY(data.size() <= k_max_uniform_size, "Too many uniforms");
     }
 
+    void set_draw_uniforms(std::span<const std::byte> data) override {
+        DREAM_VERIFY(data.size() <= k_max_draw_uniform_size, "Too many per-draw uniforms");
+    }
+
     void bind_texture(std::uint32_t slot, TextureHandle texture) override {
         DREAM_VERIFY(slot < k_texture_slots, "There is no such texture slot");
         if (!texture.is_valid()) {

@@ -210,13 +210,17 @@ function(_dream_compile_shaders target output_dir formats)
     # Warning 39001 is that false alarm, so it is turned off.
     set(common_options -matrix-layout-column-major -warnings-disable 39001)
 
-    # A shader may #include another, such as forward_masked.slang including forward.slang, so each
-    # is compiled again when any of the target's shaders changes. There are only a few.
+    # A shader may #include another, such as forward_masked.slang including forward.slang, or a file
+    # that is only included, such as skinning.slang, so each is compiled again when any Slang file
+    # beside the target's shaders changes. There are only a few.
     set(all_sources "")
     foreach(source IN LISTS ARGN)
         cmake_path(ABSOLUTE_PATH source NORMALIZE)
-        list(APPEND all_sources "${source}")
+        cmake_path(GET source PARENT_PATH source_dir)
+        file(GLOB neighbours CONFIGURE_DEPENDS "${source_dir}/*.slang")
+        list(APPEND all_sources "${source}" ${neighbours})
     endforeach()
+    list(REMOVE_DUPLICATES all_sources)
 
     set(outputs "")
     foreach(format IN LISTS formats)

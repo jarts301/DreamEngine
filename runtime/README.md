@@ -33,6 +33,9 @@ away ([ADR 0032](../docs/adr/0032-instancing-and-lods.md)). Listing a `tangent_g
 right. Input comes as named actions from `app.input()`, which `[input.actions]` binds to keys,
 pointers and, with `input_device = ["sdl3_gamepad", "null"]` listed, gamepads
 ([ADR 0035](../docs/adr/0035-gamepads.md), and the [input guide](../docs/guides/input.md)).
+`runtime::Animation` plays skeletal animation on entities with an `Animator`, which needs
+`animation` listed ([ADR 0036](../docs/adr/0036-skeletal-animation.md), and the
+[animation guide](../docs/guides/animation.md)).
 [samples/physics_demo](../samples/physics_demo/src/physics_demo.cpp) adds 3D and 2D physics with
 `runtime::Physics3D` and `runtime::Physics2D`, which need `physics3d` or `physics2d` listed under
 `[modules.<platform>]`.

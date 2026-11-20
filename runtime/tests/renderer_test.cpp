@@ -434,3 +434,46 @@ TEST_CASE("DebugLines builds shapes out of line pairs") {
         CHECK(std::abs(vertex.position.y) <= 1.5f + 1e-4f);
     }
 }
+
+TEST_CASE_FIXTURE(RenderFixture, "Renderer gives a skinned part its joints and its posed box") {
+    World world;
+    std::size_t joints = 0;
+    float posed_bottom = 0.0f;
+
+    in_frame([&](App& app, Renderer& renderer, rhi::CommandList& commands) {
+        add_camera(world);
+        // One joint, resting 2 above the model's origin, bound where the vertices are, so at rest
+        // it lifts them by 2.
+        ModelData data;
+        data.vertices.resize(3);
+        data.vertices[1].position = Vec3{1.0f, 0.0f, 0.0f};
+        data.vertices[2].position = Vec3{0.0f, 1.0f, 0.0f};
+        for (ModelVertex& vertex : data.vertices) {
+            vertex.weights = {255, 0, 0, 0};
+        }
+        data.indices = {0, 1, 2};
+        data.materials.emplace_back();
+        data.parts.push_back(
+            ModelPart{.first_index = 0, .index_count = 3, .material = 0, .bounds = {}, .skin = 0});
+        data.skeleton.parents = {-1};
+        data.skeleton.rest_pose.push_back(
+            animation::JointTransform{.translation = Vec3{0.0f, 2.0f, 0.0f}});
+        data.skeleton.names = {"root"};
+        data.skins.push_back(ModelSkin{.joints = {0}, .inverse_bind = {core::Mat4{}}});
+        const Entity entity = world.create_entity();
+        world.registry().emplace<MeshRenderer>(
+            entity, std::make_shared<const ModelAsset>(create_model_asset(*app.device(), data).value()));
+        world.update_transforms();
+        renderer.render(world, commands, k_size);
+
+        const FakeFrame& frame = last_frame();
+        REQUIRE(frame.meshes.size() == 1);
+        joints = frame.meshes[0].joint_matrices.size();
+        posed_bottom = frame.meshes[0].bounds.min.y;
+        world.registry().clear();
+    });
+
+    // Without an animator, the rest pose: the box is the vertices' box, lifted by the joint.
+    CHECK(joints == 1);
+    CHECK(posed_bottom == Approx(2.0f));
+}

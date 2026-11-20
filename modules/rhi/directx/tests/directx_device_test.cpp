@@ -59,7 +59,7 @@ float4 fragment_main(Output input) : SV_Target {
 )hlsl";
 
 constexpr std::string_view k_misplaced_shader = R"hlsl(
-cbuffer Elsewhere : register(b2) { float4 value; };
+cbuffer Elsewhere : register(b3) { float4 value; };
 float4 vertex_main(float3 position : POSITION) : SV_Position {
     return float4(position, 1.0) + value;
 }

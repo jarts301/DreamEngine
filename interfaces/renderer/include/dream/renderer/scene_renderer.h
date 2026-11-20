@@ -7,6 +7,7 @@
 #include "dream/rhi/rhi.h"
 #include "dream/ui/draw_list.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -31,6 +32,10 @@ struct MeshVertex {
     // saying which way the bitangent, cross(normal, tangent) * w, points. All zero when unknown,
     // and then normal maps are ignored there (ADR 0033).
     core::Vec4 tangent{};
+    // For skinned parts (ADR 0036): up to four joints, as indices into the part's joint matrices,
+    // and how much each moves the vertex, out of 255, adding up to 255. Unused otherwise.
+    std::array<std::uint8_t, 4> joints{};
+    std::array<std::uint8_t, 4> weights{};
 };
 
 // How a surface's alpha is used, as glTF's alphaMode (ADR 0034).
@@ -112,7 +117,15 @@ struct MeshDraw {
     // Simpler versions, each simpler than the last, for when the part is small on screen. The
     // renderer may draw one in place of the full range (ADR 0032).
     std::span<const MeshLod> lods;
+    // For a skinned part (ADR 0036), each joint's skinning matrix, from the part's vertices to the
+    // model's space as the skeleton is posed this frame, which the vertices' joints index. At most
+    // k_max_joints. Empty for a part that isn't skinned. `bounds` then holds the posed part.
+    std::span<const core::Mat4> joint_matrices;
 };
+
+// The most joints one skinned part can use: 256 joints of 48 bytes fill the 12 KB of the per-draw
+// block the forward renderer sends them in.
+inline constexpr std::size_t k_max_joints = 256;
 
 // The camera, as runtime::camera_view gives it.
 struct View {
@@ -169,6 +182,8 @@ struct FrameStats {
     std::uint32_t simplified = 0;
     // Parts blended over the scene, which `draws` also counts.
     std::uint32_t blended = 0;
+    // Parts skinned by their joints, which `draws` also counts.
+    std::uint32_t skinned = 0;
 };
 
 // Reads one of the game's files, such as "assets:/shaders/forward.vert.spv".

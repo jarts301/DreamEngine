@@ -73,11 +73,13 @@ constexpr std::string_view k_shader_version = k_es ? "#version 310 es" : "#versi
 constexpr GLuint k_uniform_binding = 0;
 constexpr GLuint k_texture_unit = 1; // Slot 0's; slot n's is k_texture_unit + n (ADR 0027).
 constexpr GLuint k_push_constant_binding = 2;
+// The block of set_draw_uniforms, at the same binding as in Vulkan (ADR 0036).
+constexpr GLuint k_draw_block_binding = k_draw_uniform_binding;
 
 // Each set_uniforms and push_constants call takes a fresh slot in this buffer, which is renewed
 // every frame, so a draw keeps the values it was given. When a frame uses it all, it is renewed
 // again; the driver keeps what earlier draws still read.
-constexpr GLsizeiptr k_uniform_ring_bytes = 1024 * 1024;
+constexpr GLsizeiptr k_uniform_ring_bytes = 4 * 1024 * 1024;
 
 #if defined(NDEBUG)
 constexpr bool k_debug_by_default = false;
@@ -1378,12 +1380,19 @@ private:
                                                "allowed",
                                                block_name, bytes, k_max_push_constant_size));
                 }
+            } else if (static_cast<GLuint>(binding) == k_draw_block_binding) {
+                if (bytes > k_max_draw_uniform_size) {
+                    return invalid(std::format("Per-draw block '{}' is {} bytes; at most {} are "
+                                               "allowed",
+                                               block_name, bytes, k_max_draw_uniform_size));
+                }
             } else {
                 return invalid(std::format("Uniform block '{}' is at binding {}; {} shaders must "
-                                           "put the uniform block at binding {} and push "
-                                           "constants at binding {}, see ADR 0026",
+                                           "put the uniform block at binding {}, push constants "
+                                           "at binding {} and the per-draw block at binding {}, "
+                                           "see ADR 0026 and 0036",
                                            block_name, binding, k_api, k_uniform_binding,
-                                           k_push_constant_binding));
+                                           k_push_constant_binding, k_draw_block_binding));
             }
         }
 
@@ -1967,6 +1976,7 @@ void main() {
         // Zeroed constants until the game sets some, so every block is bound to something.
         write_constants(k_uniform_binding, {}, k_max_uniform_size);
         write_constants(k_push_constant_binding, {}, k_max_push_constant_size);
+        write_constants(k_draw_block_binding, {}, k_max_draw_uniform_size);
         for (std::uint32_t slot = 0; slot < k_texture_slots; ++slot) {
             bind_texture(slot, TextureHandle{});
         }
@@ -2080,6 +2090,11 @@ void main() {
     void set_uniforms(std::span<const std::byte> data) override {
         DREAM_VERIFY(data.size() <= k_max_uniform_size, "Too many uniforms");
         write_constants(k_uniform_binding, data, k_max_uniform_size);
+    }
+
+    void set_draw_uniforms(std::span<const std::byte> data) override {
+        DREAM_VERIFY(data.size() <= k_max_draw_uniform_size, "Too many per-draw uniforms");
+        write_constants(k_draw_block_binding, data, k_max_draw_uniform_size);
     }
 
     void bind_texture(std::uint32_t slot, TextureHandle handle) override {

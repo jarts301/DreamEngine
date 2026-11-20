@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dream/animation/animation.h"
 #include "dream/core/math/bounds.h"
 #include "dream/core/math/vector.h"
 #include "dream/core/result.h"
@@ -87,6 +88,12 @@ struct ModelMaterialData {
     int emissive_image = -1;
 };
 
+// A box around the vertices one joint of a skin moves, in the skin's bind space.
+struct JointBounds {
+    std::uint32_t joint = 0;
+    core::Aabb bounds;
+};
+
 struct ModelPart {
     std::uint32_t first_index = 0;
     std::uint32_t index_count = 0;
@@ -95,6 +102,35 @@ struct ModelPart {
     core::Aabb bounds;
     // Simpler versions of the part, each simpler than the last, from generate_lods.
     std::vector<renderer::MeshLod> lods;
+    // The skin that moves the part, an index into ModelData::skins, or -1 for a static part.
+    std::int32_t skin = -1;
+    // For a skinned part, a box per joint that moves any of its vertices, from which the posed
+    // part's box is worked out each frame. create_model_asset works it out.
+    std::vector<JointBounds> joint_bounds{};
+};
+
+// The joints a model's skins hang from (ADR 0036): every glTF node a skin uses as a joint, and
+// every node above those, so an armature's own transform poses the model as glTF says. Empty for a
+// model without skins.
+struct ModelSkeleton {
+    std::vector<std::int32_t> parents;
+    std::vector<animation::JointTransform> rest_pose;
+    std::vector<std::string> names;
+};
+
+// The joints one skinned mesh is bound to.
+struct ModelSkin {
+    // Each skin joint's index in the skeleton. The vertices' joint indices index this list.
+    std::vector<std::uint32_t> joints;
+    // From the mesh's space to each joint's, as the mesh was bound.
+    std::vector<core::Mat4> inverse_bind;
+};
+
+// One of a model's animations, as keyframes per skeleton joint.
+struct ModelClip {
+    std::string name;
+    float duration = 0.0f;
+    std::vector<animation::JointTrack> tracks;
 };
 
 // A model in ordinary memory, before anything is sent to the GPU.
@@ -104,7 +140,18 @@ struct ModelData {
     std::vector<ModelPart> parts;
     std::vector<ModelMaterialData> materials;
     std::vector<ImageData> images;
+    ModelSkeleton skeleton{};
+    std::vector<ModelSkin> skins{};
+    std::vector<ModelClip> clips{};
 };
+
+// Each skeleton joint's transform in the model's space, posed at rest.
+[[nodiscard]] std::vector<core::Mat4> rest_model_space(const ModelSkeleton& skeleton);
+
+// A skin's skinning matrices for a posed skeleton, whose joints' model-space transforms are
+// `model_space`, written into `out`, one per skin joint.
+void skinning_matrices(const ModelSkin& skin, std::span<const core::Mat4> model_space,
+                       std::vector<core::Mat4>& out);
 
 // How generate_lods makes the simpler versions of a model.
 struct LodOptions {
@@ -138,8 +185,10 @@ struct LodOptions {
 using ModelFileReader =
     std::function<core::Result<std::vector<std::byte>>(std::string_view relative_path)>;
 
-// Reads a binary glTF (.glb) file. Node transforms are baked into the vertices, and only triangles
-// with normals are accepted. Animation and skinning are ignored. Images are PNG, JPEG or KTX2,
+// Reads a binary glTF (.glb) file. Node transforms are baked into the vertices of static meshes,
+// and only triangles with normals are accepted. Skins, joint weights and animations are read into
+// a skeleton, skins and clips (ADR 0036): skinned meshes keep their own space, as glTF says, and
+// meshes that hang from a joint without a skin follow that joint. Morph targets are ignored. Images are PNG, JPEG or KTX2,
 // embedded or in files of their own, which `read_file` reads; textures with the KHR_texture_basisu
 // extension use their KTX2 image. Materials keep their metallic-roughness factors and textures,
 // normal map, occlusion and emission, with KHR_materials_emissive_strength, and their alpha mode,
@@ -157,6 +206,12 @@ struct ModelAsset {
     std::vector<GpuTexture> textures;
     std::vector<ModelMaterial> materials;
     std::vector<ModelPart> parts;
+    // For animation (ADR 0036). The runtime's Animation builds its own form of these.
+    ModelSkeleton skeleton{};
+    std::vector<ModelSkin> skins{};
+    std::vector<ModelClip> clips{};
+    // Each skin's matrices at rest, for drawing a skinned model nothing animates.
+    std::vector<std::vector<core::Mat4>> rest_skinning{};
 };
 
 [[nodiscard]] core::Result<ModelAsset> create_model_asset(rhi::Device& device,

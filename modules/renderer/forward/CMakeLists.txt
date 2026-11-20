@@ -5,8 +5,12 @@ dream_add_module(renderer forward
     SHADERS
         shaders/forward.slang
         shaders/forward_masked.slang
+        shaders/forward_skinned.slang
+        shaders/forward_masked_skinned.slang
         shaders/shadow.slang
         shaders/shadow_masked.slang
+        shaders/shadow_skinned.slang
+        shaders/shadow_masked_skinned.slang
         shaders/tonemap.slang
         shaders/debug_lines.slang
         shaders/ui.slang

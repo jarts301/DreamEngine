@@ -1,9 +1,10 @@
-// A scene file drawn by the engine's renderer. The game only says what spins, and orbits the
-// camera with keys or a gamepad's stick: loading models, lighting and drawing all come from the
-// engine.
+// A scene file drawn by the engine's renderer. The game only says what spins, orbits the camera
+// with keys or a gamepad's stick, and changes the tentacle's animation: loading models, lighting,
+// animation and drawing all come from the engine.
 
 #include "dream/core/log.h"
 #include "dream/core/math/quaternion.h"
+#include "dream/runtime/animation.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/game.h"
 #include "dream/runtime/renderer.h"
@@ -15,8 +16,11 @@
 #include <cstdio>
 #include <format>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 using namespace dream;
 using core::Vec3;
@@ -45,6 +49,9 @@ public:
         if (core::Result<void> ready = m_renderer.initialize(app); !ready.has_value()) {
             return ready;
         }
+        if (core::Result<void> ready = m_animation.initialize(app); !ready.has_value()) {
+            return ready;
+        }
         app.scenes().register_component("spin", &read_spin);
 
         core::Result<std::unique_ptr<runtime::World>> world =
@@ -53,6 +60,14 @@ public:
             return world.error();
         }
         m_world = std::move(world).value();
+
+        // Checks compare a picture, so they hold every animation at one moment.
+        if (const std::optional<double> held = app.config().get_float("demo.animation_time")) {
+            for (auto [entity, animator] : m_world->registry().view<runtime::Animator>().each()) {
+                animator.time = static_cast<float>(*held);
+                animator.speed = 0.0f;
+            }
+        }
 
         // The camera orbits its target, starting where the scene put it.
         const auto cameras = m_world->registry().view<runtime::Camera, runtime::Transform>();
@@ -78,6 +93,9 @@ public:
             DREAM_LOG_INFO("Spinning: {}", m_spinning);
         }
         orbit(app, static_cast<float>(time.delta_seconds));
+        if (app.input().was_pressed("next_animation")) {
+            next_animation();
+        }
         if (m_spinning) {
             const Vec3 axis{0.0f, 1.0f, 0.0f};
             for (const auto [entity, transform, spin] :
@@ -88,6 +106,7 @@ public:
             }
         }
         m_world->update_transforms();
+        m_animation.update(*m_world, time.delta_seconds);
 
         if (app.input().was_pressed("quit") ||
             (m_quit_after_frames > 0 && m_frames >= m_quit_after_frames)) {
@@ -115,6 +134,24 @@ public:
     }
 
 private:
+    // Fades every animated model to its next clip.
+    void next_animation() {
+        auto animated = m_world->registry().view<runtime::Animator, const runtime::MeshRenderer>();
+        for (const auto [entity, animator, mesh] : animated.each()) {
+            const std::vector<std::string_view> clips = runtime::Animation::clip_names(*mesh.model);
+            if (clips.empty()) {
+                continue;
+            }
+            const auto at = std::ranges::find(clips, animator.clip);
+            const std::size_t next =
+                at == clips.end() ? 0 : (static_cast<std::size_t>(at - clips.begin()) + 1) % clips.size();
+            if (const core::Result<void> played = m_animation.play(*m_world, entity, clips[next], 0.4f);
+                played.has_value()) {
+                DREAM_LOG_INFO("Playing '{}'", clips[next]);
+            }
+        }
+    }
+
     // Turns the camera around its target, and moves it nearer or farther, by how far the orbit and
     // zoom actions are held: fully for keys, partly for a stick or trigger pushed partway.
     void orbit(runtime::App& app, float seconds) {
@@ -137,6 +174,7 @@ private:
     }
 
     runtime::Renderer m_renderer;
+    runtime::Animation m_animation;
     runtime::Entity m_camera = runtime::k_no_entity;
     Vec3 m_target;
     float m_distance = 1.0f;

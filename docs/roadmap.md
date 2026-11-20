@@ -126,7 +126,7 @@ saved progress, music and settings, built this way and played on PC and phones.
 | Area | Available now |
 |---|---|
 | Platforms | Windows, and Android phones (arm64, Android 10 and up). Linux builds but is untested. |
-| Graphics | Five graphics APIs; the same picture on each. Static glTF models with metallic-roughness PBR materials, normal, occlusion and emissive maps, and opaque, cut-out, blended and double-sided surfaces; one directional light with soft cascaded shadows; HDR with PBR Neutral tone mapping; frustum culling, instancing and levels of detail made as models load; debug lines. |
+| Graphics | Five graphics APIs; the same picture on each. glTF models, static or skinned and animated, with metallic-roughness PBR materials, normal, occlusion and emissive maps, and opaque, cut-out, blended and double-sided surfaces; one directional light with soft cascaded shadows; HDR with PBR Neutral tone mapping; frustum culling, instancing and levels of detail made as models load; debug lines. |
 | Textures | PNG cooked to KTX2, sent to the GPU as BC7 on PC and ASTC on phones. |
 | Physics | 3D (Jolt or the engine's own impulse solver): bodies, joints, triggers, ray casts. 2D (Box2D or Chipmunk). |
 | Audio | WAV, MP3 and FLAC; streamed music; buses with volumes; sounds placed in 3D. |
@@ -140,7 +140,8 @@ Good fits today: puzzle and physics games, arcade and casual mobile games, small
 static props, prototypes and game jams.
 
 Not yet possible without writing engine code first:
-- **Characters:** animated characters (no skinning or animation).
+- **Characters:** root motion, animation events, inverse kinematics, blend trees, facial morph
+  targets and ragdolls (skeletal animation with fades between clips exists).
 - **Rendering:** environment lighting (materials are PBR, but reflect only the sun and a flat
   ambient), bloom, more than one light, visual effects (no particles), very large worlds (culling, instancing and LODs exist, but no streaming
   or spatial structures), 2D sprite games (no sprite renderer).
@@ -153,7 +154,6 @@ Not yet possible without writing engine code first:
 
 | Need | Why it matters | As a module |
 |---|---|---|
-| Skeletal animation | Characters, creatures, anything that moves by itself | `animation`: `ozz` (MIT), `null` |
 | Point and spot lights, many lights | Interiors, night scenes, effects | `renderer`: `forward_plus` |
 | Particles | Fire, smoke, impacts, magic | `particles`: GPU or CPU backend, `null` |
 | Environment lighting and bloom | Shiny metals and glass reflect their surroundings, and glowing surfaces glow | In `forward`: image-based lighting, reflection probes and a bloom pass |
@@ -169,7 +169,8 @@ Not yet possible without writing engine code first:
 Already done in Phase 12, and no longer missing: PBR materials with normal, occlusion and emissive
 maps, tangents from `tangent_generator` (ADR 0033); transparent, cut-out and double-sided materials
 (ADR 0034); frustum culling (ADR 0031); instancing and levels of detail from `mesh_simplifier`
-(ADR 0032); gamepads through `input_device` (ADR 0035).
+(ADR 0032); gamepads through `input_device` (ADR 0035); skeletal animation through `animation`:
+`ozz`, `null`, with GPU skinning (ADR 0036).
 
 ### 3.2 Tools
 
@@ -234,12 +235,14 @@ and the remaining platforms.
   (ADR 0029), the OpenGL backends (ADR 0026), the renderer as a module (ADR 0030), frustum
   culling (ADR 0031), instancing and levels of detail (ADR 0032), and PBR materials with normal
   maps (ADR 0033, with a [guide](guides/materials.md)), transparent, cut-out and double-sided
-  materials (ADR 0034), and gamepads (ADR 0035, with a [guide](guides/input.md)).
+  materials (ADR 0034), gamepads (ADR 0035, with a [guide](guides/input.md)), and skeletal
+  animation (ADR 0036, with a [guide](guides/animation.md)).
 - **Next, in order:**
   1. Point and spot lights, with `forward_plus` for many lights.
-  2. Skeletal animation (`animation: ozz`).
-  3. Particles (`particles`).
-  4. 2D sprites (`sprite_renderer`).
+  2. Particles (`particles`).
+  3. 2D sprites (`sprite_renderer`).
+  4. Animation, after ADR 0036: root motion, animation events, sending joints once per frame for
+     crowds, building clips at build time, then inverse kinematics, blend trees and morph targets.
   5. Gamepads, after ADR 0035: focus navigation in `ui` menus, an on-screen aiming cursor for
      pointer-aimed games such as Toppler, rebinding in a settings menu, and a check with a real
      gamepad on a phone.
@@ -365,7 +368,7 @@ of simulated latency and 5% packet loss, and the match stays in sync.
 The engine can already ship small, polished 3D games on Windows and Android phones, built from
 modules that swap through configuration, and with the testing, profiling and crash tooling
 professional work needs. Before a commercial release on Steam or Google Play, it most needs:
-- animation, more lights, environment lighting and bloom, and gamepad navigation in menus;
+- more lights, environment lighting and bloom, and gamepad navigation in menus;
 - a settings menu, localization and store services;
 - release packaging: AAB and real signing on Android, depots on Steam;
 - an installable SDK and an editor.

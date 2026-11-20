@@ -23,6 +23,7 @@
     "meshoptimizer",
     "mikktspace",
     "miniaudio",
+    "ozz-animation",
     {
       "name": "opengl-registry",
       "platform": "windows"

@@ -5,6 +5,7 @@ width = 960
 height = 540
 
 [demo]
+animation_time = 0.5
 quit_after_frames = 600
 spin = false
 
@@ -18,6 +19,7 @@ orbit_left = ["key:a", "key:left"]
 orbit_right = ["key:d", "key:right"]
 zoom_in = ["key:w", "key:up"]
 zoom_out = ["key:s", "key:down"]
+next_animation = ["key:n"]
 
 # Compares frame 60 with the reference image, within a tolerance. See docs/adr/0021.
 [screenshot]
@@ -36,6 +38,7 @@ rhi = ["directx12"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
+animation = ["ozz"]
 
 [audio]
 muted = true

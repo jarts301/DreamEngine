@@ -4,7 +4,8 @@
 // light, each a factor times a texture. Output is linear, into the HDR target or the window.
 //
 // The same code is forward_masked.slang's, with DREAM_ALPHA_MASK defined, for materials whose
-// alpha cuts holes in them (ADR 0034). Only that one has a discard, which can stop phone GPUs
+// alpha cuts holes in them (ADR 0034), and the _skinned files', with DREAM_SKINNED defined, for
+// parts that a skeleton moves (ADR 0036). Only that one has a discard, which can stop phone GPUs
 // from testing depth before shading, so opaque parts are drawn without it.
 //
 // Every shader uses the same bindings, for both graphics APIs (ADR 0013): the uniform block is
@@ -55,6 +56,10 @@ Sampler2D emissive_texture : register(t6) : register(s6);
 
 static const float k_pi = 3.14159265;
 
+#if defined(DREAM_SKINNED)
+#include "skinning.slang"
+#endif
+
 // Which of a material's textures and emission a part has, as forward_renderer.cpp's
 // MaterialFeature bits. What a part doesn't have isn't read, which saves texture reads on phones.
 // Every pixel of one draw takes the same branches.
@@ -87,6 +92,11 @@ struct VertexInput {
     [[vk::location(12)]] float4 material : MATERIAL0;
     // The emissive color, and in w which textures and emission to read, as k_feature_ bits.
     [[vk::location(13)]] float4 emissive : EMISSIVE0;
+#if defined(DREAM_SKINNED)
+    // The vertex's joints and their weights, after the instance's inputs.
+    [[vk::location(14)]] float4 joints : JOINTS0;
+    [[vk::location(15)]] float4 weights : WEIGHTS0;
+#endif
 };
 
 struct VertexOutput {
@@ -103,19 +113,25 @@ struct VertexOutput {
 
 [shader("vertex")]
 VertexOutput vertex_main(VertexInput input) {
-    const float3 p = input.position;
+    float3 p = input.position;
+    float3 n = input.normal;
+    float3 t = input.tangent.xyz;
+#if defined(DREAM_SKINNED)
+    // Into the model's space by the posed joints, before the instance's own transform.
+    skin(input.joints, input.weights, p, n, t);
+#endif
     const float4 world = input.model_x * p.x + input.model_y * p.y + input.model_z * p.z +
                          input.model_w;
 
     VertexOutput output;
     output.position = mul(frame.view_projection, world);
     output.world_position = world.xyz;
-    output.world_normal = input.normal_x.xyz * input.normal.x + input.normal_y.xyz * input.normal.y +
-                          input.normal_z.xyz * input.normal.z;
+    output.world_normal = input.normal_x.xyz * n.x + input.normal_y.xyz * n.y +
+                          input.normal_z.xyz * n.z;
     // Tangents move with the surface, so they take the model matrix itself. A mirroring matrix
     // turns the bitangent around too.
-    const float3 tangent = input.model_x.xyz * input.tangent.x + input.model_y.xyz * input.tangent.y +
-                           input.model_z.xyz * input.tangent.z;
+    const float3 tangent = input.model_x.xyz * t.x + input.model_y.xyz * t.y +
+                           input.model_z.xyz * t.z;
     const float mirrored =
         dot(cross(input.model_x.xyz, input.model_y.xyz), input.model_z.xyz) < 0.0 ? -1.0 : 1.0;
     output.world_tangent = float4(tangent, input.tangent.w * mirrored);

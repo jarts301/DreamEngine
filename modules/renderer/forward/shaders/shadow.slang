@@ -1,7 +1,8 @@
 // Draws shadow casters into the shadow map, as the sun sees them: depth only (ADR 0029).
 //
 // The frame block is forward.slang's, with the same binding, and each instance's model matrix is
-// read as forward.slang reads it (ADR 0032).
+// read as forward.slang reads it (ADR 0032). shadow_skinned.slang compiles it with DREAM_SKINNED,
+// for parts a skeleton moves (ADR 0036).
 
 struct FrameUniforms {
     float4x4 view_projection;
@@ -26,11 +27,23 @@ struct VertexInput {
     [[vk::location(2)]] float4 model_y : MODEL1;
     [[vk::location(3)]] float4 model_z : MODEL2;
     [[vk::location(4)]] float4 model_w : MODEL3;
+#if defined(DREAM_SKINNED)
+    [[vk::location(5)]] float4 joints : JOINTS0;
+    [[vk::location(6)]] float4 weights : WEIGHTS0;
+#endif
 };
+
+#if defined(DREAM_SKINNED)
+#include "skinning.slang"
+#endif
 
 [shader("vertex")]
 float4 vertex_main(VertexInput input) : SV_Position {
+#if defined(DREAM_SKINNED)
+    const float3 p = skin_position(input.joints, input.weights, input.position);
+#else
     const float3 p = input.position;
+#endif
     const float4 world = input.model_x * p.x + input.model_y * p.y + input.model_z * p.z +
                          input.model_w;
     return mul(frame.light_view_projection, world);

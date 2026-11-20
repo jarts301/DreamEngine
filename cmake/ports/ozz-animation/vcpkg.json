@@ -1,0 +1,13 @@
+{
+  "name": "ozz-animation",
+  "version": "0.17.0",
+  "description": "Skeletal animation runtime and offline libraries, as DreamEngine's animation module uses them (ADR 0036)",
+  "homepage": "https://github.com/guillaumeblanc/ozz-animation",
+  "license": "MIT",
+  "dependencies": [
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    }
+  ]
+}

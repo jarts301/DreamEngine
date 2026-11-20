@@ -4,6 +4,7 @@
 
 #include <doctest/doctest.h>
 
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <format>
@@ -576,4 +577,158 @@ TEST_CASE("generate_tangents leaves parts without normal maps, or with tangents,
     CHECK(generator.calls == 0);
     CHECK(plain.vertices[0].tangent.w == 0.0f);
     CHECK(given.vertices[0].tangent.y == 1.0f);
+}
+
+namespace {
+
+// A skinned triangle on a two-joint chain under an armature node, as Blender exports one, with a
+// step-interpolated quarter turn of the child joint at one second, and an unskinned triangle
+// hanging from the child joint.
+std::vector<std::byte> skinned_glb() {
+    std::vector<std::byte> binary;
+    append<float>(binary, k_positions);                                         // 0, 36 bytes.
+    append<float>(binary, k_normals);                                           // 36.
+    append<float>(binary, k_uvs);                                               // 72.
+    constexpr std::uint8_t k_joints[] = {0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0};   // 96.
+    append<std::uint8_t>(binary, k_joints);
+    constexpr float k_weights[] = {1, 0, 0, 0, 0.5f, 0.5f, 0, 0, 1, 0, 0, 0};   // 108.
+    append<float>(binary, k_weights);
+    append<std::uint16_t>(binary, k_indices);                                   // 156, then 2 pad.
+    binary.push_back(std::byte{0});
+    binary.push_back(std::byte{0});
+    constexpr float k_inverse_bind[] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -5, 1,
+                                        1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1, -5, 1}; // 164.
+    append<float>(binary, k_inverse_bind);
+    constexpr float k_times[] = {0, 1};                                         // 292.
+    append<float>(binary, k_times);
+    const float half = std::sqrt(0.5f);
+    const float rotations[] = {0, 0, 0, 1, 0, 0, half, half};                   // 300.
+    append<float>(binary, std::span<const float>(rotations));
+
+    const std::string json = R"({"asset":{"version":"2.0"},"scene":0,
+"scenes":[{"nodes":[0,1]}],
+"nodes":[{"mesh":0,"skin":0},{"name":"Armature","translation":[0,0,5],"children":[2]},
+{"name":"root","children":[3]},{"name":"tip","translation":[0,1,0],"children":[4]},{"mesh":1}],
+"skins":[{"joints":[2,3],"inverseBindMatrices":6}],
+"meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2,"JOINTS_0":3,"WEIGHTS_0":4},"indices":5}]},
+{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1},"indices":5}]}],
+"animations":[{"name":"bend","samplers":[{"input":7,"output":8,"interpolation":"STEP"}],
+"channels":[{"sampler":0,"target":{"node":3,"path":"rotation"}}]}],
+"buffers":[{"byteLength":332}],
+"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":36},
+{"buffer":0,"byteOffset":72,"byteLength":24},{"buffer":0,"byteOffset":96,"byteLength":12},
+{"buffer":0,"byteOffset":108,"byteLength":48},{"buffer":0,"byteOffset":156,"byteLength":6},
+{"buffer":0,"byteOffset":164,"byteLength":128},{"buffer":0,"byteOffset":292,"byteLength":8},
+{"buffer":0,"byteOffset":300,"byteLength":32}],
+"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
+{"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
+{"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},
+{"bufferView":3,"componentType":5121,"count":3,"type":"VEC4"},
+{"bufferView":4,"componentType":5126,"count":3,"type":"VEC4"},
+{"bufferView":5,"componentType":5123,"count":3,"type":"SCALAR"},
+{"bufferView":6,"componentType":5126,"count":2,"type":"MAT4"},
+{"bufferView":7,"componentType":5126,"count":2,"type":"SCALAR","min":[0],"max":[1]},
+{"bufferView":8,"componentType":5126,"count":2,"type":"VEC4"}]})";
+    return make_glb(json, binary);
+}
+
+std::uint32_t joint_named(const ModelData& model, std::string_view name) {
+    const auto found = std::ranges::find(model.skeleton.names, name);
+    REQUIRE(found != model.skeleton.names.end());
+    return static_cast<std::uint32_t>(found - model.skeleton.names.begin());
+}
+
+} // namespace
+
+TEST_CASE("parse_glb reads a skeleton from a skin's joints and the nodes above them") {
+    const core::Result<ModelData> model = parse_glb(skinned_glb());
+    REQUIRE_MESSAGE(model.has_value(), model.error().message);
+    const ModelData& data = model.value();
+
+    REQUIRE(data.skeleton.parents.size() == 3);
+    const std::uint32_t armature = joint_named(data, "Armature");
+    const std::uint32_t root = joint_named(data, "root");
+    const std::uint32_t tip = joint_named(data, "tip");
+    CHECK(data.skeleton.parents[armature] == -1);
+    CHECK(data.skeleton.parents[root] == static_cast<std::int32_t>(armature));
+    CHECK(data.skeleton.parents[tip] == static_cast<std::int32_t>(root));
+
+    // At rest, the tip is 1 above the root, which the armature moves 5 along Z.
+    const std::vector<core::Mat4> rest = rest_model_space(data.skeleton);
+    const core::Vec3 tip_at = core::transform_point(rest[tip], core::Vec3{});
+    CHECK(tip_at.y == Approx(1.0f));
+    CHECK(tip_at.z == Approx(5.0f));
+}
+
+TEST_CASE("parse_glb keeps a skinned mesh in its own space, with joints and weights") {
+    const core::Result<ModelData> model = parse_glb(skinned_glb());
+    REQUIRE_MESSAGE(model.has_value(), model.error().message);
+    const ModelData& data = model.value();
+
+    REQUIRE(data.parts.size() == 2);
+    const ModelPart& skinned = data.parts[0];
+    CHECK(skinned.skin == 0);
+    REQUIRE(data.skins.size() == 2);
+    CHECK(data.skins[0].joints ==
+          std::vector<std::uint32_t>{joint_named(data, "root"), joint_named(data, "tip")});
+    // The skin's own matrices bind it where the armature put it: no node transform is baked in.
+    CHECK(data.vertices[1].position.x == Approx(1.0f));
+    CHECK(data.vertices[1].position.z == Approx(0.0f));
+    // Half and half, as bytes that add up to 255.
+    CHECK(data.vertices[1].joints[1] == 1);
+    CHECK(data.vertices[1].weights[0] + data.vertices[1].weights[1] == 255);
+    CHECK(data.vertices[0].weights[0] == 255);
+
+    // Skinned at rest, the mesh is where the armature bound it.
+    std::vector<core::Mat4> skinning;
+    skinning_matrices(data.skins[0], rest_model_space(data.skeleton), skinning);
+    const core::Vec3 bound = core::transform_point(skinning[1], data.vertices[2].position);
+    CHECK(bound.y == Approx(1.0f));
+}
+
+TEST_CASE("parse_glb gives a mesh hanging from a joint a rigid skin") {
+    const core::Result<ModelData> model = parse_glb(skinned_glb());
+    REQUIRE_MESSAGE(model.has_value(), model.error().message);
+    const ModelData& data = model.value();
+    const ModelPart& rigid = data.parts[1];
+    REQUIRE(rigid.skin == 1);
+    CHECK(data.skins[1].joints == std::vector<std::uint32_t>{joint_named(data, "tip")});
+    // Its vertices are in the model's space, as it rests: under the tip, 1 up and 5 along Z.
+    const ModelVertex& vertex = data.vertices[data.indices[rigid.first_index]];
+    CHECK(vertex.position.y == Approx(1.0f));
+    CHECK(vertex.position.z == Approx(5.0f));
+    CHECK(vertex.weights[0] == 255);
+}
+
+TEST_CASE("parse_glb reads animations, turning step keys into linear ones") {
+    const core::Result<ModelData> model = parse_glb(skinned_glb());
+    REQUIRE_MESSAGE(model.has_value(), model.error().message);
+    const ModelData& data = model.value();
+    REQUIRE(data.clips.size() == 1);
+    const ModelClip& bend = data.clips[0];
+    CHECK(bend.name == "bend");
+    CHECK(bend.duration == Approx(1.0f));
+    REQUIRE(bend.tracks.size() == 3);
+    const animation::JointTrack& tip = bend.tracks[joint_named(data, "tip")];
+    // The first value holds until just before one second, then the second.
+    REQUIRE(tip.rotations.size() == 3);
+    CHECK(tip.rotations[1].time < 1.0f);
+    CHECK(tip.rotations[1].time > 0.99f);
+    CHECK(tip.rotations[1].value.w == Approx(1.0f));
+    CHECK(tip.rotations[2].value.z == Approx(std::sqrt(0.5f)));
+    CHECK(bend.tracks[joint_named(data, "root")].rotations.empty());
+}
+
+TEST_CASE("create_model_asset keeps a skinned part's per-joint boxes and its rest pose") {
+    const core::Result<ModelData> model = parse_glb(skinned_glb());
+    REQUIRE(model.has_value());
+    FakeDeviceState state;
+    FakeDevice device(state);
+    const core::Result<ModelAsset> asset = create_model_asset(device, model.value());
+    REQUIRE(asset.has_value());
+    // Both joints move a vertex of the skinned triangle.
+    CHECK(asset.value().parts[0].joint_bounds.size() == 2);
+    REQUIRE(asset.value().rest_skinning.size() == 2);
+    CHECK(asset.value().rest_skinning[0].size() == 2);
+    CHECK(asset.value().clips.size() == 1);
 }

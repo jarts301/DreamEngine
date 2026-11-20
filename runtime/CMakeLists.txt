@@ -8,6 +8,7 @@ find_package(Ktx CONFIG REQUIRED)
 add_library(dream_runtime STATIC
     src/app.cpp
     src/asset_manager.cpp
+    src/animation.cpp
     src/audio.cpp
     src/crash_reports.cpp
     src/debug_lines.cpp
@@ -40,7 +41,7 @@ target_link_libraries(dream_runtime PUBLIC
     dream::interface_physics3d dream::interface_audio dream::interface_ui
     dream::interface_debug_ui dream::interface_profiler dream::interface_renderer
     dream::interface_mesh_simplifier dream::interface_tangent_generator
-    dream::interface_input_device EnTT::EnTT)
+    dream::interface_input_device dream::interface_animation EnTT::EnTT)
 target_link_libraries(dream_runtime PRIVATE KTX::ktx)
 dream_configure_target(dream_runtime)
 
@@ -48,6 +49,7 @@ if(DREAM_BUILD_TESTS)
     dream_add_test(dream_runtime_tests
         SOURCES
             tests/test_main.cpp
+            tests/animation_test.cpp
             tests/app_test.cpp
             tests/asset_manager_test.cpp
             tests/audio_test.cpp

@@ -3,6 +3,7 @@ window = "hidden"
 max_fps = 0
 
 [demo]
+animation_time = 0.5
 quit_after_frames = 5
 
 [input.actions]
@@ -12,6 +13,7 @@ orbit_left = ["key:a", "key:left"]
 orbit_right = ["key:d", "key:right"]
 zoom_in = ["key:w", "key:up"]
 zoom_out = ["key:s", "key:down"]
+next_animation = ["key:n"]
 
 [modules.windows]
 platform = ["sdl3"]
@@ -20,6 +22,7 @@ rhi = ["null"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
+animation = ["ozz"]
 
 [modules.android]
 platform = ["sdl3"]
@@ -28,6 +31,7 @@ rhi = ["null"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
+animation = ["ozz"]
 
 [modules.linux]
 platform = ["sdl3"]
@@ -36,6 +40,7 @@ rhi = ["null"]
 renderer = ["forward"]
 mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
+animation = ["ozz"]
 
 [audio]
 muted = true

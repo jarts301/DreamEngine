@@ -119,6 +119,22 @@ as for glass, and double-sided. [Materials](docs/guides/materials.md) explains h
 that look right, and [ADR 0033](docs/adr/0033-pbr-materials-and-normal-maps.md) and
 [ADR 0034](docs/adr/0034-transparency.md) record the design.
 
+## Animation
+
+Skinned glTF models load with their skeleton and animations, and are skinned on the GPU on every
+graphics backend. With `animation = ["ozz", "null"]` listed and a `runtime::Animation` updated each
+frame, an `animator` in a scene file plays a clip, and `Animation::play` fades between clips:
+
+```toml
+[entities.hero.animator]
+clip = "walk"
+```
+
+ozz-animation (MIT) comes from an overlay port in `cmake/ports`, which the presets list. The render
+demo's tentacle has two clips; N or a gamepad's north button fades between them.
+[Animation](docs/guides/animation.md) explains how to export animated models from Blender and play
+them, and [ADR 0036](docs/adr/0036-skeletal-animation.md) records the design.
+
 ## Input and gamepads
 
 Games read named actions, which `[input.actions]` in `dream.toml` binds to keys, mouse buttons,
@@ -253,6 +269,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 | `mesh_simplifier` | `meshoptimizer`, `null` | all | all | Makes the simpler versions of models that the renderer draws far away. Optional. |
 | `tangent_generator` | `mikktspace`, `null` | all | all | Makes tangents for normal maps on models exported without them. Optional. |
 | `input_device` | `sdl3_gamepad`, `null` | all | all | Gamepads, bound to the same actions as keys. Optional. |
+| `animation` | `ozz`, `null` | all | all | Plays skeletal animation; `null` leaves models at rest. Optional. |
 | `physics3d` | `jolt`, `impulse`, `null` | all | all | `impulse` is the engine's own library. |
 | `physics2d` | `box2d`, `chipmunk`, `null` | all | all | `chipmunk` has no continuous collision. |
 | `audio` | `miniaudio`, `portaudio`, `null` | all | `miniaudio`, `null` | PortAudio has no Android output. |

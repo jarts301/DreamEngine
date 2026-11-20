@@ -687,3 +687,33 @@ TEST_CASE_FIXTURE(Fixture, "Double-sided parts are drawn without culling, and sa
     CHECK(features == 16.0f);
     CHECK(cutoff == 0.5f);
 }
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer draws skinned parts one each, with their joints") {
+    start();
+    // Two joints: one in place, one moved by (1, 2, 3).
+    const std::array joints{core::Mat4{}, core::translation(Vec3{1.0f, 2.0f, 3.0f})};
+    std::array meshes{mesh(0), mesh(0), mesh(3)};
+    meshes[0].joint_matrices = joints;
+    meshes[1].joint_matrices = joints;
+    FrameStats stats;
+    const Calls calls =
+        draw(Frame{.size = k_size, .view = view_from({0, 0, 5}), .meshes = meshes}, &stats);
+
+    // The skinned parts share a mesh, but each has its own pose, so each is its own draw.
+    CHECK(stats.draws == 3);
+    CHECK(stats.skinned == 2);
+    CHECK(stats.draw_calls == 3);
+    // Two joints of three rows of four floats each, set before each skinned draw.
+    CHECK(std::ranges::count(calls, "draw_uniforms 96") == 2);
+    const auto uploaded = std::ranges::find(calls, "draw_uniforms 96");
+    CHECK(uploaded < std::ranges::find(calls, "draw 0+3 x1"));
+
+    // The second joint's rows end in its translation.
+    REQUIRE(state.last_draw_uniforms.size() == 96);
+    std::array<float, 24> rows{};
+    std::memcpy(rows.data(), state.last_draw_uniforms.data(), sizeof(rows));
+    CHECK(rows[12] == 1.0f); // Joint 1, row x: (1, 0, 0, 1).
+    CHECK(rows[15] == 1.0f);
+    CHECK(rows[19] == 2.0f);
+    CHECK(rows[23] == 3.0f);
+}

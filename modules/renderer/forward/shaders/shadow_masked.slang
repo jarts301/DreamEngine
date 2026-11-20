@@ -32,7 +32,15 @@ struct VertexInput {
     // Only w, the alpha cutoff, is read.
     [[vk::location(6)]] float4 normal_x : NORMALS0;
     [[vk::location(7)]] float4 base_color : COLOR0;
+#if defined(DREAM_SKINNED)
+    [[vk::location(8)]] float4 joints : JOINTS0;
+    [[vk::location(9)]] float4 weights : WEIGHTS0;
+#endif
 };
+
+#if defined(DREAM_SKINNED)
+#include "skinning.slang"
+#endif
 
 struct VertexOutput {
     float4 position : SV_Position;
@@ -43,7 +51,11 @@ struct VertexOutput {
 
 [shader("vertex")]
 VertexOutput vertex_main(VertexInput input) {
+#if defined(DREAM_SKINNED)
+    const float3 p = skin_position(input.joints, input.weights, input.position);
+#else
     const float3 p = input.position;
+#endif
     const float4 world = input.model_x * p.x + input.model_y * p.y + input.model_z * p.z +
                          input.model_w;
     VertexOutput output;

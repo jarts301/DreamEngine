@@ -6,7 +6,8 @@ docs/adr/0024-texture-cooking.md); the models refer to them by name. Every mater
 metallic and roughness factors, since glTF's defaults are fully metallic and fully rough (see
 docs/guides/materials.md). The brick wall has a normal map and an occlusion-roughness-metallic
 map, and no tangents, which the engine's tangent generator makes. The glass pane is blended, the
-fence is cut out of a board by its texture's alpha, and the lamp glows.
+fence is cut out of a board by its texture's alpha, and the lamp glows. The tentacle is skinned to a
+chain of joints and has two animations, "sway" and "curl" (see docs/guides/animation.md).
 
 Usage: python tools/make_sample_models.py
 
@@ -429,6 +430,169 @@ def make_lamp():
     )
 
 
+TENTACLE_JOINTS = 5
+TENTACLE_SEGMENT = 0.4  # Meters between joints.
+TENTACLE_RINGS = 24
+TENTACLE_SIDES = 12
+
+
+def quat_axis_angle(axis, angle):
+    s = math.sin(angle / 2)
+    return (axis[0] * s, axis[1] * s, axis[2] * s, math.cos(angle / 2))
+
+
+def make_tentacle():
+    """A tapered tube standing on the ground, skinned to a chain of joints up its middle, with two
+    looping animations: "sway", a wave running up it, and "curl", bending over and back."""
+    height = TENTACLE_SEGMENT * (TENTACLE_JOINTS - 1)
+    positions, normals, uvs, joints, weights, indices = [], [], [], [], [], []
+    for ring in range(TENTACLE_RINGS + 1):
+        v = ring / TENTACLE_RINGS
+        y = v * height
+        radius = 0.28 * (1 - v) + 0.06
+        # Each ring follows the two joints around it, by how near it is to each.
+        along = y / TENTACLE_SEGMENT
+        lower = min(int(along), TENTACLE_JOINTS - 2)
+        upper_weight = min(max(along - lower, 0.0), 1.0)
+        for side in range(TENTACLE_SIDES + 1):
+            u = side / TENTACLE_SIDES
+            angle = u * 2 * math.pi
+            nx, nz = math.sin(angle), math.cos(angle)
+            positions.append((nx * radius, y, nz * radius))
+            normals.append((nx, 0.0, nz))
+            uvs.append((u, 1 - v))
+            joints.append((lower, lower + 1, 0, 0))
+            weights.append((1 - upper_weight, upper_weight, 0.0, 0.0))
+    row = TENTACLE_SIDES + 1
+    for ring in range(TENTACLE_RINGS):
+        for side in range(TENTACLE_SIDES):
+            a = ring * row + side
+            b = a + row
+            indices += [a, a + 1, b + 1, a, b + 1, b]
+    # A cap on top, so it reads as solid from above.
+    top = len(positions)
+    positions.append((0.0, height, 0.0))
+    normals.append((0.0, 1.0, 0.0))
+    uvs.append((0.5, 0.0))
+    joints.append((TENTACLE_JOINTS - 1, 0, 0, 0))
+    weights.append((1.0, 0.0, 0.0, 0.0))
+    last = TENTACLE_RINGS * row
+    for side in range(TENTACLE_SIDES):
+        indices += [last + side, last + side + 1, top]
+
+    views, accessors, binary = [], [], bytearray()
+
+    def add(data, target=None):
+        while len(binary) % 4:
+            binary.append(0)
+        view = {"buffer": 0, "byteOffset": len(binary), "byteLength": len(data)}
+        if target is not None:
+            view["target"] = target
+        binary.extend(data)
+        views.append(view)
+        return len(views) - 1
+
+    def accessor(data, count, kind, component, target=None, extra=None):
+        entry = {"bufferView": add(data, target), "componentType": component, "count": count,
+                 "type": kind}
+        entry.update(extra or {})
+        accessors.append(entry)
+        return len(accessors) - 1
+
+    def floats(values, kind, target=None, extra=None):
+        flat = [c for value in values for c in value]
+        return accessor(struct.pack(f"<{len(flat)}f", *flat), len(values), kind, 5126, target,
+                        extra)
+
+    bounds = {"min": [min(p[i] for p in positions) for i in range(3)],
+              "max": [max(p[i] for p in positions) for i in range(3)]}
+    position_accessor = floats(positions, "VEC3", 34962, bounds)
+    normal_accessor = floats(normals, "VEC3", 34962)
+    uv_accessor = floats(uvs, "VEC2", 34962)
+    flat_joints = [c for value in joints for c in value]
+    joints_accessor = accessor(struct.pack(f"<{len(flat_joints)}B", *flat_joints), len(joints),
+                               "VEC4", 5121, 34962)
+    weights_accessor = floats(weights, "VEC4", 34962)
+    index_accessor = accessor(struct.pack(f"<{len(indices)}H", *indices), len(indices), "SCALAR",
+                              5123, 34963)
+    # Each joint at its height when bound; the inverse moves the mesh back down to it.
+    inverse_bind = []
+    for joint in range(TENTACLE_JOINTS):
+        y = joint * TENTACLE_SEGMENT
+        inverse_bind.append((1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -y, 0, 1))
+    inverse_accessor = floats(inverse_bind, "MAT4")
+
+    # Two looping animations, keyed every tenth of a second.
+    def clip(name, duration, rotation_of):
+        steps = int(round(duration * 10))
+        times = [i / 10 for i in range(steps + 1)]
+        time_accessor = floats([(t,) for t in times], "SCALAR", extra={"min": [0.0],
+                                                                         "max": [times[-1]]})
+        samplers, channels = [], []
+        for joint in range(TENTACLE_JOINTS):
+            keys = [rotation_of(joint, t / duration) for t in times]
+            samplers.append({"input": time_accessor, "output": floats(keys, "VEC4"),
+                             "interpolation": "LINEAR"})
+            channels.append({"sampler": joint, "target": {"node": 1 + joint, "path": "rotation"}})
+        return {"name": name, "samplers": samplers, "channels": channels}
+
+    def sway(joint, phase):
+        # A wave that runs up the tentacle, each joint a little behind the one below.
+        angle = 0.32 * math.sin(2 * math.pi * phase - joint * 0.9) * (0.4 + joint * 0.2)
+        return quat_axis_angle((0, 0, 1), angle)
+
+    def curl(joint, phase):
+        # Every joint bends the same way, so the whole tentacle curls over, then straightens.
+        bend = 0.5 * (1 - math.cos(2 * math.pi * phase))
+        return quat_axis_angle((1, 0, 0), bend * 0.45 * (0.3 + joint * 0.25))
+
+    animations = [clip("sway", 2.0, sway), clip("curl", 3.0, curl)]
+
+    nodes = [{"mesh": 0, "skin": 0, "name": "tentacle"}]
+    for joint in range(TENTACLE_JOINTS):
+        node = {"name": f"joint{joint}", "translation": [0.0, 0.0 if joint == 0 else
+                                                         TENTACLE_SEGMENT, 0.0]}
+        if joint + 1 < TENTACLE_JOINTS:
+            node["children"] = [2 + joint]
+        nodes.append(node)
+
+    while len(binary) % 4:
+        binary.append(0)
+    gltf = {
+        "asset": {"version": "2.0", "generator": "DreamEngine make_sample_models.py"},
+        "scene": 0,
+        "scenes": [{"nodes": [0, 1]}],
+        "nodes": nodes,
+        "skins": [{"joints": list(range(1, 1 + TENTACLE_JOINTS)),
+                   "inverseBindMatrices": inverse_accessor, "skeleton": 1}],
+        "meshes": [{"primitives": [{
+            "attributes": {"POSITION": position_accessor, "NORMAL": normal_accessor,
+                           "TEXCOORD_0": uv_accessor, "JOINTS_0": joints_accessor,
+                           "WEIGHTS_0": weights_accessor},
+            "indices": index_accessor, "material": 0}]}],
+        "materials": [{"name": "tentacle", "pbrMetallicRoughness": {
+            "baseColorFactor": [0.55, 0.12, 0.45, 1], "metallicFactor": 0.0,
+            "roughnessFactor": 0.45}}],
+        "animations": animations,
+        "accessors": accessors,
+        "bufferViews": views,
+        "buffers": [{"byteLength": len(binary)}],
+    }
+    text = json.dumps(gltf, separators=(",", ":")).encode()
+    text += b" " * ((4 - len(text) % 4) % 4)
+    path = OUTPUT / "tentacle.glb"
+    total = 12 + 8 + len(text) + 8 + len(binary)
+    path.write_bytes(
+        struct.pack("<III", 0x46546C67, 2, total)
+        + struct.pack("<II", len(text), 0x4E4F534A)
+        + text
+        + struct.pack("<II", len(binary), 0x004E4942)
+        + binary
+    )
+    print(f"{path.name}: {total} bytes, {len(positions)} vertices, {len(indices) // 3} triangles, "
+          f"{TENTACLE_JOINTS} joints, {len(animations)} animations")
+
+
 if __name__ == "__main__":
     OUTPUT.mkdir(parents=True, exist_ok=True)
     make_crate()
@@ -440,3 +604,4 @@ if __name__ == "__main__":
     make_glass_pane()
     make_fence()
     make_lamp()
+    make_tentacle()

@@ -3,6 +3,7 @@
 #include "dream/core/assert.h"
 #include "dream/core/log.h"
 #include "dream/core/profile.h"
+#include "dream/runtime/animation.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/texture.h"
 
@@ -492,9 +493,32 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
                 continue;
             }
             const ModelAsset& model = *mesh.model;
+            const Animator* const animator = world.registry().try_get<Animator>(entity);
             for (const ModelPart& part : model.parts) {
                 renderer::MeshMaterial material = model.materials[part.material];
                 material.base_color = multiply(material.base_color, mesh.tint);
+                // A skinned part takes its animator's pose, or the rest pose, and a box around it
+                // as posed, from its joints' boxes (ADR 0036).
+                std::span<const Mat4> joints;
+                core::Aabb bounds = part.bounds;
+                if (part.skin >= 0 && static_cast<std::size_t>(part.skin) < model.skins.size()) {
+                    const auto skin = static_cast<std::size_t>(part.skin);
+                    joints = animator != nullptr && skin < animator->skinning.size() &&
+                                     !animator->skinning[skin].empty()
+                                 ? std::span<const Mat4>(animator->skinning[skin])
+                                 : std::span<const Mat4>(model.rest_skinning[skin]);
+                    if (!part.joint_bounds.empty()) {
+                        bounds = {};
+                        for (const JointBounds& joint : part.joint_bounds) {
+                            if (joint.joint < joints.size()) {
+                                const core::Aabb moved =
+                                    core::transformed(joints[joint.joint], joint.bounds);
+                                bounds.add(moved.min);
+                                bounds.add(moved.max);
+                            }
+                        }
+                    }
+                }
                 m_meshes.push_back(renderer::MeshDraw{
                     .vertices = model.vertices.get(),
                     .indices = model.indices.get(),
@@ -503,8 +527,9 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
                     .model = transform.matrix,
                     .material = material,
                     .casts_shadows = mesh.casts_shadows,
-                    .bounds = part.bounds,
+                    .bounds = bounds,
                     .lods = part.lods,
+                    .joint_matrices = joints,
                 });
             }
         }

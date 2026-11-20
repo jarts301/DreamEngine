@@ -43,7 +43,8 @@ constexpr std::uint32_t k_frames_in_flight = 2;
 constexpr std::size_t k_kept_gpu_frame_times = 16;
 
 // How much uniform data, and how many different texture bindings, one frame can use.
-constexpr VkDeviceSize k_uniform_buffer_size = 256 * 1024;
+// Each frame's uniforms and per-draw uniforms (ADR 0036) share this buffer.
+constexpr VkDeviceSize k_uniform_buffer_size = 4 * 1024 * 1024;
 constexpr std::uint32_t k_max_descriptor_sets_per_frame = 512;
 constexpr const char* k_validation_layer = "VK_LAYER_KHRONOS_validation";
 
@@ -756,6 +757,7 @@ public:
         frame.uniform_used = 0;
         frame.vertex_used = 0;
         m_uniform_offset = 0;
+        m_draw_uniform_offset = 0;
         m_bound_textures = {};
         m_bound_texture_keys = {};
         m_descriptors_dirty = false;
@@ -1230,9 +1232,9 @@ private:
             std::max<VkDeviceSize>(properties.limits.minUniformBufferOffsetAlignment, 1);
         create_timestamps(properties);
 
-        // One layout for every pipeline: a uniform block, a texture per slot at bindings 1 to 3
-        // (ADR 0027), and push constants.
-        std::array<VkDescriptorSetLayoutBinding, 1 + k_texture_slots> bindings{};
+        // One layout for every pipeline: a uniform block, a texture per slot at bindings 1 to 7
+        // (ADR 0027, 0033), the per-draw block at binding 8 (ADR 0036), and push constants.
+        std::array<VkDescriptorSetLayoutBinding, 2 + k_texture_slots> bindings{};
         bindings[0] = VkDescriptorSetLayoutBinding{
             .binding = 0,
             .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
@@ -1247,6 +1249,13 @@ private:
                 .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             };
         }
+        static_assert(1 + k_texture_slots == k_draw_uniform_binding);
+        bindings[1 + k_texture_slots] = VkDescriptorSetLayoutBinding{
+            .binding = k_draw_uniform_binding,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        };
         const VkDescriptorSetLayoutCreateInfo descriptor_layout{
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             .bindingCount = static_cast<std::uint32_t>(bindings.size()),
@@ -1849,7 +1858,7 @@ private:
 
             const std::array pool_sizes{
                 VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-                                     k_max_descriptor_sets_per_frame},
+                                     k_max_descriptor_sets_per_frame * 2},
                 VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                      k_max_descriptor_sets_per_frame * k_texture_slots},
             };
@@ -2371,6 +2380,26 @@ private:
         m_descriptors_dirty = true;
     }
 
+    void set_draw_uniforms(std::span<const std::byte> data) override {
+        DREAM_VERIFY(data.size() <= k_max_draw_uniform_size, "Too many per-draw uniforms");
+
+        // The descriptor covers k_max_draw_uniform_size bytes from the offset, which must stay in
+        // the buffer, though only what was given is written.
+        FrameResources& frame = m_frames[m_frame_index];
+        const VkDeviceSize remainder = frame.uniform_used % m_uniform_alignment;
+        const VkDeviceSize offset =
+            remainder == 0 ? frame.uniform_used : frame.uniform_used + m_uniform_alignment - remainder;
+        DREAM_VERIFY(offset + k_max_draw_uniform_size <= k_uniform_buffer_size,
+                     "Too many set_draw_uniforms calls in one frame");
+
+        std::memcpy(frame.uniform_memory + offset, data.data(), data.size());
+        vmaFlushAllocation(m_allocator, frame.uniform_allocation, offset, data.size());
+
+        frame.uniform_used = offset + std::max<VkDeviceSize>(data.size(), 1);
+        m_draw_uniform_offset = static_cast<std::uint32_t>(offset);
+        m_descriptors_dirty = true;
+    }
+
     void bind_texture(std::uint32_t slot, TextureHandle handle) override {
         DREAM_VERIFY(slot < k_texture_slots, "There is no such texture slot");
         if (!handle.is_valid()) {
@@ -2410,6 +2439,8 @@ private:
                          "Too many different textures in one frame");
 
             const VkDescriptorBufferInfo buffer{frame.uniform_buffer, 0, k_max_uniform_size};
+            const VkDescriptorBufferInfo draw_buffer{frame.uniform_buffer, 0,
+                                                     k_max_draw_uniform_size};
             std::array<VkDescriptorImageInfo, k_texture_slots> images{};
             for (std::uint32_t slot = 0; slot < k_texture_slots; ++slot) {
                 const VkImageView fallback = slot == k_shadow_slot ? m_far_depth_texture.view
@@ -2420,7 +2451,7 @@ private:
                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                 };
             }
-            std::array<VkWriteDescriptorSet, 1 + k_texture_slots> writes{};
+            std::array<VkWriteDescriptorSet, 2 + k_texture_slots> writes{};
             writes[0] = VkWriteDescriptorSet{
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                 .dstSet = set,
@@ -2439,12 +2470,23 @@ private:
                     .pImageInfo = &images[slot],
                 };
             }
+            writes[1 + k_texture_slots] = VkWriteDescriptorSet{
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = set,
+                .dstBinding = k_draw_uniform_binding,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                .pBufferInfo = &draw_buffer,
+            };
             vkUpdateDescriptorSets(m_device, static_cast<std::uint32_t>(writes.size()), writes.data(),
                                    0, nullptr);
         }
 
+        // Dynamic offsets go in binding order: the frame's block, then the per-draw one.
+        const std::array<std::uint32_t, 2> offsets{m_uniform_offset, m_draw_uniform_offset};
         vkCmdBindDescriptorSets(m_recording, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline_layout, 0,
-                                1, &set, 1, &m_uniform_offset);
+                                1, &set, static_cast<std::uint32_t>(offsets.size()),
+                                offsets.data());
     }
 
     void draw_indexed(std::uint32_t index_count) override {
@@ -2588,6 +2630,7 @@ private:
     std::uint32_t m_image_index = 0;
     VkCommandBuffer m_recording = VK_NULL_HANDLE;
     std::uint32_t m_uniform_offset = 0;
+    std::uint32_t m_draw_uniform_offset = 0;
     std::array<VkImageView, k_texture_slots> m_bound_textures{};
     TextureSlotsKey m_bound_texture_keys{};
     bool m_descriptors_dirty = false;

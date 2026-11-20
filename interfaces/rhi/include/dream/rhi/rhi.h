@@ -39,6 +39,13 @@ inline constexpr std::size_t k_max_push_constant_size = 128;
 // The largest block accepted by CommandList::set_uniforms.
 inline constexpr std::size_t k_max_uniform_size = 512;
 
+// The largest block accepted by CommandList::set_draw_uniforms (ADR 0036): 16 KB, the most every
+// OpenGL ES 3 and Vulkan device takes in one uniform block.
+inline constexpr std::size_t k_max_draw_uniform_size = 16 * 1024;
+
+// Where shaders find the block of set_draw_uniforms.
+inline constexpr std::uint32_t k_draw_uniform_binding = 8;
+
 // How many bytes CommandList::draw_vertices, bind_frame_geometry and bind_instances can take in one
 // frame, over all their calls.
 inline constexpr std::size_t k_max_frame_vertex_bytes = 4 * 1024 * 1024;
@@ -339,6 +346,12 @@ public:
     // draws. The data is copied, and it can change any number of times per frame. At most
     // k_max_uniform_size bytes.
     virtual void set_uniforms(std::span<const std::byte> data) = 0;
+
+    // Sets a second block, for data that changes from draw to draw, such as a skinned part's joint
+    // matrices (ADR 0036): binding 8 of set 0, register b2, or uniform block binding 8 in OpenGL.
+    // At most k_max_draw_uniform_size bytes, copied, for this and later draws. A shader may
+    // declare the block as large as k_max_draw_uniform_size; what wasn't set reads as anything.
+    virtual void set_draw_uniforms(std::span<const std::byte> data) = 0;
 
     // Sets the texture that shaders read at `slot`, below k_texture_slots, for this and later draws
     // in the pass. Each pass starts with defaults, which an invalid handle also selects: plain

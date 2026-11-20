@@ -40,6 +40,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0033](0033-pbr-materials-and-normal-maps.md) | Materials are glTF's metallic-roughness PBR, with normal maps and tangents from a module |
 | [0034](0034-transparency.md) | Blended, cut-out and double-sided materials, drawn in passes after opaque ones |
 | [0035](0035-gamepads.md) | Gamepads through an `input_device` module, bound to the same actions as keys, with analog values |
+| [0036](0036-skeletal-animation.md) | Skeletal animation through an `animation` module (ozz-animation), with GPU skinning |
 
 ## Template
 

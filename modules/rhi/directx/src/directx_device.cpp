@@ -39,6 +39,8 @@ using Microsoft::WRL::ComPtr;
 // push constants, which DirectX has no special kind of buffer for.
 constexpr UINT k_uniform_register = 0;
 constexpr UINT k_push_constant_register = 1;
+// The block of set_draw_uniforms (ADR 0036).
+constexpr UINT k_draw_uniform_register = 2;
 // Slot n of bind_texture reads register tn with sampler sn (ADR 0027).
 constexpr UINT k_texture_register = 0;
 constexpr UINT k_sampler_register = 0;
@@ -771,6 +773,11 @@ private:
         if (FAILED(result)) {
             return directx_error("Creating the uniform buffer", result);
         }
+        result = create_dynamic(k_max_draw_uniform_size, D3D11_BIND_CONSTANT_BUFFER,
+                                m_draw_uniform_buffer);
+        if (FAILED(result)) {
+            return directx_error("Creating the per-draw uniform buffer", result);
+        }
         result = create_dynamic(k_max_push_constant_size, D3D11_BIND_CONSTANT_BUFFER,
                                 m_push_constant_buffer);
         if (FAILED(result)) {
@@ -830,12 +837,19 @@ private:
                                                    "are allowed",
                                                    name, buffer.Size, k_max_push_constant_size));
                     }
+                } else if (binding.BindPoint == k_draw_uniform_register) {
+                    if (buffer.Size > k_max_draw_uniform_size) {
+                        return invalid(std::format("Per-draw block '{}' is {} bytes; at most {} "
+                                                   "are allowed",
+                                                   name, buffer.Size, k_max_draw_uniform_size));
+                    }
                 } else {
                     return invalid(std::format(
                         "Constant buffer '{}' is at register b{}; DirectX shaders must put the "
-                        "uniform block at register(b{}) and push constants at register(b{}), "
-                        "see ADR 0013",
-                        name, binding.BindPoint, k_uniform_register, k_push_constant_register));
+                        "uniform block at register(b{}), push constants at register(b{}) and the "
+                        "per-draw block at register(b{}), see ADR 0013 and 0036",
+                        name, binding.BindPoint, k_uniform_register, k_push_constant_register,
+                        k_draw_uniform_register));
                 }
                 break;
             }
@@ -1353,9 +1367,11 @@ private:
         m_context->RSSetViewports(1, &viewport);
         set_scissor(std::nullopt);
 
-        const std::array<ID3D11Buffer*, 2> constants{m_uniform_buffer.Get(),
-                                                     m_push_constant_buffer.Get()};
-        static_assert(k_uniform_register == 0 && k_push_constant_register == 1);
+        const std::array<ID3D11Buffer*, 3> constants{m_uniform_buffer.Get(),
+                                                     m_push_constant_buffer.Get(),
+                                                     m_draw_uniform_buffer.Get()};
+        static_assert(k_uniform_register == 0 && k_push_constant_register == 1 &&
+                      k_draw_uniform_register == 2);
         m_context->VSSetConstantBuffers(0, static_cast<UINT>(constants.size()), constants.data());
         m_context->PSSetConstantBuffers(0, static_cast<UINT>(constants.size()), constants.data());
         std::array<ID3D11SamplerState*, k_texture_slots> samplers{};
@@ -1429,6 +1445,11 @@ private:
     void set_uniforms(std::span<const std::byte> data) override {
         DREAM_VERIFY(data.size() <= k_max_uniform_size, "Too many uniforms");
         write_dynamic(m_uniform_buffer.Get(), data);
+    }
+
+    void set_draw_uniforms(std::span<const std::byte> data) override {
+        DREAM_VERIFY(data.size() <= k_max_draw_uniform_size, "Too many per-draw uniforms");
+        write_dynamic(m_draw_uniform_buffer.Get(), data);
     }
 
     void bind_texture(std::uint32_t slot, TextureHandle handle) override {
@@ -1548,6 +1569,7 @@ private:
     ComPtr<IDXGIFactory2> m_factory;
     std::array<ComPtr<ID3D11SamplerState>, k_texture_slots> m_samplers;
     ComPtr<ID3D11Buffer> m_uniform_buffer;
+    ComPtr<ID3D11Buffer> m_draw_uniform_buffer;
     ComPtr<ID3D11Buffer> m_push_constant_buffer;
     ComPtr<ID3D11Buffer> m_frame_buffer;
     TextureResource m_white_texture;
