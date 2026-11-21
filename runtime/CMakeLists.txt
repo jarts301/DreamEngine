@@ -19,6 +19,7 @@ add_library(dream_runtime STATIC
     src/memory_budget.cpp
     src/memory_guard.cpp
     src/model_loader.cpp
+    src/model_parse.cpp
     src/particles.cpp
     src/physics_2d.cpp
     src/physics_3d.cpp

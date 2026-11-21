@@ -9,7 +9,9 @@
 #include <cstring>
 #include <format>
 #include <ostream> // Needed for doctest to print std::string.
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace dream;
@@ -731,4 +733,107 @@ TEST_CASE("create_model_asset keeps a skinned part's per-joint boxes and its res
     REQUIRE(asset.value().rest_skinning.size() == 2);
     CHECK(asset.value().rest_skinning[0].size() == 2);
     CHECK(asset.value().clips.size() == 1);
+}
+
+namespace {
+
+// Two parts, each with distinct indices, so a version put in the wrong place shows.
+ModelData two_parts() {
+    ModelData data;
+    data.vertices.resize(6);
+    for (std::uint32_t triangle = 0; triangle < 200; ++triangle) {
+        data.indices.insert(data.indices.end(), {0, 1, 2});
+    }
+    for (std::uint32_t triangle = 0; triangle < 100; ++triangle) {
+        data.indices.insert(data.indices.end(), {3, 4, 5});
+    }
+    data.parts.push_back(ModelPart{.first_index = 0, .index_count = 600, .material = 0, .bounds = {}});
+    data.parts.push_back(
+        ModelPart{.first_index = 600, .index_count = 300, .material = 0, .bounds = {}});
+    return data;
+}
+
+std::vector<std::byte> bytes_of(std::string_view text) {
+    std::vector<std::byte> bytes(text.size());
+    std::memcpy(bytes.data(), text.data(), text.size());
+    return bytes;
+}
+
+} // namespace
+
+TEST_CASE("Cooked levels of detail give the same versions as making them") {
+    const std::vector<std::byte> source = bytes_of("a model file");
+    ModelData made = two_parts();
+    HalvingSimplifier simplifier;
+    REQUIRE(generate_lods(made, simplifier).has_value());
+    const std::vector<std::byte> cooked = write_cooked_lods(made, source, {});
+
+    ModelData loaded = two_parts();
+    REQUIRE(apply_cooked_lods(loaded, cooked, source, {}).has_value());
+    CHECK(loaded.indices == made.indices);
+    REQUIRE(loaded.parts.size() == 2);
+    for (std::size_t part = 0; part < 2; ++part) {
+        REQUIRE(loaded.parts[part].lods.size() == made.parts[part].lods.size());
+        for (std::size_t lod = 0; lod < made.parts[part].lods.size(); ++lod) {
+            CHECK(loaded.parts[part].lods[lod].first_index == made.parts[part].lods[lod].first_index);
+            CHECK(loaded.parts[part].lods[lod].index_count == made.parts[part].lods[lod].index_count);
+            CHECK(loaded.parts[part].lods[lod].error == made.parts[part].lods[lod].error);
+        }
+    }
+    CHECK(cooked_lods_path("assets:/models/ball.glb") == "assets:/models/ball.lods");
+    CHECK(cooked_lods_path("assets:/models.v2/ball") == "assets:/models.v2/ball.lods");
+}
+
+TEST_CASE("Cooked levels of detail are refused when anything they were made from changed") {
+    const std::vector<std::byte> source = bytes_of("a model file");
+    ModelData made = two_parts();
+    HalvingSimplifier simplifier;
+    REQUIRE(generate_lods(made, simplifier).has_value());
+    const std::vector<std::byte> cooked = write_cooked_lods(made, source, {});
+
+    const auto refused = [&](ModelData data, std::span<const std::byte> file,
+                             std::span<const std::byte> from, const LodOptions& options) {
+        const std::size_t indices = data.indices.size();
+        const bool failed = !apply_cooked_lods(data, file, from, options).has_value();
+        // Nothing is changed when refused.
+        CHECK(data.indices.size() == indices);
+        CHECK(data.parts[0].lods.empty());
+        return failed;
+    };
+    // Another model file.
+    CHECK(refused(two_parts(), cooked, bytes_of("a model file!"), {}));
+    CHECK(refused(two_parts(), cooked, bytes_of("a model filE"), {}));
+    // Other [lods] settings.
+    CHECK(refused(two_parts(), cooked, source, LodOptions{.levels = 2}));
+    // Read differently: another vertex count, or another part.
+    ModelData more_vertices = two_parts();
+    more_vertices.vertices.resize(7);
+    CHECK(refused(more_vertices, cooked, source, {}));
+    ModelData other_part = two_parts();
+    other_part.parts[1].index_count = 297;
+    CHECK(refused(other_part, cooked, source, {}));
+    // Cut short, or not a cooked file.
+    CHECK(refused(two_parts(), std::span(cooked).first(cooked.size() - 4), source, {}));
+    CHECK(refused(two_parts(), bytes_of("DLOD but not really"), source, {}));
+    // An index past the vertices.
+    std::vector<std::byte> broken = cooked;
+    const std::uint32_t far = 1000;
+    std::memcpy(broken.data() + broken.size() - 4, &far, 4);
+    CHECK(refused(two_parts(), broken, source, {}));
+}
+
+TEST_CASE("read_lod_options reads [lods], cook included") {
+    const auto read = [](std::string_view text) {
+        return read_lod_options(core::Config::parse(text).value());
+    };
+    const auto defaults = read("");
+    REQUIRE(defaults.has_value());
+    CHECK(defaults.value().levels == 3);
+    CHECK(defaults.value().cook);
+    const auto set = read("[lods]\nlevels = 2\ncook = false");
+    REQUIRE(set.has_value());
+    CHECK(set.value().levels == 2);
+    CHECK_FALSE(set.value().cook);
+    CHECK_FALSE(read("[lods]\ncook = 1").has_value());
+    CHECK_FALSE(read("[lods]\nlevels = 9").has_value());
 }

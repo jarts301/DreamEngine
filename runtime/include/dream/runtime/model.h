@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dream/animation/animation.h"
+#include "dream/core/config.h"
 #include "dream/core/math/bounds.h"
 #include "dream/core/math/vector.h"
 #include "dream/core/result.h"
@@ -164,7 +165,43 @@ struct LodOptions {
     // A version that keeps more than this fraction of the last one's triangles isn't worth having,
     // and ends the list.
     float min_saving = 0.8f;
+    // Whether the build makes them, with the model cook tool, instead of the runtime as models
+    // load (ADR 0042). Only the build reads it.
+    bool cook = true;
 };
+
+// Reads the [lods] table of a project's configuration:
+//
+//     [lods]
+//     levels = 3          # Versions per part, at most; 0 makes none.
+//     reduction = 0.5     # Each aims for this fraction of the last one's triangles.
+//     min_triangles = 64  # Smaller parts get none.
+//     cook = true         # Made at build time, where the build can.
+[[nodiscard]] core::Result<LodOptions> read_lod_options(const core::Config& config);
+
+// Levels of detail made at build time (ADR 0042): a model's simpler versions, cooked by the model
+// cook tool into a file beside it, which the runtime reads in place of making them as the model
+// loads. The file names the model it was made from, by its size and a hash of its bytes, and the
+// options and geometry it was made with, so a model or setting changed since is noticed, and its
+// versions are made again as it loads.
+inline constexpr std::uint32_t k_cooked_lods_version = 1;
+
+// Where a model's cooked versions are: "models/ball.glb" has "models/ball.lods".
+[[nodiscard]] std::string cooked_lods_path(std::string_view model_path);
+
+// The cooked versions of `data`, which generate_lods has given its versions, made from the model
+// file `source` with `options`.
+[[nodiscard]] std::vector<std::byte> write_cooked_lods(const ModelData& data,
+                                                      std::span<const std::byte> source,
+                                                      const LodOptions& options);
+
+// Gives `data`, parsed from `source` and with its tangents made, the versions cooked for it, as
+// generate_lods would have. Fails, leaving `data` as it was, if they were made from another file,
+// other options, or other geometry, which a change to the engine's model reading can cause.
+[[nodiscard]] core::Result<void> apply_cooked_lods(ModelData& data,
+                                                   std::span<const std::byte> cooked,
+                                                   std::span<const std::byte> source,
+                                                   const LodOptions& options);
 
 // Adds simpler versions of each part to `data`, appending their indices after the others. Parts
 // whose simplifier can't make them simpler enough get fewer, or none.

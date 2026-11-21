@@ -46,6 +46,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0039](0039-sprites-and-tile-maps.md) | 2D sprites, sprite-sheet animation and tile maps, drawn by the renderer modules over the scene |
 | [0040](0040-environment-lighting-and-bloom.md) | Environment lighting from prefiltered HDR images, an eighth texture slot, half-float textures, and bloom |
 | [0041](0041-cascade-blending-battery-limit-and-allocations.md) | Blending between shadow cascades, a frame limit on battery with a display refresh hint, and fewer allocations per frame |
+| [0042](0042-cooked-levels-of-detail.md) | Levels of detail made at build time by a model cook tool, PC-built or from a vcpkg port, checked and with load-time making as the fallback |
 
 ## Template
 

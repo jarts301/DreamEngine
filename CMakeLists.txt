@@ -9,6 +9,7 @@ option(DREAM_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 # from the engine and games altogether, for builds that ship. See docs/adr/0015-profiling.md.
 # Off ships textures as their source PNGs, for checking whether a problem comes from cooking.
 option(DREAM_COOK_TEXTURES "Cook game textures into compressed KTX2 files" ON)
+option(DREAM_COOK_MODELS "Make models' levels of detail at build time (ADR 0042)" ON)
 option(DREAM_PROFILING "Compile profiling zones into the engine and games" ON)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -44,6 +45,10 @@ add_subdirectory(runtime)
 # Tools that run on the build machine, such as packing a PC game's assets.
 if(NOT CMAKE_CROSSCOMPILING)
     add_subdirectory(tools/pack)
+    # Cross-compiled builds, such as Android's, take it from vcpkg instead (ADR 0042).
+    if(DREAM_COOK_MODELS)
+        add_subdirectory(tools/model_cook)
+    endif()
 endif()
 
 if(DREAM_BUILD_SAMPLES)
