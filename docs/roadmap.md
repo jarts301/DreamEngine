@@ -6,7 +6,7 @@ This document has three parts:
   Store and similar stores;
 - the plan to close those gaps, including macOS, iOS and online play.
 
-It reflects the repository on 2026-11-19. The plan is a proposal: each phase gets its own decisions
+It reflects the repository on 2026-11-20. The plan is a proposal: each phase gets its own decisions
 and ADRs when it starts.
 
 ## 1. The rule every plan follows: everything is a module
@@ -28,15 +28,15 @@ Every new feature in this plan follows that rule: networking, store services, an
 editor, analytics and new platforms are each an interface with modules, and a `null` backend
 that lets a game run without it.
 
-### Modular debt in the code today
+### Modular debt, now paid off
 
-A few features grew inside the runtime before this rule was written down. They work, but should
-move behind interfaces:
+A few features grew inside the runtime before this rule was written down. All have since moved
+behind interfaces or choices:
 
-| Feature | Today | Should become |
+| Feature | Was | Now |
 |---|---|---|
-| Crash reports | Built into Core, writing local files | Local capture stays in Core; uploading becomes a `crash_upload` interface: `none`, `sentry`, `backtrace` |
-| Texture cooking | Hard-wired to KTX2 and UASTC in the build | A cooker step per format, chosen like shader formats |
+| Crash reports | Built into Core, writing local files only | Local capture stays in Core; uploading is the `crash_upload` interface: `null`, `sentry`, `backtrace`, sending through the platform (ADR 0043) |
+| Texture cooking | Hard-wired to KTX2 and UASTC in the build | A texture cooker per format, chosen in `[cook]` per platform: `ktx2_uastc`, `ktx2_etc1s`, `none`, or a project's own (ADR 0043) |
 | Game UI glue | `runtime/ui.h` over the `ui` interface | Fine as it is: the backends are already modules |
 
 The 3D renderer was the largest of these. It is now the `renderer` interface, with the `forward`
@@ -126,14 +126,15 @@ saved progress, music and settings, built this way and played on PC and phones.
 | Area | Available now |
 |---|---|
 | Platforms | Windows, and Android phones (arm64, Android 10 and up). Linux builds but is untested. |
-| Graphics | Five graphics APIs; the same picture on each. glTF models, static or skinned and animated, with metallic-roughness PBR materials, normal, occlusion and emissive maps, and opaque, cut-out, blended and double-sided surfaces; one directional light with soft cascaded shadows, and point and spot lights, up to 256 with `forward_plus`; lighting from an HDR environment, which shiny surfaces reflect; HDR with PBR Neutral tone mapping and bloom; frustum culling, instancing and levels of detail made as models load; particles; 2D sprites, sprite-sheet animation and tile maps, with crisp pixel art; debug lines. |
-| Textures | PNG cooked to KTX2, sent to the GPU as BC7 on PC and ASTC on phones. |
+| Graphics | Five graphics APIs; the same picture on each. glTF models, static or skinned and animated, with metallic-roughness PBR materials, normal, occlusion and emissive maps, and opaque, cut-out, blended and double-sided surfaces; one directional light with soft cascaded shadows, and point and spot lights, up to 256 with `forward_plus`; lighting from an HDR environment, which shiny surfaces reflect; HDR with PBR Neutral tone mapping and bloom; frustum culling, instancing and levels of detail, made at build time; particles; 2D sprites, sprite-sheet animation and tile maps, with crisp pixel art; debug lines. |
+| Textures | PNG cooked at build time by a cooker chosen per platform: KTX2 with UASTC, or the smaller ETC1S, sent to the GPU as BC7 on PC and ASTC on phones; or PNG kept as it is, as for pixel art. |
 | Physics | 3D (Jolt or the engine's own impulse solver): bodies, joints, triggers, ray casts. 2D (Box2D or Chipmunk). |
 | Audio | WAV, MP3 and FLAC; streamed music; buses with volumes; sounds placed in 3D. |
 | Interface | Menus and HUDs written in RML and RCSS (RmlUi or the engine's own `markup`); Dear ImGui for debug tools. |
 | Input | Keyboard, mouse, touch and gamepads, bound to named actions in the config, with analog values for sticks and triggers. |
 | Data | Scenes as TOML; saves and settings written to the user folder. |
-| Workflow | Hot reload of shaders, models and textures; profiling; memory budgets; crash reports with stack traces and minidumps; screenshot tests. |
+| Workflow | Hot reload of shaders, models and textures; profiling; memory budgets; crash reports with stack traces and minidumps, uploaded to Sentry or Backtrace from Windows and Android; screenshot tests. |
+| Power | A frame limit, and a lower one on battery, which also asks a phone's display to slow to match. |
 | Shipping | A PC folder with the executable and `assets.pak`; an Android APK signed with the debug key. |
 
 Good fits today: puzzle and physics games, arcade and casual mobile games, 2D platformers and
@@ -171,7 +172,9 @@ maps, tangents from `tangent_generator` (ADR 0033); transparent, cut-out and dou
 `ozz`, `null`, with GPU skinning (ADR 0036); point and spot lights in `forward` and
 `forward_plus` (ADR 0037); particles through `particles`: `cpu`, `null` (ADR 0038); 2D sprites,
 sprite-sheet animation and tile maps with collisions, drawn by `forward` (ADR 0039); environment
-lighting from HDR images and bloom (ADR 0040).
+lighting from HDR images and bloom (ADR 0040); blending between shadow cascades, a frame limit on
+battery and almost no heap allocations per frame (ADR 0041); levels of detail made at build time
+(ADR 0042).
 
 ### 3.2 Tools
 
@@ -179,7 +182,7 @@ lighting from HDR images and bloom (ADR 0040).
 |---|---|---|
 | Project setup | Games live in the engine tree | An installable SDK: `find_package(DreamEngine)`, a `dream new` command and a template |
 | Editor | None | Scene editing, an entity inspector, an asset browser and play-in-editor. It would be a tool program built on the engine, with its panels as modules on `debug_ui` |
-| Asset pipeline | glTF, PNG to KTX2, Slang | Importers for FBX and audio, an asset database with dependencies, per-platform bundles |
+| Asset pipeline | glTF with levels of detail made at build time; PNG to KTX2 by a texture cooker chosen per platform; Slang | Importers for FBX and audio, an asset database with dependencies, per-platform bundles |
 | Release pipeline | CI builds and tests on push (paused for now) | Release builds with symbols kept and uploaded, versioning, signed artifacts, store uploads |
 
 ### 3.3 Store requirements
@@ -221,8 +224,8 @@ lighting from HDR images and bloom (ADR 0040).
 - On the Mac outside the store: notarization and universal binaries (arm64 and x86-64).
 
 **Every store**
-- Age ratings (IARC), store pages, a crash-report backend, analytics if wanted, terms and privacy
-  documents, and a support contact.
+- Age ratings (IARC), store pages, a crash-report backend (uploads to Sentry or Backtrace exist,
+  ADR 0043), analytics if wanted, terms and privacy documents, and a support contact.
 
 ## 4. The plan
 
@@ -261,7 +264,7 @@ on the five PC graphics backends and on a phone.
 | 5 | Input | Focus navigation in `ui` menus for gamepads, an on-screen aiming cursor for pointer-aimed games such as Toppler, rebinding in a settings menu, a check with a real gamepad on a phone | ADR 0035 |
 | 6 | Materials and environment | Reflection probes for interiors, environments prepared at build time, order-independent transparency, antialiased cut-outs, reading `.gltf` files so Blender's images are cooked, half-precision lighting math for phones (PBR costs 1.4 ms of GPU time per frame on the A52s at full screen) | ADR 0033, 0034, 0040 |
 | 7 | Levels of detail | Hand-made versions, such as glTF's `MSFT_lod`, taking priority over made ones | ADR 0032, 0042 |
-| 8 | Checking | Each rendering feature's pictures on an Adreno, a Mali and an Xclipse phone before it is called done. So far the A52s's Adreno is checked for everything, with Vulkan and OpenGL ES; the A57's Xclipse only up to the cascaded shadows (ADR 0029), and no Mali phone yet | All |
+| 8 | Checking | Each rendering feature's pictures on an Adreno, a Mali and an Xclipse phone before it is called done. So far the A52s's Adreno is checked for everything, with Vulkan and OpenGL ES; the A57's Xclipse with Vulkan for the render demo, through environment lighting and bloom (ADR 0040), but not yet the 2D sprites; and no Mali phone yet | All |
 
 ### Phase 13: tools for making games
 
@@ -291,7 +294,8 @@ on the five PC graphics backends and on a phone.
   - out-of-tree `steam` and `google_play`.
 - **Consent and analytics:** a `consent` interface (`null`, `ump`) and `analytics` (`null`,
   `local_log`, an open backend such as PostHog through HTTP).
-- **Crash uploads:** `crash_upload` with `sentry`.
+- **Crash uploads:** done ahead of the phase: `crash_upload` with `sentry`, `backtrace` and
+  `null` (ADR 0043). Left for this phase: a player-facing consent setting, and uploads from Linux.
 - **Player-facing basics:** a settings menu template, display modes, localization, accessibility
   options, input remapping.
 - **Store build artifacts:** AAB, release signing from a keystore outside the repo, target SDK
@@ -384,9 +388,9 @@ of simulated latency and 5% packet loss, and the match stays in sync.
 
 ## 6. Summary
 
-The engine can already ship small, polished 3D games on Windows and Android phones, built from
-modules that swap through configuration, and with the testing, profiling and crash tooling
-professional work needs. Before a commercial release on Steam or Google Play, it most needs:
+The engine can already ship small, polished 3D and 2D games on Windows and Android phones, built
+from modules that swap through configuration, and with the testing, profiling and crash tooling,
+crash uploads included, that professional work needs. Before a commercial release on Steam or Google Play, it most needs:
 - shadows from point and spot lights, reflection probes, and gamepad navigation in menus;
 - a settings menu, localization and store services;
 - release packaging: AAB and real signing on Android, depots on Steam;

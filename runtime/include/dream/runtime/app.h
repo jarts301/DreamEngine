@@ -117,6 +117,11 @@ public:
         return m_surface_size;
     }
 
+    // The platform module, for what App doesn't wrap, such as Platform::post_http.
+    [[nodiscard]] platform::Platform& platform() noexcept {
+        return *m_platform;
+    }
+
     // See platform::Platform::display_scale.
     [[nodiscard]] float display_scale() const {
         return m_platform->display_scale();

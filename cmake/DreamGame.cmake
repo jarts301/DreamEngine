@@ -12,6 +12,14 @@
 #
 # On PC this creates an executable, with the assets copied next to it. On Android it creates
 # libmain.so and, if APPLICATION_ID is given and ANDROID_HOME is set, a <name>_apk target.
+
+include(${CMAKE_CURRENT_LIST_DIR}/DreamCookConfig.cmake)
+
+# Folders of texture cookers (ADR 0043), searched in order: the engine's own, then any a project
+# adds, for a cooker of its own named in its [cook] table.
+set(DREAM_TEXTURE_COOKER_DIRS "${CMAKE_CURRENT_LIST_DIR}/cookers/textures" CACHE STRING
+    "Folders of texture cookers, searched in order")
+
 function(dream_add_game name)
     cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG;APPLICATION_ID;DISPLAY_NAME"
         "SOURCES;SHADERS;ASSETS")
@@ -70,8 +78,10 @@ function(dream_add_game name)
                            "so they are not compiled.")
         endif()
     endif()
+    set(textures_cooked OFF)
     if(DREAM_COOK_TEXTURES)
-        _dream_cook_textures(${name} "${generated_assets}" ${asset_dirs})
+        _dream_cook_textures(${name} "${generated_assets}" "${ARG_CONFIG}" textures_cooked
+            ${asset_dirs})
     endif()
     if(DREAM_COOK_MODELS)
         _dream_cook_models(${name} "${generated_assets}" "${ARG_CONFIG}" ${asset_dirs})
@@ -95,7 +105,7 @@ function(dream_add_game name)
     list(JOIN asset_dirs "|" joined_dirs)
     add_custom_target(${name}_assets
         COMMAND ${CMAKE_COMMAND} "-DSOURCES=${joined_dirs}" "-DDESTINATION=${staged_dir}"
-            "-DCOOKED=${DREAM_COOK_TEXTURES}"
+            "-DCOOKED=${textures_cooked}"
             -P "${DreamEngine_SOURCE_DIR}/cmake/DreamStageAssets.cmake"
         VERBATIM)
     foreach(made IN ITEMS shaders textures models)
@@ -142,7 +152,36 @@ endfunction()
 set(_DREAM_NORMAL_TEXTURE_SUFFIXES "_normal" "_normals" "_nrm")
 set(_DREAM_LINEAR_TEXTURE_SUFFIXES "_orm" "_metallic_roughness" "_mr" "_roughness" "_metallic"
     "_occlusion" "_ao" "_linear")
-function(_dream_cook_textures target output_dir)
+function(_dream_cook_textures target output_dir config out_cooked)
+    # The project's texture cooker for this platform (ADR 0043): a file in one of
+    # DREAM_TEXTURE_COOKER_DIRS, the engine's own first, that defines how each image is cooked.
+    dream_read_cook_config("${config}" "${DREAM_PLATFORM}" cooker)
+    set(cooker_file "")
+    foreach(dir IN LISTS DREAM_TEXTURE_COOKER_DIRS)
+        if(EXISTS "${dir}/${cooker}.cmake")
+            set(cooker_file "${dir}/${cooker}.cmake")
+            break()
+        endif()
+    endforeach()
+    if(NOT cooker_file)
+        message(FATAL_ERROR "${config} names the texture cooker \"${cooker}\", which none of "
+                            "these folders has: ${DREAM_TEXTURE_COOKER_DIRS}")
+    endif()
+    unset(DREAM_TEXTURE_COOKER_NONE)
+    include("${cooker_file}")
+    if(DREAM_TEXTURE_COOKER_NONE)
+        # Textures a cooker made before are removed, or they would be staged and used.
+        file(GLOB_RECURSE stale "${output_dir}/*.ktx2")
+        if(stale)
+            file(REMOVE ${stale})
+        endif()
+        set(${out_cooked} OFF PARENT_SCOPE)
+        return()
+    endif()
+    if(NOT COMMAND dream_texture_cooker_${cooker})
+        message(FATAL_ERROR "${cooker_file} doesn't define dream_texture_cooker_${cooker}()")
+    endif()
+
     file(GLOB ktx_dirs "${VCPKG_INSTALLED_DIR}/*/tools/ktx")
     find_program(DREAM_KTX ktx HINTS ${ktx_dirs} NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
 
@@ -169,23 +208,15 @@ function(_dream_cook_textures target output_dir)
                     break()
                 endif()
             endforeach()
-            if(kind STREQUAL "color")
-                set(color_options --format R8G8B8A8_SRGB --assign-tf srgb)
-            elseif(kind STREQUAL "normal")
-                set(color_options --format R8G8B8A8_UNORM --assign-tf linear --normalize)
-            else()
-                set(color_options --format R8G8B8A8_UNORM --assign-tf linear)
-            endif()
+            cmake_language(CALL dream_texture_cooker_${cooker} ${kind} arguments)
             set(output "${output_dir}/${relative}")
             cmake_path(GET output PARENT_PATH output_parent)
             add_custom_command(
                 OUTPUT "${output}"
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${output_parent}"
-                COMMAND "${DREAM_KTX}" create ${color_options} --encode uastc
-                    --uastc-quality 2 --zstd 18 --generate-mipmap
-                    "${source}" "${output}"
-                DEPENDS "${source}"
-                COMMENT "Cooking ${relative}"
+                COMMAND "${DREAM_KTX}" create ${arguments} "${source}" "${output}"
+                DEPENDS "${source}" "${cooker_file}" "${config}"
+                COMMENT "Cooking ${relative} (${cooker})"
                 VERBATIM)
             list(APPEND outputs "${output}")
         endforeach()
@@ -193,6 +224,7 @@ function(_dream_cook_textures target output_dir)
     if(outputs)
         add_custom_target(${target}_textures DEPENDS ${outputs})
     endif()
+    set(${out_cooked} ON PARENT_SCOPE)
 endfunction()
 
 # Makes every .glb model's levels of detail with the model cook tool, into a .lods file of the same
@@ -368,6 +400,9 @@ function(_dream_add_apk name native_dir asset_dirs application_id display_name)
         set(gradle_task assembleRelease)
     endif()
 
+    dream_module_android_permissions(${name} permissions)
+    list(JOIN permissions "," permissions)
+
     set(output_dir "${CMAKE_CURRENT_BINARY_DIR}/${name}_apk")
     add_custom_target(${name}_apk
         COMMAND ${CMAKE_COMMAND} -E env "ANDROID_HOME=$ENV{ANDROID_HOME}"
@@ -378,6 +413,7 @@ function(_dream_add_apk name native_dir asset_dirs application_id display_name)
             "-PdreamNativeDir=${native_dir}"
             "-PdreamAssetDirs=${asset_dirs}"
             "-PdreamJavaDirs=${java_dirs}"
+            "-PdreamPermissions=${permissions}"
             ${gradle_task}
         WORKING_DIRECTORY "${DreamEngine_SOURCE_DIR}/templates/android"
         COMMENT "Packaging ${name} as an APK in ${output_dir}/app/outputs/apk"

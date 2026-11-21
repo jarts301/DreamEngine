@@ -13,6 +13,9 @@ quit = ["key:escape"]
 platform = ["null"]
 input_device = ["null"]
 profiler = ["null"]
+# Neither uploader is set up here, so both are passed over for null: this builds them and their
+# tests, and checks a game still runs when its uploads can't be set up (ADR 0043).
+crash_upload = ["sentry", "backtrace", "null"]
 
 [modules.android]
 platform = ["null"]

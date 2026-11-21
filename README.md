@@ -269,8 +269,19 @@ where the game fills the screen.
 
 PNG files in a `textures` folder among a game's assets are cooked at build time into KTX2 files,
 which the game transcodes to BC7 on PCs and ASTC on phones, with their mipmaps made in advance. A
-model that names `textures/crate.png` loads the cooked `textures/crate.ktx2`. Configure with
-`-DDREAM_COOK_TEXTURES=OFF` to ship the PNGs instead.
+model that names `textures/crate.png` loads the cooked `textures/crate.ktx2`. A project picks its
+texture cooker in `dream.toml`, for every platform or one, such as smaller ETC1S files on phones:
+
+```toml
+[cook]
+textures = "ktx2_uastc"      # The default. Or "ktx2_etc1s", smaller; or "none", the PNGs.
+
+[cook.android]
+textures = "ktx2_etc1s"
+```
+
+Configure with `-DDREAM_COOK_TEXTURES=OFF` to ship the PNGs for every game. See
+[ADR 0043](docs/adr/0043-crash-uploads-and-texture-cookers.md).
 
 On PC, `cmake --build <folder> --target <game>_package` puts the program and an `assets.pak`
 holding all its assets in `<game>_package/`, ready to hand out. See
@@ -357,6 +368,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 | `debug_ui` | `imgui`, `null` | all | all | |
 | `platform` | `sdl3`, `null` | all | all | |
 | `profiler` | `timeline`, `null` | all | all | `timeline` saves a trace to open in Perfetto; see [Profiling](#profiling). |
+| `crash_upload` | `sentry`, `backtrace`, `null` | all | all | Uploads saved crash reports in the background at the next start; Windows and Android. Optional; see [crash reports](docs/reports/crash-reports.md). |
 
 ```toml
 [modules.windows]

@@ -11,6 +11,7 @@ add_library(dream_runtime STATIC
     src/animation.cpp
     src/audio.cpp
     src/crash_reports.cpp
+    src/crash_uploads.cpp
     src/debug_lines.cpp
     src/environment.cpp
     src/event_bus.cpp
@@ -46,6 +47,7 @@ target_link_libraries(dream_runtime PUBLIC
     dream::interface_debug_ui dream::interface_profiler dream::interface_renderer
     dream::interface_mesh_simplifier dream::interface_tangent_generator
     dream::interface_input_device dream::interface_animation dream::interface_particles
+    dream::interface_crash_upload
     EnTT::EnTT)
 target_link_libraries(dream_runtime PRIVATE KTX::ktx)
 dream_configure_target(dream_runtime)
@@ -59,6 +61,7 @@ if(DREAM_BUILD_TESTS)
             tests/asset_manager_test.cpp
             tests/audio_test.cpp
             tests/crash_reports_test.cpp
+            tests/crash_uploads_test.cpp
             tests/environment_test.cpp
             tests/event_bus_test.cpp
             tests/gamepad_test.cpp
