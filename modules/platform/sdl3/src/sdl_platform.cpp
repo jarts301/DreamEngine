@@ -2,6 +2,7 @@
 #include "dream/core/log.h"
 #include "dream/core/module_registry.h"
 #include "dream/platform/platform.h"
+#include "http_post.h"
 
 #define SDL_MAIN_HANDLED
 #include <SDL3/SDL.h>
@@ -312,6 +313,10 @@ public:
 #else
         static_cast<void>(frames_per_second);
 #endif
+    }
+
+    core::Result<platform::HttpResponse> post_http(const platform::HttpRequest& request) override {
+        return sdl3::post_http(request);
     }
 
     // Modification times, in nanoseconds. Assets inside the APK or an archive have none.

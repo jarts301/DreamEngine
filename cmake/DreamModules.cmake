@@ -42,9 +42,13 @@ endfunction()
 #
 # A backend that draws with its own shaders, such as a renderer, lists their Slang files in SHADERS,
 # and every game that links it compiles them with its own (ADR 0030).
+#
+# A backend that needs an Android permission, such as one that uses the network, lists it in
+# ANDROID_PERMISSIONS, by its name after "android.permission.", such as INTERNET. A game's APK asks
+# for the permissions of the backends it links, and no others (ADR 0043).
 function(dream_add_module interface backend)
     cmake_parse_arguments(PARSE_ARGV 2 ARG "" "SHADER_SUFFIX;SHADER_TARGET;SHADER_PROFILE"
-        "SOURCES;LIBRARIES;SHADERS")
+        "SOURCES;LIBRARIES;SHADERS;ANDROID_PERMISSIONS")
 
     set(target dream_module_${interface}_${backend})
     add_library(${target} STATIC ${ARG_SOURCES})
@@ -71,6 +75,25 @@ function(dream_add_module interface backend)
         list(APPEND shaders "${shader}")
     endforeach()
     set_target_properties(${target} PROPERTIES DREAM_MODULE_SHADERS "${shaders}")
+    set_target_properties(${target} PROPERTIES DREAM_ANDROID_PERMISSIONS "${ARG_ANDROID_PERMISSIONS}")
+endfunction()
+
+# Usage: dream_module_android_permissions(<target> <out-var>)
+#
+# Lists the Android permissions that the modules linked into <target> ask for, each once.
+function(dream_module_android_permissions target out_var)
+    get_target_property(module_targets ${target} DREAM_MODULE_TARGETS)
+    set(permissions "")
+    if(module_targets)
+        foreach(module_target IN LISTS module_targets)
+            get_target_property(asked ${module_target} DREAM_ANDROID_PERMISSIONS)
+            if(asked)
+                list(APPEND permissions ${asked})
+            endif()
+        endforeach()
+        list(REMOVE_DUPLICATES permissions)
+    endif()
+    set(${out_var} "${permissions}" PARENT_SCOPE)
 endfunction()
 
 # Usage: dream_module_shader_formats(<target> <out-var>)

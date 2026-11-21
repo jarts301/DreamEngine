@@ -7,6 +7,7 @@
 #include "dream/rhi/rhi.h"
 #include "dream/runtime/app.h"
 #include "dream/runtime/crash_reports.h"
+#include "dream/runtime/crash_uploads.h"
 #include "dream/runtime/game.h"
 #include "dream/runtime/profiling.h"
 
@@ -87,6 +88,31 @@ int run_program() {
     if (game == nullptr) {
         DREAM_LOG_ERROR("create_game returned null");
         return 1;
+    }
+
+    // Reports that earlier runs saved, uploaded in the background while the game runs (ADR 0043).
+    // Destroyed before the game and the App, waiting for an upload under way.
+    std::unique_ptr<CrashUploads> crash_uploads;
+    if (project.value().is_configured<crash_upload::CrashUploader>()) {
+        core::Result<CrashUploads::Settings> settings =
+            CrashUploads::read_settings(project.value().config());
+        if (!settings.has_value()) {
+            DREAM_LOG_ERROR("{}", settings.error().message);
+            return 1;
+        }
+        settings.value().directory = crash_config.value().directory;
+        settings.value().application = std::string(
+            project.value().config().get_string("app.title").value_or("Dream Engine"));
+        settings.value().platform = std::string(project.value().platform());
+        core::Result<core::CreatedModule<crash_upload::CrashUploader>> uploader =
+            project.value().create<crash_upload::CrashUploader>();
+        if (uploader.has_value()) {
+            crash_uploads = std::make_unique<CrashUploads>(std::move(uploader.value().instance),
+                                                           app.platform(), settings.value());
+        } else {
+            // A game whose uploads can't be set up still runs.
+            DREAM_LOG_WARNING("Crash reports won't be uploaded: {}", uploader.error().message);
+        }
     }
 
     if (const core::Result<void> result = app.run(*game); !result.has_value()) {

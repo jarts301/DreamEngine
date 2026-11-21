@@ -61,6 +61,9 @@ from it when it is next to the program, and from the assets folder otherwise. `d
 it, and `core::ArchiveReader` and `ArchiveWriter` hold the format. On Android, the APK is the
 package.
 
+ADR 0043 makes this one of several texture cookers, `ktx2_uastc`, the default, which a project
+chooses per platform in its `[cook]` table.
+
 ## Consequences
 
 - The samples' textures load as BC7 on an RTX 5080, with all three graphics APIs, and as ASTC 4x4

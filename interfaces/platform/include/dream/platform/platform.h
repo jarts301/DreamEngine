@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace dream::platform {
@@ -43,6 +44,22 @@ enum class FileRoot : std::uint8_t {
 // The operating system, as seen by the engine: a window, its events and file storage.
 //
 // All functions must be called from the thread that created the Platform.
+// An HTTPS request a platform sends for the engine, such as a crash report's upload (ADR 0043).
+struct HttpRequest {
+    std::string url;
+    // Name and value of each header, such as {"Content-Type", "application/json"}.
+    std::vector<std::pair<std::string, std::string>> headers;
+    std::vector<std::byte> body;
+    // How long to wait for the server, for connecting and for its answer each.
+    std::uint32_t timeout_seconds = 20;
+};
+
+struct HttpResponse {
+    // The HTTP status, such as 200.
+    int status = 0;
+    std::string body;
+};
+
 class Platform {
 public:
     static constexpr std::string_view k_module_interface = "platform";
@@ -101,6 +118,13 @@ public:
     // which saves power where the screen is faster than the game runs, as on 120 Hz phones; 0
     // lets the display choose again. Does nothing where the platform can't, which is the default.
     virtual void set_frame_rate_hint(float /*frames_per_second*/) {}
+
+    // An optional capability: sends a POST request and waits for the answer, from any thread.
+    // Fails where the platform can't, which is the default, and when the network does. An Android
+    // game needs its modules to ask for the INTERNET permission (dream_add_module).
+    [[nodiscard]] virtual core::Result<HttpResponse> post_http(const HttpRequest& /*request*/) {
+        return core::Error{core::ErrorCode::Unknown, "This platform can't send HTTP requests"};
+    }
 };
 
 } // namespace dream::platform

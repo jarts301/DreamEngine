@@ -37,6 +37,21 @@ android {
     }
 
     sourceSets.getByName("main") {
+        // The permissions the game's modules ask for, such as INTERNET for one that uploads crash
+        // reports, added to a copy of the manifest. A game whose modules ask for none gets it as
+        // it is.
+        val permissions = dreamProperty("dreamPermissions").split(",").filter { it.isNotEmpty() }
+        if (permissions.isNotEmpty()) {
+            val lines = permissions.joinToString("") {
+                "    <uses-permission android:name=\"android.permission.$it\" />\n"
+            }
+            val manifest = file("src/main/AndroidManifest.xml").readText()
+                .replaceFirst("\n    <application", "\n" + lines + "\n    <application")
+            val copy = file(dreamProperty("dreamBuildDir") + "/manifest/AndroidManifest.xml")
+            copy.parentFile.mkdirs()
+            copy.writeText(manifest)
+            this.manifest.srcFile(copy)
+        }
         java.srcDirs(dreamProperty("dreamJavaDirs").split(",").filter { it.isNotEmpty() })
         jniLibs.srcDir(dreamProperty("dreamNativeDir"))
         assets.srcDirs(dreamProperty("dreamAssetDirs").split(",").filter { it.isNotEmpty() })

@@ -167,7 +167,42 @@ All optional, under `[crash_report]`:
 | `simulate` | `"none"` | Crashes the game on purpose, to try the reports (section 1) |
 | `simulate_after_frames` | `300` | The crash happens in the frame after this many |
 
+Uploading has its own `[crash_upload]` table, below.
+
 If the folder can't be created, the game still runs, without crash reports, and the log says so.
+
+### Uploading reports
+
+With a `crash_upload` module listed, the next start of the game uploads the reports earlier runs
+saved, in the background, and moves each into a `sent` folder once its service has it
+([ADR 0043](../adr/0043-crash-uploads-and-texture-cookers.md)). Windows and Android only.
+
+```toml
+[modules.windows]
+crash_upload = ["sentry", "null"]      # Or "backtrace". Without a setup, falls back to null.
+
+[modules.android]
+crash_upload = ["sentry", "null"]      # Also makes the APK ask for INTERNET.
+
+[crash_upload]
+enabled = true                          # All optional.
+max_reports = 5                         # Uploaded per start, oldest first.
+
+[crash_upload.sentry]
+dsn = "https://<public key>@<host>/<project id>"   # The project's Client Keys page.
+environment = "production"                          # Optional.
+
+[crash_upload.backtrace]
+url = "https://submit.backtrace.io/<universe>/<token>"   # The project's submission URL.
+```
+
+- **Sentry** gets Windows minidumps, which it symbolicates with the game's PDB files once they are
+  uploaded to the project, and Android reports as fatal events. Each has its text report attached.
+- **Backtrace** gets minidumps the same way, and Android reports as JSON crashes, the report as an
+  annotation.
+- A report that fails, usually for the network, stays, and is tried at the next start.
+- **Ask players first** where the law requires it: reports list the device's modules and memory,
+  and the log's last lines. List a module that sends only in builds where players agreed.
 
 ## 5. How it works
 

@@ -37,6 +37,10 @@ struct FakeState {
     // What on_battery reports, and the refresh rates asked of the display, in order.
     std::optional<bool> on_battery;
     std::vector<float> frame_rate_hints;
+    // What post_http answers, and the URLs it was sent, in order.
+    int http_status = 200;
+    bool http_offline = false;
+    std::vector<std::string> http_urls;
 };
 
 class FakePlatform final : public platform::Platform {
@@ -102,6 +106,14 @@ public:
 
     std::optional<bool> on_battery() override {
         return m_state.on_battery;
+    }
+
+    core::Result<platform::HttpResponse> post_http(const platform::HttpRequest& request) override {
+        m_state.http_urls.push_back(request.url);
+        if (m_state.http_offline) {
+            return core::Error{core::ErrorCode::IoError, "offline"};
+        }
+        return platform::HttpResponse{.status = m_state.http_status, .body = {}};
     }
 
     void set_frame_rate_hint(float frames_per_second) override {
