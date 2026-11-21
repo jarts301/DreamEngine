@@ -345,6 +345,8 @@ struct Settings {
     std::uint32_t shadow_resolution = 0;
     std::uint32_t shadow_cascades = 0;
     float shadow_distance = 40.0f;
+    // How much of each cascade's range, at its far end, blends into the next one's shadows.
+    float shadow_blend = 0.1f;
     bool culling = true;
     // How many pixels a simpler version of a part may stray on screen; 0 always draws the full one.
     float lod_error = 1.0f;
@@ -465,6 +467,13 @@ core::Result<Settings> read_settings(const core::Config& config, const rhi::Devi
                                          distance));
     }
     settings.shadow_distance = static_cast<float>(distance);
+    const double blend = config.get_float("renderer.shadows.blend").value_or(0.1);
+    if (!(blend >= 0.0 && blend <= 0.5)) {
+        return setting_error(std::format("Setting 'renderer.shadows.blend' must be from 0 to 0.5, "
+                                         "not {}",
+                                         blend));
+    }
+    settings.shadow_blend = static_cast<float>(blend);
 
     const double lod_error = config.get_float("renderer.lod_error").value_or(1.0);
     if (!(lod_error >= 0.0 && lod_error <= 100.0)) {
@@ -656,7 +665,8 @@ void fit_cascades(FrameUniforms& frame, const View& camera, Vec3 light_direction
     if (const std::optional<Mat4> clip_to_world = core::inverse(camera.view_projection)) {
         const Vec4 middle = *clip_to_world * Vec4{0.0f, 0.0f, 0.0f, 1.0f};
         const Vec3 point = Vec3{middle.x, middle.y, middle.z} * (1.0f / middle.w);
-        frame.camera_forward = extend(core::normalized(point - camera.eye), 0.0f);
+        frame.camera_forward =
+            extend(core::normalized(point - camera.eye), settings.shadow_blend);
     }
 }
 
@@ -904,6 +914,7 @@ private:
     std::vector<LightReach> m_light_reach;
     std::vector<std::uint32_t> m_cluster_counts;
     std::vector<std::uint32_t> m_cluster_starts;
+    std::vector<std::uint32_t> m_cluster_limits;
     std::vector<std::pair<float, std::uint32_t>> m_light_order;
     // One texel pointing straight out of the surface, for parts without a normal map.
     OwnedTexture m_flat_normal;
@@ -1760,7 +1771,8 @@ bool ForwardRenderer::prepare_lights(const Frame& frame, FrameStats& stats) {
     }
     // The lists, filled in the order the counts were made, so each stays within its count.
     std::vector<std::uint32_t>& filled = m_cluster_counts;
-    std::vector<std::uint32_t> limits = filled;
+    std::vector<std::uint32_t>& limits = m_cluster_limits;
+    limits.assign(filled.begin(), filled.end());
     std::ranges::fill(filled, 0);
     for (const LightReach& reach : m_light_reach) {
         for (std::uint32_t z = reach.low[2]; z <= reach.high[2]; ++z) {

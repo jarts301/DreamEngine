@@ -62,6 +62,9 @@ public:
 
 private:
     Registry m_registry;
+    // For update_transforms: by entity index, the update in which each was last worked out.
+    std::vector<std::uint32_t> m_resolved;
+    std::uint32_t m_resolve_pass = 0;
 };
 
 } // namespace dream::runtime

@@ -90,6 +90,17 @@ public:
                                                                    std::string_view /*path*/) {
         return std::nullopt;
     }
+
+    // An optional capability: whether the device runs on its battery now, unplugged. Nothing when
+    // the platform can't tell, which is the default. It may take a moment, so ask now and then.
+    [[nodiscard]] virtual std::optional<bool> on_battery() {
+        return std::nullopt;
+    }
+
+    // An optional capability: asks the display to refresh at about this many frames a second,
+    // which saves power where the screen is faster than the game runs, as on 120 Hz phones; 0
+    // lets the display choose again. Does nothing where the platform can't, which is the default.
+    virtual void set_frame_rate_hint(float /*frames_per_second*/) {}
 };
 
 } // namespace dream::platform

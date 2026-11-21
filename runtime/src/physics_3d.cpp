@@ -461,8 +461,8 @@ void Physics3D::step(float step_seconds) {
 
     // Copied first, because a listener may add or remove bodies.
     const std::span<const ContactEvent> raw = m_backend->contact_events();
-    std::vector<Contact3D> contacts;
-    contacts.reserve(raw.size());
+    std::vector<Contact3D>& contacts = m_contacts;
+    contacts.clear();
     m_contact_points.clear();
     for (const ContactEvent& event : raw) {
         contacts.push_back(Contact3D{

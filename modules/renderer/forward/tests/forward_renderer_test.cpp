@@ -1037,3 +1037,27 @@ TEST_CASE_FIXTURE(Fixture, "The forward renderer lights the scene from its envir
         CHECK(environment[0] == Approx(0.0f));
     }
 }
+
+TEST_CASE_FIXTURE(Fixture, "The forward renderer blends shadow cascades over the end of each") {
+    state.render_target_formats = {rhi::TextureFormat::Depth32Float};
+    const std::array meshes{mesh(0)};
+    const auto blend_sent = [&] {
+        draw(Frame{.size = k_size, .view = view_from({0, 3, 8}), .sun = Sunlight{},
+                   .meshes = meshes});
+        // The camera's forward direction is the uniforms' second to last vector; w is the blend.
+        float blend = -1.0f;
+        std::memcpy(&blend, state.last_uniforms.data() + 480 + 12, sizeof(float));
+        return blend;
+    };
+    SUBCASE("by default, a tenth of each cascade's range") {
+        start("[renderer.shadows]\nmode = \"on\"\ncascades = 3");
+        CHECK(blend_sent() == Approx(0.1f));
+    }
+    SUBCASE("as set") {
+        start("[renderer.shadows]\nmode = \"on\"\ncascades = 3\nblend = 0.25");
+        CHECK(blend_sent() == Approx(0.25f));
+    }
+    SUBCASE("not past half") {
+        CHECK_FALSE(make("[renderer.shadows]\nblend = 0.8").value()->start(device).has_value());
+    }
+}

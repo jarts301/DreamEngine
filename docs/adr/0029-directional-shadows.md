@@ -25,6 +25,7 @@ mode = "auto"         # "auto", "on" or "off".
 resolution = 0        # Each cascade's width and height; 0 picks one per device.
 cascades = 0          # From 1 to 4; 0 picks one per device.
 distance = 40.0       # How far from the camera shadows reach, in world units.
+blend = 0.1           # How much of each cascade's range blends into the next (ADR 0041).
 ```
 
 `DirectionalLight::casts_shadows` turns them off for a light, and `MeshRenderer::casts_shadows`

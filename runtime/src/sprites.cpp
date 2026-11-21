@@ -554,7 +554,9 @@ void gather_sprites(const World& world, const Mat4& view, std::vector<renderer::
         std::uint32_t id = 0;
         Entity entity = k_no_entity;
     };
-    std::vector<Item> items;
+    // Kept from call to call, so gathering allocates nothing once they have grown.
+    thread_local std::vector<Item> items;
+    items.clear();
     for (const auto [entity, sprite] : registry.view<const SpriteRenderer>().each()) {
         if (sprite.visible && registry.all_of<WorldTransform>(entity)) {
             items.push_back(Item{sprite.layer, sprite.order, false,
@@ -594,7 +596,8 @@ void gather_sprites(const World& world, const Mat4& view, std::vector<renderer::
         std::uint32_t height = 1;
         renderer::SpriteFilter filter = renderer::SpriteFilter::Pixel;
     };
-    std::vector<Run> runs;
+    thread_local std::vector<Run> runs;
+    runs.clear();
     const auto add = [&](const renderer::SpriteQuad& quad, const AssetRef<TextureAsset>& texture,
                          renderer::SpriteFilter filter) {
         const rhi::TextureHandle handle = texture ? texture->texture.get() : rhi::TextureHandle{};

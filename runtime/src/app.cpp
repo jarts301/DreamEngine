@@ -129,6 +129,10 @@ core::Result<void> App::attach_surface() {
     core::Result<void> attached =
         m_device->attach_surface(m_platform->native_window(), m_surface_size);
     m_surface_attached = attached.has_value();
+    // A new surface forgets the rate asked of the last one.
+    if (m_surface_attached && m_frame_rate_hint > 0.0f) {
+        m_platform->set_frame_rate_hint(m_frame_rate_hint);
+    }
     return attached;
 }
 
@@ -188,6 +192,11 @@ core::Result<void> App::run(Game& game) {
         read_setting(m_config, "app.max_fps", m_device != nullptr ? 0 : 60, 0);
     if (!max_fps.has_value()) {
         return max_fps.error();
+    }
+    const core::Result<std::uint32_t> battery_fps =
+        read_setting(m_config, "app.max_fps_on_battery", 0, 0);
+    if (!battery_fps.has_value()) {
+        return battery_fps.error();
     }
     const core::Result<std::uint32_t> fixed_rate = read_setting(m_config, "app.fixed_rate", 60, 1);
     if (!fixed_rate.has_value()) {
@@ -286,10 +295,33 @@ core::Result<void> App::run(Game& game) {
     }
 
     using Duration = std::chrono::steady_clock::duration;
-    const Duration frame_period =
-        max_fps.value() == 0 ? Duration::zero()
-                             : std::chrono::duration_cast<Duration>(
-                                   std::chrono::duration<double>(1.0 / max_fps.value()));
+    // The limit in force, which a battery limit lowers while the device is unplugged.
+    std::uint32_t frame_limit = 0;
+    bool limit_applied = false;
+    Duration frame_period = Duration::zero();
+    const auto apply_limit = [&](std::uint32_t limit) {
+        if (limit_applied && limit == frame_limit) {
+            return;
+        }
+        limit_applied = true;
+        frame_limit = limit;
+        frame_period = limit == 0 ? Duration::zero()
+                                  : std::chrono::duration_cast<Duration>(
+                                        std::chrono::duration<double>(1.0 / limit));
+        // With a graphics device, the display is asked to match, where it can.
+        if (m_device != nullptr) {
+            m_frame_rate_hint = static_cast<float>(limit);
+            m_platform->set_frame_rate_hint(m_frame_rate_hint);
+        }
+        if (limit != 0) {
+            DREAM_LOG_INFO("Frames are limited to {} per second", limit);
+        }
+    };
+    apply_limit(max_fps.value());
+    const bool battery_limit =
+        battery_fps.value() != 0 &&
+        (max_fps.value() == 0 || battery_fps.value() < max_fps.value());
+    core::TimePoint next_battery_check = core::now();
 
     core::Clock clock;
     core::TimePoint next_frame = core::now();
@@ -408,6 +440,13 @@ core::Result<void> App::run(Game& game) {
                                           "[screenshot] asked for a frame, but none was drawn"};
                     break;
                 }
+            }
+
+            // On battery, the lower limit, checked every few seconds as it costs a moment.
+            if (battery_limit && core::now() >= next_battery_check) {
+                next_battery_check = core::now() + std::chrono::seconds(3);
+                const bool unplugged = m_platform->on_battery().value_or(false);
+                apply_limit(unplugged ? battery_fps.value() : max_fps.value());
             }
 
             // Stops the loop using a whole CPU core when nothing else sets the pace.

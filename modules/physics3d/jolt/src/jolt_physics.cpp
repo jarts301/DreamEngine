@@ -251,12 +251,12 @@ public:
                                         pair.GetBody2ID(), core::Vec3{}, core::Vec3{}});
     }
 
-    // Called on the main thread, while no step is running.
-    std::vector<RawContact> take() {
+    // Called on the main thread, while no step is running. Swapped with `into`, which is cleared
+    // first, so both lists keep their memory from step to step.
+    void take(std::vector<RawContact>& into) {
         const std::lock_guard lock(m_mutex);
-        std::vector<RawContact> taken;
-        taken.swap(m_contacts);
-        return taken;
+        into.clear();
+        into.swap(m_contacts);
     }
 
 private:
@@ -516,7 +516,8 @@ public:
         }
 
         m_events.clear();
-        for (const RawContact& contact : m_contacts.take()) {
+        m_contacts.take(m_taken_contacts);
+        for (const RawContact& contact : m_taken_contacts) {
             const BodyIdentity* const a = identity(contact.body_a);
             const BodyIdentity* const b = identity(contact.body_b);
             if (a == nullptr || b == nullptr) {
@@ -677,6 +678,7 @@ private:
     JPH::TempAllocatorImpl m_temp_allocator;
     JPH::JobSystemThreadPool m_job_system;
     ContactCollector m_contacts;
+    std::vector<RawContact> m_taken_contacts;
     JPH::PhysicsSystem m_system;
 
     core::HandlePool<BodyRecord> m_bodies;

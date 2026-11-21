@@ -33,6 +33,8 @@ namespace dream::runtime {
 //     height = 720
 //     max_fps = 60     # 0 means no limit. Defaults to 60, or no limit with a graphics device,
 //                      # whose vertical sync already sets the pace.
+//     max_fps_on_battery = 60   # Optional: a lower limit while the device runs on battery,
+//                               # checked every few seconds. 0, the default, keeps max_fps.
 //     fixed_rate = 60  # How many times per second Game::on_fixed_update runs. Defaults to 60.
 //
 // With a profiler installed, it also records frame timing and resources (see
@@ -199,6 +201,8 @@ private:
     bool m_paused = false;
     bool m_has_surface = true;
     bool m_surface_attached = false;
+    // The refresh rate asked of the display for the frame-rate limit, 0 for none.
+    float m_frame_rate_hint = 0.0f;
     MemoryPressure m_memory_pressure = MemoryPressure::Normal;
     bool m_refuse_loads_when_critical = true;
 };

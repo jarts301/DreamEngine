@@ -260,9 +260,9 @@ and the remaining platforms.
      prepared at build time, order-independent transparency, antialiased cut-outs, reading `.gltf` files
      so Blender's images are cooked, and half-precision lighting math for phones (PBR costs 1.4 ms
      of GPU time per frame on the A52s at full screen; see the Android performance report).
-  7. Smaller items: blending between shadow cascades, a frame-rate cap, removing the ~13
-     allocations per frame found on the A52s, and cooking levels of detail at build time instead of
-     when models load.
+  7. Cooking levels of detail at build time instead of when models load, which needs phone
+     builds to run a tool on the build machine. Blending between shadow cascades, a frame limit
+     on battery and removing the allocations per frame are done (ADR 0041).
   8. A phone check per GPU family: run the render samples' pictures on Adreno, Mali and Xclipse
      phones before a rendering feature is called done. The cascaded shadows went unseen on Adreno
      for a day, because only the A57's Xclipse GPU had been checked (ADR 0029). The PBR materials

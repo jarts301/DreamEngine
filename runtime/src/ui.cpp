@@ -147,9 +147,10 @@ void UserInterface::update(App& app, float delta_seconds) {
     DREAM_PROFILE_ZONE("Interface update");
     m_renderer->release_ui_textures();
     m_backend->update(frame_info(app, delta_seconds, m_origin));
-    // Copied first, because a listener may change the interface.
-    const std::vector<ui::UiEvent> events(m_backend->events().begin(), m_backend->events().end());
-    for (const ui::UiEvent& event : events) {
+    // Copied first, because a listener may change the interface, into a list kept from frame to
+    // frame.
+    m_events.assign(m_backend->events().begin(), m_backend->events().end());
+    for (const ui::UiEvent& event : m_events) {
         app.events().publish(UiEventPublished{event});
     }
     m_renderer->set_ui_layer(UiLayer::Game, m_backend->render(), m_origin);

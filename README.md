@@ -97,7 +97,8 @@ See [ADR 0028](docs/adr/0028-hdr-and-tone-mapping.md).
 
 The sun casts shadows, in cascades: four of 2048x2048 on PCs, and three of 1024x1024 on phones with at
 least 4 GB of memory, with soft edges. `[renderer.shadows]` sets `mode` (`auto`, `on` or `off`),
-`resolution`, `cascades` and `distance`, and lights and meshes take `casts_shadows = false`. See
+`resolution`, `cascades`, `distance` and `blend`, the part of each cascade that blends into the
+next, and lights and meshes take `casts_shadows = false`. See
 [ADR 0029](docs/adr/0029-directional-shadows.md).
 
 Parts of models out of the camera's view are skipped, and so are shadow casters outside each

@@ -3,7 +3,7 @@
 #include "dream/core/profile.h"
 
 #include <cstddef>
-#include <unordered_set>
+#include <algorithm>
 #include <vector>
 
 namespace dream::runtime {
@@ -14,17 +14,24 @@ core::Mat4 local_matrix(const Transform& transform) {
 }
 
 // Works out a parented entity's matrix, after its parent's. `done` avoids repeating shared parents.
-const core::Mat4& resolve(Registry& registry, Entity entity, std::unordered_set<Entity>& done) {
+// `done` holds, by entity index, the pass in which each entity was last resolved.
+const core::Mat4& resolve(Registry& registry, Entity entity, std::vector<std::uint32_t>& done,
+                          std::uint32_t pass) {
     WorldTransform& world = registry.get<WorldTransform>(entity);
-    if (!done.insert(entity).second) {
+    const auto index = static_cast<std::size_t>(entt::to_entity(entity));
+    if (index >= done.size()) {
+        done.resize(index + 1, 0);
+    }
+    if (done[index] == pass) {
         return world.matrix;
     }
+    done[index] = pass;
 
     const core::Mat4 local = local_matrix(registry.get<Transform>(entity));
     const Parent* const parent = registry.try_get<Parent>(entity);
     if (parent != nullptr && registry.valid(parent->entity) &&
         registry.all_of<Transform, WorldTransform>(parent->entity)) {
-        world.matrix = resolve(registry, parent->entity, done) * local;
+        world.matrix = resolve(registry, parent->entity, done, pass) * local;
     } else {
         world.matrix = local;
     }
@@ -103,9 +110,14 @@ void World::update_transforms() {
         ++updated;
     }
 
-    std::unordered_set<Entity> done;
+    // A new pass number marks every entity unresolved without clearing anything, and the list
+    // keeps its size, so updates allocate nothing once it has grown.
+    if (++m_resolve_pass == 0) {
+        std::ranges::fill(m_resolved, 0);
+        m_resolve_pass = 1;
+    }
     for (const auto entity : m_registry.view<Parent, Transform, WorldTransform>()) {
-        resolve(m_registry, entity, done);
+        resolve(m_registry, entity, m_resolved, m_resolve_pass);
         ++updated;
     }
     // Every entity with a Transform, which in practice is every entity.
