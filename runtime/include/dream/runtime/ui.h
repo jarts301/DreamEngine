@@ -105,6 +105,8 @@ private:
     std::vector<Subscription> m_subscriptions;
     core::Vec2 m_origin;
     bool m_text_input = false;
+    // The backend's events of the last update, copied before they are published.
+    std::vector<ui::UiEvent> m_events;
 };
 
 } // namespace dream::runtime

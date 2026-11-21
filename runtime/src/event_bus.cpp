@@ -65,10 +65,13 @@ void EventBus::dispatch(const void* type, const void* event) {
 }
 
 void EventBus::flush() {
-    const std::vector<std::function<void()>> pending = std::exchange(m_queue, {});
-    for (const auto& deliver : pending) {
+    // Swapped, so both lists keep their memory from frame to frame, and events queued while these
+    // are delivered wait for the next flush.
+    m_delivering.swap(m_queue);
+    for (const auto& deliver : m_delivering) {
         deliver();
     }
+    m_delivering.clear();
 }
 
 } // namespace dream::runtime

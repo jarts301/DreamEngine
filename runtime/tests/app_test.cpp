@@ -462,6 +462,32 @@ TEST_CASE("App limits the frame rate when asked") {
     CHECK(stopwatch.elapsed_seconds() >= 0.04);
 }
 
+TEST_CASE("App limits frames on battery, and asks the display to match") {
+    const auto config = core::Config::parse("[app]\nmax_fps = 0\nmax_fps_on_battery = 50");
+    REQUIRE(config.has_value());
+
+    SUBCASE("on battery") {
+        RenderRun run;
+        run.state.on_battery = true;
+        const core::Stopwatch stopwatch;
+        REQUIRE(run.go({k_end_of_frame, k_end_of_frame, k_end_of_frame, k_end_of_frame},
+                       config.value())
+                    .has_value());
+        // Four frames at 20 ms each, and the display asked for 50 Hz.
+        CHECK(stopwatch.elapsed_seconds() >= 0.06);
+        REQUIRE_FALSE(run.state.frame_rate_hints.empty());
+        CHECK(run.state.frame_rate_hints.back() == doctest::Approx(50.0f));
+    }
+    SUBCASE("plugged in") {
+        RenderRun run;
+        run.state.on_battery = false;
+        REQUIRE(run.go({k_end_of_frame, k_end_of_frame}, config.value()).has_value());
+        // No limit: the display chooses.
+        REQUIRE_FALSE(run.state.frame_rate_hints.empty());
+        CHECK(run.state.frame_rate_hints.back() == doctest::Approx(0.0f));
+    }
+}
+
 TEST_CASE("App runs fixed updates at the configured rate, before each update") {
     const auto config = core::Config::parse("[app]\nmax_fps = 0\nfixed_rate = 200");
     REQUIRE(config.has_value());

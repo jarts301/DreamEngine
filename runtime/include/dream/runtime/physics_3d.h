@@ -212,6 +212,8 @@ private:
 
     std::unordered_map<Entity, TrackedJoint> m_joints;
     std::vector<core::Vec3> m_contact_points;
+    // Reused by each step, so contacts allocate nothing once it has grown.
+    std::vector<Contact3D> m_contacts;
 };
 
 } // namespace dream::runtime

@@ -88,10 +88,13 @@ ran twice, alternating, and the two runs of each agreed within 0.01 ms.
 - **About 13 heap allocations every frame** in Toppler and the arcade, and 6 in the render demo,
   where [reading-profiles.md](reading-profiles.md) expects close to zero. They are steady, not
   growing, so they aren't a leak, but they are worth finding with a debug build's trace.
+  *Since fixed (ADR 0041): the engine's own were removed, and the render demo makes about 2, the
+  profiler's; Toppler's and the arcade's that remain are RmlUi's.*
 - **One frame of 27 – 45 ms** in a few runs, at a level load or at the start. The p99 stays near
   10 ms, so players won't see stutter in normal play.
 - **The game runs at 120 FPS whenever the screen can,** which costs battery and heat for no visible
   gain in a puzzle game. A frame-rate cap, such as 60 FPS on battery, would be a cheap setting to add.
+  *Since added (ADR 0041): `[app] max_fps_on_battery`, which also asks the display to match.*
 
 ## What wasn't checked
 

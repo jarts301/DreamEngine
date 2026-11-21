@@ -156,24 +156,11 @@ VertexOutput vertex_main(VertexInput input) {
 }
 
 // How much of the sun reaches a point: 1 lit, 0 in shadow, and between at the edges, from nine
-// filtered comparisons around it in the nearest cascade that covers it. Past the last cascade, and
-// without shadows, everything is lit.
-float sunlight(float3 world_position, float3 normal) {
-    const int count = int(frame.shadow_settings.x + 0.5);
-    if (count == 0) {
-        return 1.0;
-    }
-    const float depth = dot(world_position - frame.camera_position.xyz, frame.camera_forward.xyz);
-    int cascade = -1;
-    for (int index = 3; index >= 0; --index) {
-        if (index < count && depth < frame.cascade_far[index]) {
-            cascade = index;
-        }
-    }
-    if (cascade < 0) {
-        return 1.0;
-    }
-
+// filtered comparisons around it in the nearest cascade that covers it, blended into the next near
+// the cascade's end. Past the last cascade, and without shadows, everything is lit.
+// How much of the sun reaches a point by one cascade's part of the shadow map: nine filtered
+// comparisons around it, staying inside that part.
+float cascade_light(int cascade, int count, float3 world_position, float3 normal) {
     // Moved a little along the normal, which keeps lit surfaces from shadowing themselves.
     const float3 moved = world_position + normal * frame.cascade_normal_offset[cascade];
     const int column = cascade * 4;
@@ -205,6 +192,37 @@ float sunlight(float3 world_position, float3 normal) {
         }
     }
     return lit / 9.0;
+}
+
+float sunlight(float3 world_position, float3 normal) {
+    const int count = int(frame.shadow_settings.x + 0.5);
+    if (count == 0) {
+        return 1.0;
+    }
+    const float depth = dot(world_position - frame.camera_position.xyz, frame.camera_forward.xyz);
+    int cascade = -1;
+    for (int index = 3; index >= 0; --index) {
+        if (index < count && depth < frame.cascade_far[index]) {
+            cascade = index;
+        }
+    }
+    if (cascade < 0) {
+        return 1.0;
+    }
+    const float lit = cascade_light(cascade, count, world_position, normal);
+
+    // Over the last part of its range, each cascade gives way to the next, and the last to full
+    // sunlight, so no line shows where one ends. camera_forward.w is how much of the range that is.
+    const float far = frame.cascade_far[cascade];
+    const float near = cascade > 0 ? frame.cascade_far[cascade - 1] : 0.0;
+    const float band = (far - near) * frame.camera_forward.w;
+    if (band <= 0.0 || depth < far - band) {
+        return lit;
+    }
+    const float next = cascade + 1 < count
+                           ? cascade_light(cascade + 1, count, world_position, normal)
+                           : 1.0;
+    return lerp(lit, next, saturate((depth - (far - band)) / band));
 }
 
 bool has_feature(VertexOutput input, uint feature) {

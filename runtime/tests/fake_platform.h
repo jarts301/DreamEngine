@@ -34,6 +34,9 @@ struct FakeState {
     // other assets that exist, and 0 for missing ones. Off, it reports nothing, as an APK does.
     bool reports_versions = false;
     std::map<std::string, std::int64_t, std::less<>> asset_versions;
+    // What on_battery reports, and the refresh rates asked of the display, in order.
+    std::optional<bool> on_battery;
+    std::vector<float> frame_rate_hints;
 };
 
 class FakePlatform final : public platform::Platform {
@@ -95,6 +98,14 @@ public:
             return core::Error{core::ErrorCode::NotFound, std::format("Not found: {}", path)};
         }
         return file->second;
+    }
+
+    std::optional<bool> on_battery() override {
+        return m_state.on_battery;
+    }
+
+    void set_frame_rate_hint(float frames_per_second) override {
+        m_state.frame_rate_hints.push_back(frames_per_second);
     }
 
     std::optional<std::int64_t> file_version(platform::FileRoot root,

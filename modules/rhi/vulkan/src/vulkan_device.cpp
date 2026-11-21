@@ -143,9 +143,16 @@ struct FrameResources {
     std::byte* vertex_memory = nullptr;
     VkDeviceSize vertex_used = 0;
 
-    // One descriptor set per combination of textures used this frame.
+    // One descriptor set per combination of textures used this frame. The map keeps its entries
+    // from frame to frame, so it allocates nothing once warm; an entry counts only if it was made
+    // since the pool was last reset, which `pool_resets` tells.
+    struct CachedSet {
+        VkDescriptorSet set = VK_NULL_HANDLE;
+        std::uint64_t made_after_reset = 0;
+    };
     VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
-    std::map<TextureSlotsKey, VkDescriptorSet> descriptor_sets;
+    std::map<TextureSlotsKey, CachedSet> descriptor_sets;
+    std::uint64_t pool_resets = 0;
 };
 
 struct StagingBuffer {
@@ -770,7 +777,11 @@ public:
         vkResetFences(m_device, 1, &frame.in_flight);
         vkResetCommandPool(m_device, frame.pool, 0);
         vkResetDescriptorPool(m_device, frame.descriptor_pool, 0);
-        frame.descriptor_sets.clear();
+        ++frame.pool_resets;
+        // Combinations that stop being used are forgotten now and then, so the map stays small.
+        if (frame.descriptor_sets.size() > k_max_descriptor_sets_per_frame * 4) {
+            frame.descriptor_sets.clear();
+        }
         frame.uniform_used = 0;
         frame.vertex_used = 0;
         m_uniform_offset = 0;
@@ -2292,15 +2303,16 @@ private:
                              : core::Result<VkFramebuffer>(pass.error());
         DREAM_VERIFY(framebuffer.has_value(), "Could not prepare the render targets");
 
-        std::vector<VkClearValue> clear_values;
+        std::array<VkClearValue, 2> clear_values{};
+        std::uint32_t clear_count = 0;
         if (color != nullptr) {
             const ClearColor value = targets.clear_color.value_or(ClearColor{});
-            clear_values.push_back(
-                VkClearValue{.color = {.float32 = {value.r, value.g, value.b, value.a}}});
+            clear_values[clear_count++] =
+                VkClearValue{.color = {.float32 = {value.r, value.g, value.b, value.a}}};
         }
         if (depth != nullptr) {
-            clear_values.push_back(
-                VkClearValue{.depthStencil = {targets.clear_depth.value_or(1.0f), 0}});
+            clear_values[clear_count++] =
+                VkClearValue{.depthStencil = {targets.clear_depth.value_or(1.0f), 0}};
         }
         const VkExtent2D extent = color != nullptr ? color->extent : depth->extent;
         const VkRenderPassBeginInfo info{
@@ -2308,7 +2320,7 @@ private:
             .renderPass = pass.value(),
             .framebuffer = framebuffer.value(),
             .renderArea = {{0, 0}, extent},
-            .clearValueCount = static_cast<std::uint32_t>(clear_values.size()),
+            .clearValueCount = clear_count,
             .pClearValues = clear_values.data(),
         };
         vkCmdBeginRenderPass(m_recording, &info, VK_SUBPASS_CONTENTS_INLINE);
@@ -2513,8 +2525,10 @@ private:
         m_descriptors_dirty = false;
 
         FrameResources& frame = m_frames[m_frame_index];
-        VkDescriptorSet& set = frame.descriptor_sets[m_bound_texture_keys];
-        if (set == VK_NULL_HANDLE) {
+        FrameResources::CachedSet& cached = frame.descriptor_sets[m_bound_texture_keys];
+        VkDescriptorSet& set = cached.set;
+        if (cached.made_after_reset != frame.pool_resets || set == VK_NULL_HANDLE) {
+            cached.made_after_reset = frame.pool_resets;
             const VkDescriptorSetAllocateInfo allocate{
                 .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                 .descriptorPool = frame.descriptor_pool,

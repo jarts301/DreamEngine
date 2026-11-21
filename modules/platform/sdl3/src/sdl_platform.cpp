@@ -7,6 +7,11 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#if defined(SDL_PLATFORM_ANDROID)
+#include <android/native_window.h>
+#include <dlfcn.h>
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -272,6 +277,41 @@ public:
         std::vector<std::byte> contents(bytes, bytes + size);
         SDL_free(data);
         return contents;
+    }
+
+    std::optional<bool> on_battery() override {
+        int percent = 0;
+        switch (SDL_GetPowerInfo(nullptr, &percent)) {
+        case SDL_POWERSTATE_ON_BATTERY:
+            return true;
+        case SDL_POWERSTATE_NO_BATTERY:
+        case SDL_POWERSTATE_CHARGING:
+        case SDL_POWERSTATE_CHARGED:
+            return false;
+        default:
+            return std::nullopt;
+        }
+    }
+
+    // Android 11 and up let a window ask for a refresh rate. Looked up when called, since the
+    // engine supports Android 10, which lacks it.
+    void set_frame_rate_hint(float frames_per_second) override {
+#if defined(SDL_PLATFORM_ANDROID)
+        if (m_window == nullptr) {
+            return;
+        }
+        auto* const native = static_cast<ANativeWindow*>(SDL_GetPointerProperty(
+            SDL_GetWindowProperties(m_window), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr));
+        using SetFrameRate = std::int32_t (*)(ANativeWindow*, float, std::int8_t);
+        static const auto set_frame_rate =
+            reinterpret_cast<SetFrameRate>(dlsym(RTLD_DEFAULT, "ANativeWindow_setFrameRate"));
+        if (native != nullptr && set_frame_rate != nullptr) {
+            // ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT.
+            static_cast<void>(set_frame_rate(native, frames_per_second, 0));
+        }
+#else
+        static_cast<void>(frames_per_second);
+#endif
     }
 
     // Modification times, in nanoseconds. Assets inside the APK or an archive have none.
