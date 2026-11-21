@@ -232,42 +232,36 @@ and the remaining platforms.
 
 ### Phase 12: features (in progress)
 
-- **Done:** render targets (ADR 0027), HDR and tone mapping (ADR 0028), cascaded shadows
-  (ADR 0029), the OpenGL backends (ADR 0026), the renderer as a module (ADR 0030), frustum
-  culling (ADR 0031), instancing and levels of detail (ADR 0032), and PBR materials with normal
-  maps (ADR 0033, with a [guide](guides/materials.md)), transparent, cut-out and double-sided
-  materials (ADR 0034), gamepads (ADR 0035, with a [guide](guides/input.md)), skeletal
-  animation (ADR 0036, with a [guide](guides/animation.md)), and point and spot lights with
-  `forward_plus` (ADR 0037, with a [guide](guides/lighting.md)), particles (ADR 0038, with a
-  [guide](guides/particles.md)), 2D sprites and tile maps (ADR 0039, with a
-  [guide](guides/sprites.md) and `samples/platformer`), and environment lighting and bloom
-  (ADR 0040, with a [guide](guides/environment.md)).
-- **Next, in order:**
-  1. 2D, after ADR 0039: tile maps from Tiled files (a JSON reader), animated tiles, parallax
-     backgrounds, 9-slice sprites, atlases packed at build time, sorting by Y for top-down games,
-     and a renderer module for 2D alone.
-  2. Particles, after ADR 0038: soft particles, sprite-sheet animation, curves for color and
-     size, trails, effect files shared between scenes, then a `gpu` module once compute shaders
-     exist.
-  3. Lights, after ADR 0037: shadows from spot lights, then from point lights, and compute shaders
-     in the graphics interface to sort lights on the GPU.
-  4. Animation, after ADR 0036: root motion, animation events, sending joints once per frame for
-     crowds, building clips at build time, then inverse kinematics, blend trees and morph targets.
-  5. Gamepads, after ADR 0035: focus navigation in `ui` menus, an on-screen aiming cursor for
-     pointer-aimed games such as Toppler, rebinding in a settings menu, and a check with a real
-     gamepad on a phone.
-  6. Materials, after ADR 0033, 0034 and 0040: reflection probes for interiors, environments
-     prepared at build time, order-independent transparency, antialiased cut-outs, reading `.gltf` files
-     so Blender's images are cooked, and half-precision lighting math for phones (PBR costs 1.4 ms
-     of GPU time per frame on the A52s at full screen; see the Android performance report).
-  7. Cooking levels of detail at build time instead of when models load, which needs phone
-     builds to run a tool on the build machine. Blending between shadow cascades, a frame limit
-     on battery and removing the allocations per frame are done (ADR 0041).
-  8. A phone check per GPU family: run the render samples' pictures on Adreno, Mali and Xclipse
-     phones before a rendering feature is called done. The cascaded shadows went unseen on Adreno
-     for a day, because only the A57's Xclipse GPU had been checked (ADR 0029). The PBR materials
-     (ADR 0033) were checked on the A52s's Adreno, with Vulkan and OpenGL ES; the A57's Xclipse and
-     a Mali phone are still to do.
+Phase 12 adds the features games most often need, each as a module or a renderer setting, checked
+on the five PC graphics backends and on a phone.
+
+**Done**
+
+| Area | What works now | Design | Guide |
+|---|---|---|---|
+| Rendering base | The OpenGL backends; render targets; HDR with PBR Neutral tone mapping; the renderer as a module | ADR 0026, 0027, 0028, 0030 | |
+| Shadows | Cascaded shadows from the sun, blended between cascades | ADR 0029, 0041 | |
+| Performance | Frustum culling; instancing; levels of detail, made at build time; almost no heap allocations per frame; a frame limit on battery | ADR 0031, 0032, 0041, 0042 | |
+| Materials | Metallic-roughness PBR with normal, occlusion and emissive maps; transparent, cut-out and double-sided surfaces | ADR 0033, 0034 | [Materials](guides/materials.md) |
+| Lights | Point and spot lights: 16 with `forward`, 256 with `forward_plus` | ADR 0037 | [Lighting](guides/lighting.md) |
+| Environment | Lighting and reflections from HDR images, drawn as the sky; bloom | ADR 0040 | [Environment](guides/environment.md) |
+| Effects | Particles on the CPU: fire, smoke, sparks, one-off bursts | ADR 0038 | [Particles](guides/particles.md) |
+| 2D | Sprites, sprite-sheet animation, tile maps with collisions, pixel art kept crisp | ADR 0039 | [2D games](guides/sprites.md) |
+| Characters | Skeletal animation with fades between clips, skinned on the GPU | ADR 0036 | [Animation](guides/animation.md) |
+| Input | Gamepads, with analog sticks and triggers bound to actions | ADR 0035 | [Input](guides/input.md) |
+
+**Missing, in the order planned**
+
+| # | Area | What is missing | Builds on |
+|---|---|---|---|
+| 1 | 2D | Tile maps from Tiled files (needs a JSON reader), animated tiles, parallax backgrounds, 9-slice sprites, atlases packed at build time, sorting by Y for top-down games, a renderer module for 2D alone | ADR 0039 |
+| 2 | Effects | Soft particles, sprite-sheet animation, curves for color and size, trails, effect files shared between scenes; later a `gpu` module, once the graphics interface has compute shaders | ADR 0038 |
+| 3 | Lights | Shadows from spot lights, then from point lights; compute shaders in the graphics interface, to sort lights on the GPU | ADR 0037 |
+| 4 | Characters | Root motion, animation events, joints sent once per frame for crowds, clips built at build time; then inverse kinematics, blend trees and morph targets | ADR 0036 |
+| 5 | Input | Focus navigation in `ui` menus for gamepads, an on-screen aiming cursor for pointer-aimed games such as Toppler, rebinding in a settings menu, a check with a real gamepad on a phone | ADR 0035 |
+| 6 | Materials and environment | Reflection probes for interiors, environments prepared at build time, order-independent transparency, antialiased cut-outs, reading `.gltf` files so Blender's images are cooked, half-precision lighting math for phones (PBR costs 1.4 ms of GPU time per frame on the A52s at full screen) | ADR 0033, 0034, 0040 |
+| 7 | Levels of detail | Hand-made versions, such as glTF's `MSFT_lod`, taking priority over made ones | ADR 0032, 0042 |
+| 8 | Checking | Each rendering feature's pictures on an Adreno, a Mali and an Xclipse phone before it is called done. So far the A52s's Adreno is checked for everything, with Vulkan and OpenGL ES; the A57's Xclipse only up to the cascaded shadows (ADR 0029), and no Mali phone yet | All |
 
 ### Phase 13: tools for making games
 

@@ -108,8 +108,11 @@ See [ADR 0031](docs/adr/0031-frustum-culling.md).
 Parts that draw the same mesh with the same texture are drawn together, as instances of one draw,
 in the scene and in each shadow cascade. When a project lists a `mesh_simplifier`, models get
 simpler versions as they load, and the renderer draws the simplest one whose error stays within
-`lod_error` pixels on screen (1 by default). `[lods]` sets how many versions are made. See
-[ADR 0032](docs/adr/0032-instancing-and-lods.md).
+`lod_error` pixels on screen (1 by default). `[lods]` sets how many versions are made. The build
+makes them ahead of time with its model cook tool, on PC and Android, so detailed models load
+several times faster, and the runtime makes them as models load only when that file is missing or
+out of date. See [ADR 0032](docs/adr/0032-instancing-and-lods.md) and
+[ADR 0042](docs/adr/0042-cooked-levels-of-detail.md).
 
 Surfaces use glTF's metallic-roughness materials: base color, metallic, roughness, normal,
 occlusion and emissive maps, lit with a physically based model. Normal maps need tangents, which a

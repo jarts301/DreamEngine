@@ -25,6 +25,11 @@
     "miniaudio",
     "ozz-animation",
     {
+      "name": "dream-model-cook",
+      "host": true,
+      "platform": "android"
+    },
+    {
       "name": "opengl-registry",
       "platform": "windows"
     },

@@ -73,6 +73,9 @@ function(dream_add_game name)
     if(DREAM_COOK_TEXTURES)
         _dream_cook_textures(${name} "${generated_assets}" ${asset_dirs})
     endif()
+    if(DREAM_COOK_MODELS)
+        _dream_cook_models(${name} "${generated_assets}" "${ARG_CONFIG}" ${asset_dirs})
+    endif()
     list(APPEND asset_dirs "${generated_assets}")
 
     # A target of its own that runs on every build, so a changed asset is copied even when the
@@ -95,7 +98,7 @@ function(dream_add_game name)
             "-DCOOKED=${DREAM_COOK_TEXTURES}"
             -P "${DreamEngine_SOURCE_DIR}/cmake/DreamStageAssets.cmake"
         VERBATIM)
-    foreach(made IN ITEMS shaders textures)
+    foreach(made IN ITEMS shaders textures models)
         if(TARGET ${name}_${made})
             add_dependencies(${name}_assets ${name}_${made})
         endif()
@@ -189,6 +192,57 @@ function(_dream_cook_textures target output_dir)
     endforeach()
     if(outputs)
         add_custom_target(${target}_textures DEPENDS ${outputs})
+    endif()
+endfunction()
+
+# Makes every .glb model's levels of detail with the model cook tool, into a .lods file of the same
+# name, which the runtime reads in place of making them as the model loads. PC builds build the
+# tool themselves; cross-compiled builds, such as Android's, take it from the dream-model-cook port,
+# which vcpkg builds for the build machine. Without the tool, nothing is cooked, and the runtime
+# makes the versions as models load. See docs/adr/0042-cooked-levels-of-detail.md.
+function(_dream_cook_models target output_dir config)
+    if(TARGET dream_model_cook)
+        set(cook "$<TARGET_FILE:dream_model_cook>")
+        set(cook_depends dream_model_cook)
+    else()
+        file(GLOB cook_dirs "${VCPKG_INSTALLED_DIR}/*/tools/dream-model-cook")
+        find_program(DREAM_MODEL_COOK dream_model_cook HINTS ${cook_dirs} NO_DEFAULT_PATH
+            NO_CMAKE_FIND_ROOT_PATH)
+        if(NOT DREAM_MODEL_COOK)
+            message(STATUS "${target}: no model cook tool, so levels of detail are made as models "
+                           "load")
+            return()
+        endif()
+        set(cook "${DREAM_MODEL_COOK}")
+        set(cook_depends "${DREAM_MODEL_COOK}")
+    endif()
+    if(ANDROID)
+        set(platform android)
+    elseif(WIN32)
+        set(platform windows)
+    else()
+        set(platform linux)
+    endif()
+    cmake_path(ABSOLUTE_PATH config NORMALIZE)
+
+    set(outputs "")
+    foreach(asset_dir IN LISTS ARGN)
+        file(GLOB_RECURSE sources CONFIGURE_DEPENDS "${asset_dir}/*.glb")
+        foreach(source IN LISTS sources)
+            file(RELATIVE_PATH relative "${asset_dir}" "${source}")
+            string(REGEX REPLACE "\.glb$" ".lods" relative "${relative}")
+            set(output "${output_dir}/${relative}")
+            add_custom_command(
+                OUTPUT "${output}"
+                COMMAND "${cook}" "${source}" "${output}" "${config}" ${platform}
+                DEPENDS "${source}" "${config}" ${cook_depends}
+                COMMENT "Cooking levels of detail for ${relative}"
+                VERBATIM)
+            list(APPEND outputs "${output}")
+        endforeach()
+    endforeach()
+    if(outputs)
+        add_custom_target(${target}_models DEPENDS ${outputs})
     endif()
 endfunction()
 

@@ -202,32 +202,6 @@ void warn_about_missing_tangents(const ModelData& data, std::string_view path) {
 }
 
 // The [lods] table, which says how simpler versions of models are made.
-core::Result<LodOptions> read_lod_options(const core::Config& config) {
-    LodOptions options;
-    const std::int64_t levels = config.get_int("lods.levels").value_or(options.levels);
-    if (levels < 0 || levels > 8) {
-        return core::Error{core::ErrorCode::InvalidArgument,
-                           std::format("Setting 'lods.levels' must be from 0 to 8, not {}", levels)};
-    }
-    options.levels = static_cast<std::uint32_t>(levels);
-    const double reduction = config.get_float("lods.reduction").value_or(options.reduction);
-    if (!(reduction >= 0.1 && reduction <= 0.9)) {
-        return core::Error{core::ErrorCode::InvalidArgument,
-                           std::format("Setting 'lods.reduction' must be from 0.1 to 0.9, not {}",
-                                       reduction)};
-    }
-    options.reduction = static_cast<float>(reduction);
-    const std::int64_t min_triangles =
-        config.get_int("lods.min_triangles").value_or(options.min_triangles);
-    if (min_triangles < 1 || min_triangles > 1'000'000) {
-        return core::Error{core::ErrorCode::InvalidArgument,
-                           std::format("Setting 'lods.min_triangles' must be from 1 to 1000000, "
-                                       "not {}",
-                                       min_triangles)};
-    }
-    options.min_triangles = static_cast<std::uint32_t>(min_triangles);
-    return options;
-}
 
 } // namespace
 
@@ -577,7 +551,25 @@ core::Result<void> Renderer::initialize(App& app,
                 }
             }
             warn_about_missing_tangents(data.value(), context.path);
-            if (simplifier != nullptr) {
+            // Versions the build cooked (ADR 0042), when they were made from this model as it is,
+            // and otherwise made now.
+            bool cooked = false;
+            if (options.levels > 0) {
+                const std::string cooked_path = cooked_lods_path(context.path);
+                // An empty file means the build was told not to cook.
+                if (const auto lods = context.files.read(cooked_path);
+                    lods.has_value() && !lods.value().empty()) {
+                    const core::Result<void> applied =
+                        apply_cooked_lods(data.value(), lods.value(), file.value(), options);
+                    if (applied.has_value()) {
+                        cooked = true;
+                    } else {
+                        DREAM_LOG_WARNING("'{}': {}, so they are made as it loads", context.path,
+                                          applied.error().message);
+                    }
+                }
+            }
+            if (!cooked && simplifier != nullptr) {
                 if (const core::Result<void> made = generate_lods(data.value(), *simplifier, options);
                     !made.has_value()) {
                     return core::Error{made.error().code,

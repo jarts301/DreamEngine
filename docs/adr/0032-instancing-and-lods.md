@@ -83,8 +83,8 @@ version that saves less than a fifth of the last one's triangles ends the list.
   every backend.
 - Instances carry the color, so tinted copies of a model still group together. Parts with
   different textures don't.
-- Making versions costs time when a model loads. Cooking them into the asset at build time would
-  remove that, and is left for later.
+- Making versions costs time when a model loads. ADR 0042 makes them at build time instead, and
+  keeps this as the fallback.
 - Versions are chosen per part, so a model's parts can switch at different distances. Their shared
   edges are kept, so they still meet.
 - Switching between versions pops. Blending between them, by dithering or by morphing, can come
