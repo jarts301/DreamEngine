@@ -11,6 +11,8 @@ option(DREAM_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(DREAM_COOK_TEXTURES "Cook game textures into compressed KTX2 files" ON)
 option(DREAM_COOK_MODELS "Make models' levels of detail at build time (ADR 0042)" ON)
 option(DREAM_PROFILING "Compile profiling zones into the engine and games" ON)
+# Off when a game builds the engine through find_package, so the game's own install doesn't copy it.
+option(DREAM_INSTALL_SDK "Install the SDK with cmake --install (ADR 0045)" ${PROJECT_IS_TOP_LEVEL})
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -42,9 +44,11 @@ add_subdirectory(interfaces)
 add_subdirectory(libraries)
 add_subdirectory(runtime)
 
-# Tools that run on the build machine, such as packing a PC game's assets.
+# Tools that run on the build machine, such as packing a PC game's assets, and `dream`, which makes
+# new game projects.
 if(NOT CMAKE_CROSSCOMPILING)
     add_subdirectory(tools/pack)
+    add_subdirectory(tools/dream)
     # Cross-compiled builds, such as Android's, take it from vcpkg instead (ADR 0042).
     if(DREAM_COOK_MODELS)
         add_subdirectory(tools/model_cook)
@@ -53,4 +57,16 @@ endif()
 
 if(DREAM_BUILD_SAMPLES)
     add_subdirectory(samples)
+endif()
+
+# The SDK (ADR 0045): `cmake --install <build> --prefix <folder>` copies the engine's sources there,
+# which a game in its own repository builds through find_package(DreamEngine), and the `dream` tool
+# into its bin folder. The engine's own tests come along but stay off in a game's build; the samples
+# and build folders don't come.
+if(DREAM_INSTALL_SDK)
+    install(FILES CMakeLists.txt vcpkg.json LICENSE README.md DESTINATION .)
+    install(DIRECTORY cmake core docs interfaces libraries modules runtime templates tools
+        DESTINATION .
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE)
 endif()

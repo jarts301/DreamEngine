@@ -1,0 +1,10 @@
+# Build folders, which the presets put in build/.
+build/
+vcpkg_installed/
+
+# Personal settings.
+CMakeUserPresets.json
+.vs/
+.idea/
+.vscode/
+cmake-build-*/

@@ -149,10 +149,12 @@ endfunction()
 # Textures are colors, in sRGB, unless their names end in one of the suffixes below, which mark
 # linear data such as normal maps, whose smaller levels must be made without sRGB's curve. Normal
 # maps' smaller levels are also made unit length again. See docs/guides/materials.md.
-set(_DREAM_NORMAL_TEXTURE_SUFFIXES "_normal" "_normals" "_nrm")
-set(_DREAM_LINEAR_TEXTURE_SUFFIXES "_orm" "_metallic_roughness" "_mr" "_roughness" "_metallic"
-    "_occlusion" "_ao" "_linear")
 function(_dream_cook_textures target output_dir config out_cooked)
+    # Here rather than beside the function, so a game whose build adds the engine as a
+    # subdirectory, as find_package(DreamEngine) does, sees them too.
+    set(_DREAM_NORMAL_TEXTURE_SUFFIXES "_normal" "_normals" "_nrm")
+    set(_DREAM_LINEAR_TEXTURE_SUFFIXES "_orm" "_metallic_roughness" "_mr" "_roughness" "_metallic"
+        "_occlusion" "_ao" "_linear")
     # The project's texture cooker for this platform (ADR 0043): a file in one of
     # DREAM_TEXTURE_COOKER_DIRS, the engine's own first, that defines how each image is cooked.
     dream_read_cook_config("${config}" "${DREAM_PLATFORM}" cooker)

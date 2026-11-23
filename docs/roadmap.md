@@ -47,16 +47,19 @@ and `null` modules ([ADR 0030](adr/0030-renderer-module.md)).
 
 ### The steps
 
-1. **Create the game's folder inside the engine repository**, for example `samples/my_game/`, and add
-   it to `samples/CMakeLists.txt`. There is no installable SDK or project template yet: games build
-   as part of the engine tree.
+1. **Make the project** with the SDK's `dream` tool: `dream new my_game` makes `my_game/`, a
+   repository of its own that builds the engine through `find_package(DreamEngine)`, from the SDK
+   that `DREAM_ENGINE_SDK` names (ADR 0045). Install the SDK with
+   `cmake --install <build> --prefix <folder>`, or use a checkout of the engine. The template
+   already has steps 2 and 3 done, for a small 3D scene; the engine's own samples are made the same
+   way, inside its repository.
 2. **Declare the game in CMake:**
 
    ```cmake
    dream_add_game(my_game
        SOURCES src/my_game.cpp
        CONFIG dream.toml
-       ASSETS assets ../assets
+       ASSETS assets
        APPLICATION_ID com.studio.mygame
        DISPLAY_NAME "My Game"
    )
@@ -183,7 +186,7 @@ battery and almost no heap allocations per frame (ADR 0041); levels of detail ma
 
 | Need | Today | Missing |
 |---|---|---|
-| Project setup | Games live in the engine tree | An installable SDK: `find_package(DreamEngine)`, a `dream new` command and a template |
+| Project setup | An installable SDK of the engine's sources, `find_package(DreamEngine)`, `dream new` with a template, games in their own repositories (ADR 0045) | A binary SDK if first builds get too slow; `dream` commands to add modules and update a game's `vcpkg.json` |
 | Editor | None | Scene editing, an entity inspector, an asset browser and play-in-editor. It would be a tool program built on the engine, with its panels as modules on `debug_ui` |
 | Asset pipeline | glTF with levels of detail made at build time; PNG to KTX2 by a texture cooker chosen per platform; Slang | Importers for FBX and audio, an asset database with dependencies, per-platform bundles |
 | Release pipeline | CI builds and tests on push (paused for now) | Release builds with symbols kept and uploaded, versioning, signed artifacts, store uploads |
@@ -271,8 +274,10 @@ on the five PC graphics backends and on a phone.
 
 ### Phase 13: tools for making games
 
-- **Installable SDK:** CMake package config, `dream new <name>` with a project template, and games
-  in their own repositories.
+- **Installable SDK:** done (ADR 0045): the SDK is the engine's sources, installed with
+  `cmake --install`; `find_package(DreamEngine)`; `dream new <name>` with a project template; and
+  games in their own repositories. Still open: a binary SDK if first builds get too slow, and
+  `dream` commands that add modules or update a game's `vcpkg.json`.
 - **Editor v1:** a program built on the engine, with its interface in Dear ImGui (decided in
   section 5). It needs:
   - a scene view;
@@ -397,7 +402,7 @@ crash uploads included, that professional work needs. Before a commercial releas
 - shadows from point and spot lights, reflection probes, and gamepad navigation in menus;
 - a settings menu, localization and store services;
 - release packaging: AAB and real signing on Android, depots on Steam;
-- an installable SDK and an editor.
+- an editor.
 
 Each of those is planned as a module, as is everything for online play, macOS and iOS, so a
 project only carries what it uses.
