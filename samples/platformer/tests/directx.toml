@@ -31,6 +31,7 @@ input_device = ["null"]
 rhi = ["directx"]
 renderer = ["forward"]
 physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
 
 [audio]
 muted = true

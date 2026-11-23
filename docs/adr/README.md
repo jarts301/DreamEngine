@@ -48,6 +48,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0041](0041-cascade-blending-battery-limit-and-allocations.md) | Blending between shadow cascades, a frame limit on battery with a display refresh hint, and fewer allocations per frame |
 | [0042](0042-cooked-levels-of-detail.md) | Levels of detail made at build time by a model cook tool, PC-built or from a vcpkg port, checked and with load-time making as the fallback |
 | [0043](0043-crash-uploads-and-texture-cookers.md) | Crash uploads as the `crash_upload` interface over `Platform::post_http`, module-declared Android permissions, and texture cookers chosen per platform |
+| [0044](0044-code-health-review.md) | A code health review: per-world state keyed by a world's id, a re-entrant event flush, shared scene readers, the cook tool following the mesh simplifier list, and reading cooked textures as the `texture_decoder` module |
 
 ## Template
 

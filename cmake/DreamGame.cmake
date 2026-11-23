@@ -168,6 +168,7 @@ function(_dream_cook_textures target output_dir config out_cooked)
                             "these folders has: ${DREAM_TEXTURE_COOKER_DIRS}")
     endif()
     unset(DREAM_TEXTURE_COOKER_NONE)
+    unset(DREAM_TEXTURE_COOKER_DECODER)
     include("${cooker_file}")
     if(DREAM_TEXTURE_COOKER_NONE)
         # Textures a cooker made before are removed, or they would be staged and used.
@@ -181,7 +182,6 @@ function(_dream_cook_textures target output_dir config out_cooked)
     if(NOT COMMAND dream_texture_cooker_${cooker})
         message(FATAL_ERROR "${cooker_file} doesn't define dream_texture_cooker_${cooker}()")
     endif()
-
     file(GLOB ktx_dirs "${VCPKG_INSTALLED_DIR}/*/tools/ktx")
     find_program(DREAM_KTX ktx HINTS ${ktx_dirs} NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
 
@@ -221,6 +221,22 @@ function(_dream_cook_textures target output_dir config out_cooked)
             list(APPEND outputs "${output}")
         endforeach()
     endforeach()
+    # The game must be able to read what the cooker made.
+    if(outputs AND DREAM_TEXTURE_COOKER_DECODER)
+        cmake_path(ABSOLUTE_PATH config NORMALIZE OUTPUT_VARIABLE config_path)
+        dream_read_module_config("${config_path}" "${DREAM_PLATFORM}" modules)
+        set(first_decoder "")
+        if(modules_BACKENDS_texture_decoder)
+            list(GET modules_BACKENDS_texture_decoder 0 first_decoder)
+        endif()
+        if(NOT first_decoder STREQUAL DREAM_TEXTURE_COOKER_DECODER)
+            message(FATAL_ERROR "${config_path} cooks textures with \"${cooker}\", which the "
+                "\"${DREAM_TEXTURE_COOKER_DECODER}\" texture decoder reads, so "
+                "[modules.${DREAM_PLATFORM}] must list it first: "
+                "texture_decoder = [\"${DREAM_TEXTURE_COOKER_DECODER}\"]. "
+                "Or cook no textures: [cook] textures = \"none\".")
+        endif()
+    endif()
     if(outputs)
         add_custom_target(${target}_textures DEPENDS ${outputs})
     endif()

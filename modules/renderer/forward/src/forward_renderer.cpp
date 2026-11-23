@@ -174,7 +174,7 @@ constexpr std::size_t k_max_particles_per_frame = 32768;
 constexpr std::size_t k_max_particles_per_draw = 8192;
 
 // The corners of a particle's square, and its two triangles, counter-clockwise from the camera.
-constexpr std::array<core::Vec2, 4> k_particle_corners{
+constexpr std::array<core::Vec2, 4> k_quad_corners{
     core::Vec2{-0.5f, -0.5f}, core::Vec2{0.5f, -0.5f}, core::Vec2{0.5f, 0.5f},
     core::Vec2{-0.5f, 0.5f}};
 constexpr std::array<std::uint32_t, 6> k_particle_indices{0, 1, 2, 0, 2, 3};
@@ -720,8 +720,8 @@ public:
         m_shadow_map.reset();
         m_light_texture.reset();
         m_flat_normal.reset();
-        m_particle_corners.reset();
-        m_particle_indices.reset();
+        m_quad_corners.reset();
+        m_quad_indices.reset();
         m_hdr_color.reset();
         m_hdr_depth.reset();
         m_bloom.clear();
@@ -746,17 +746,17 @@ public:
 
         // Every particle is this one square, placed and sized per instance.
         const core::Result<rhi::BufferHandle> corners = device.create_buffer(
-            rhi::BufferUsage::Vertex, std::as_bytes(std::span(k_particle_corners)));
+            rhi::BufferUsage::Vertex, std::as_bytes(std::span(k_quad_corners)));
         if (!corners.has_value()) {
             return corners.error();
         }
-        m_particle_corners = OwnedBuffer(device, corners.value());
+        m_quad_corners = OwnedBuffer(device, corners.value());
         const core::Result<rhi::BufferHandle> corner_indices = device.create_buffer(
             rhi::BufferUsage::Index, std::as_bytes(std::span(k_particle_indices)));
         if (!corner_indices.has_value()) {
             return corner_indices.error();
         }
-        m_particle_indices = OwnedBuffer(device, corner_indices.value());
+        m_quad_indices = OwnedBuffer(device, corner_indices.value());
 
         // The lights' texture, rewritten each frame. Without it, only the sun lights the scene.
         const rhi::TextureDesc light_desc{.width = k_light_texture_width,
@@ -919,8 +919,8 @@ private:
     // One texel pointing straight out of the surface, for parts without a normal map.
     OwnedTexture m_flat_normal;
     // The square every particle is drawn as, and what draw_particles reuses between frames.
-    OwnedBuffer m_particle_corners;
-    OwnedBuffer m_particle_indices;
+    OwnedBuffer m_quad_corners;
+    OwnedBuffer m_quad_indices;
     std::vector<ParticleInstance> m_particle_instances;
     std::vector<std::pair<float, std::uint32_t>> m_particle_order;
     std::vector<std::pair<float, std::uint32_t>> m_batch_order;
@@ -1994,7 +1994,9 @@ void ForwardRenderer::draw_lines(rhi::CommandList& commands, std::span<const Lin
 
 void ForwardRenderer::draw_sprites(rhi::CommandList& commands, const Frame& frame,
                                    FrameStats& stats) {
-    if (frame.sprites.empty() || !m_pipelines->sprites.exists()) {
+    // Sprites need the 2D camera; a frame without one draws none.
+    if (frame.sprites.empty() || !frame.sprite_view.has_value() ||
+        !m_pipelines->sprites.exists()) {
         return;
     }
     DREAM_PROFILE_ZONE("Sprites");
@@ -2002,8 +2004,8 @@ void ForwardRenderer::draw_sprites(rhi::CommandList& commands, const Frame& fram
     camera.view_projection = *frame.sprite_view;
     commands.bind_pipeline(m_pipelines->sprites.get());
     commands.set_uniforms(std::as_bytes(std::span(&camera, 1)));
-    commands.bind_vertex_buffer(m_particle_corners.get());
-    commands.bind_index_buffer(m_particle_indices.get(), rhi::IndexFormat::UInt32);
+    commands.bind_vertex_buffer(m_quad_corners.get());
+    commands.bind_index_buffer(m_quad_indices.get(), rhi::IndexFormat::UInt32);
     for (const SpriteBatch& batch : frame.sprites) {
         if (batch.sprites.empty()) {
             continue;
@@ -2078,8 +2080,8 @@ void ForwardRenderer::draw_particles(rhi::CommandList& commands, const Frame& fr
                              &std::pair<float, std::uint32_t>::first);
 
     commands.bind_pipeline(m_pipelines->particles.get());
-    commands.bind_vertex_buffer(m_particle_corners.get());
-    commands.bind_index_buffer(m_particle_indices.get(), rhi::IndexFormat::UInt32);
+    commands.bind_vertex_buffer(m_quad_corners.get());
+    commands.bind_index_buffer(m_quad_indices.get(), rhi::IndexFormat::UInt32);
     std::size_t budget = k_max_particles_per_frame;
     for (const auto& [key, index] : m_batch_order) {
         const ParticleBatch& batch = frame.particles[index];

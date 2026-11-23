@@ -28,6 +28,7 @@ animation = ["ozz"]
 physics3d = ["impulse"]
 audio = ["portaudio"]
 ui = ["markup"]
+texture_decoder = ["ktx", "null"]
 
 [audio]
 muted = true

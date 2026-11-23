@@ -24,6 +24,7 @@ physics3d = ["null"]
 audio = ["null"]
 ui = ["null"]
 debug_ui = ["null"]
+texture_decoder = ["ktx", "null"]
 
 [modules.android]
 platform = ["sdl3"]
@@ -37,6 +38,7 @@ physics3d = ["null"]
 audio = ["null"]
 ui = ["null"]
 debug_ui = ["null"]
+texture_decoder = ["ktx", "null"]
 
 [modules.linux]
 platform = ["sdl3"]
@@ -50,6 +52,7 @@ physics3d = ["null"]
 audio = ["null"]
 ui = ["null"]
 debug_ui = ["null"]
+texture_decoder = ["ktx", "null"]
 
 [audio]
 muted = true

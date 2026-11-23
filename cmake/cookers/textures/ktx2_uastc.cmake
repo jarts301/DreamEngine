@@ -3,7 +3,10 @@
 # phones. About a quarter of a PNG's memory on the GPU, and similar in size on disk.
 #
 # A texture cooker file defines dream_texture_cooker_<name>(<kind> <out_arguments>), which gives the
-# arguments `ktx create` cooks one image with, for its kind: color, normal or linear.
+# arguments `ktx create` cooks one image with, for its kind: color, normal or linear. It sets
+# DREAM_TEXTURE_COOKER_DECODER to the texture_decoder module that reads what it makes, which the
+# build checks the project lists first for the platform.
+set(DREAM_TEXTURE_COOKER_DECODER ktx)
 function(dream_texture_cooker_ktx2_uastc kind out_arguments)
     if(kind STREQUAL "color")
         set(arguments --format R8G8B8A8_SRGB --assign-tf srgb)

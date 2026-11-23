@@ -33,10 +33,6 @@ Entity from_user_data(std::uint64_t value) {
     return static_cast<Entity>(static_cast<entt::id_type>(value));
 }
 
-core::Error scene_error(std::string message) {
-    return core::Error{core::ErrorCode::ParseError, std::move(message)};
-}
-
 core::Result<MotionType> read_motion(const ComponentData& data) {
     const core::Result<std::string> motion = data.text("motion", "dynamic");
     if (!motion.has_value()) {
@@ -53,53 +49,6 @@ core::Result<MotionType> read_motion(const ComponentData& data) {
     }
     return scene_error(std::format("unknown motion '{}'", motion.value()));
 }
-
-// Reads each setting into `target`, stopping at the first error.
-struct Reader {
-    const ComponentData& data;
-    std::optional<core::Error> error;
-
-    void number(std::string_view key, float& target) {
-        if (!error.has_value()) {
-            core::Result<float> value = data.number(key, target);
-            if (value.has_value()) {
-                target = value.value();
-            } else {
-                error = value.error();
-            }
-        }
-    }
-
-    void vec3(std::string_view key, Vec3& target) {
-        if (!error.has_value()) {
-            core::Result<Vec3> value = data.vec3(key, target);
-            if (value.has_value()) {
-                target = value.value();
-            } else {
-                error = value.error();
-            }
-        }
-    }
-
-    void flag(std::string_view key, bool& target) {
-        if (!error.has_value()) {
-            core::Result<bool> value = data.flag(key, target);
-            if (value.has_value()) {
-                target = value.value();
-            } else {
-                error = value.error();
-            }
-        }
-    }
-
-    void angle(std::string_view key, std::optional<float>& target) {
-        if (!error.has_value() && data.has(key)) {
-            float degrees = 0.0f;
-            number(key, degrees);
-            target = core::radians(degrees);
-        }
-    }
-};
 
 core::Result<void> read_rigid_body(ComponentContext& context) {
     const ComponentData& data = context.data;
@@ -123,7 +72,7 @@ core::Result<void> read_rigid_body(ComponentContext& context) {
         return shape.error();
     }
 
-    Reader read{data, std::nullopt};
+    SettingReader read(data);
     if (shape.value() == "box") {
         BoxShape box;
         read.vec3("half_extents", box.half_extents);
@@ -151,8 +100,8 @@ core::Result<void> read_rigid_body(ComponentContext& context) {
     read.vec3("angular_velocity", body.desc.angular_velocity);
     read.flag("sensor", body.desc.is_sensor);
     read.flag("continuous", body.desc.continuous_collision);
-    if (read.error.has_value()) {
-        return *read.error;
+    if (core::Result<void> done = read.result(); !done.has_value()) {
+        return done;
     }
 
     // Caught here, so the mistake is reported with the scene file's name.
@@ -200,7 +149,7 @@ core::Result<void> read_joint(ComponentContext& context) {
         }
     }
 
-    Reader read{data, std::nullopt};
+    SettingReader read(data);
     read.vec3("anchor", joint.anchor);
     read.vec3("axis", joint.axis);
     read.angle("min_angle", joint.min_angle_radians);
@@ -208,8 +157,8 @@ core::Result<void> read_joint(ComponentContext& context) {
     read.vec3("connected_anchor", joint.connected_anchor);
     read.number("min_distance", joint.min_distance);
     read.number("max_distance", joint.max_distance);
-    if (read.error.has_value()) {
-        return *read.error;
+    if (core::Result<void> done = read.result(); !done.has_value()) {
+        return done;
     }
     context.world.registry().emplace_or_replace<Joint3D>(context.entity, joint);
     return {};

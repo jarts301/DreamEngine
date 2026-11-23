@@ -33,6 +33,7 @@ input_device = ["null"]
 rhi = ["vulkan"]
 renderer = ["forward"]
 physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
 
 [modules.android]
 platform = ["sdl3"]
@@ -40,6 +41,7 @@ input_device = ["null"]
 rhi = ["vulkan"]
 renderer = ["forward"]
 physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
 
 [modules.linux]
 platform = ["sdl3"]
@@ -47,6 +49,7 @@ input_device = ["null"]
 rhi = ["vulkan"]
 renderer = ["forward"]
 physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
 
 [audio]
 muted = true

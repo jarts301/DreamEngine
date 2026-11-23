@@ -8,12 +8,15 @@
 #include "dream/runtime/virtual_file_system.h"
 #include "dream/runtime/world.h"
 
+#include <cstdint>
 #include <functional>
 #include <initializer_list>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace dream::runtime {
@@ -64,6 +67,79 @@ private:
 
     const core::Config& m_config;
     std::string m_prefix;
+};
+
+// A mistake in a scene file, such as a setting out of range.
+[[nodiscard]] core::Error scene_error(std::string message);
+
+// Reads a component's settings in turn, keeping the first error, so a component reader can list
+// them all and check once. Each value keeps what it holds when its setting is absent.
+//
+//     SettingReader read(context.data);
+//     read.number("speed", mover.speed);
+//     read.flag("loop", mover.loop);
+//     if (auto done = read.result(); !done.has_value()) {
+//         return done;
+//     }
+class SettingReader {
+public:
+    explicit SettingReader(const ComponentData& data) : m_data(data) {}
+
+    // A value read some other way, such as with one of ComponentData's getters. `read` isn't
+    // called once a setting has failed.
+    template <typename Value, typename Read> void take(Read&& read, Value& into) {
+        if (m_failed.has_value()) {
+            return;
+        }
+        auto result = std::forward<Read>(read)();
+        if (!result.has_value()) {
+            m_failed = result.error();
+            return;
+        }
+        into = std::move(result).value();
+    }
+
+    void number(std::string_view key, float& into) {
+        take([&] { return m_data.number(key, into); }, into);
+    }
+    void flag(std::string_view key, bool& into) {
+        take([&] { return m_data.flag(key, into); }, into);
+    }
+    void vec2(std::string_view key, core::Vec2& into) {
+        take([&] { return m_data.vec2(key, into); }, into);
+    }
+    void vec3(std::string_view key, core::Vec3& into) {
+        take([&] { return m_data.vec3(key, into); }, into);
+    }
+    void text(std::string_view key, std::string& into) {
+        take([&] { return m_data.text(key, into); }, into);
+    }
+    // An angle in degrees, as radians, set only when the setting is present.
+    void angle(std::string_view key, std::optional<float>& into);
+    // A whole number, 0 or more, up to 2^24, which a float holds exactly.
+    void whole(std::string_view key, std::uint32_t& into);
+    // A whole number from -10^6 to 10^6.
+    void integer(std::string_view key, std::int32_t& into);
+
+    // Fails with a scene_error, unless a setting already has.
+    void fail(std::string message);
+
+    [[nodiscard]] bool failed() const noexcept {
+        return m_failed.has_value();
+    }
+    [[nodiscard]] const ComponentData& data() const noexcept {
+        return m_data;
+    }
+    [[nodiscard]] core::Result<void> result() const {
+        if (m_failed.has_value()) {
+            return *m_failed;
+        }
+        return {};
+    }
+
+private:
+    const ComponentData& m_data;
+    std::optional<core::Error> m_failed;
 };
 
 struct ComponentContext {

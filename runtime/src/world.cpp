@@ -2,11 +2,22 @@
 
 #include "dream/core/profile.h"
 
-#include <cstddef>
 #include <algorithm>
+#include <atomic>
+#include <cstddef>
 #include <vector>
 
 namespace dream::runtime {
+
+namespace {
+
+std::atomic<std::uint64_t> g_next_world_id{1};
+
+} // namespace
+
+World::World()
+    : m_id(g_next_world_id.fetch_add(1, std::memory_order_relaxed)),
+      m_lifetime(std::make_shared<const int>(0)) {}
 namespace {
 
 core::Mat4 local_matrix(const Transform& transform) {

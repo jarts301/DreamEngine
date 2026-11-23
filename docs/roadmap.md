@@ -37,6 +37,7 @@ behind interfaces or choices:
 |---|---|---|
 | Crash reports | Built into Core, writing local files only | Local capture stays in Core; uploading is the `crash_upload` interface: `null`, `sentry`, `backtrace`, sending through the platform (ADR 0043) |
 | Texture cooking | Hard-wired to KTX2 and UASTC in the build | A texture cooker per format, chosen in `[cook]` per platform: `ktx2_uastc`, `ktx2_etc1s`, `none`, or a project's own (ADR 0043) |
+| Reading cooked textures | libktx linked into every game's runtime | The `texture_decoder` interface: `ktx`, `null`; the build checks a game lists the decoder its cooker needs (ADR 0044) |
 | Game UI glue | `runtime/ui.h` over the `ui` interface | Fine as it is: the backends are already modules |
 
 The 3D renderer was the largest of these. It is now the `renderer` interface, with the `forward`
@@ -81,6 +82,7 @@ and `null` modules ([ADR 0030](adr/0030-renderer-module.md)).
    renderer = ["forward", "null"]
    mesh_simplifier = ["meshoptimizer", "null"]
    tangent_generator = ["mikktspace", "null"]
+   texture_decoder = ["ktx", "null"]    # Reads the textures the build cooks.
    physics3d = ["jolt"]
    audio = ["miniaudio", "null"]
    ui = ["rmlui"]
@@ -91,6 +93,7 @@ and `null` modules ([ADR 0030](adr/0030-renderer-module.md)).
    renderer = ["forward", "null"]
    mesh_simplifier = ["meshoptimizer", "null"]
    tangent_generator = ["mikktspace", "null"]
+   texture_decoder = ["ktx", "null"]    # Reads the textures the build cooks.
    physics3d = ["jolt"]
    audio = ["miniaudio", "null"]
    ui = ["rmlui"]

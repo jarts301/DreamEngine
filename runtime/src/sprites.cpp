@@ -21,66 +21,22 @@ using core::Vec2;
 using core::Vec3;
 using core::Vec4;
 
-core::Error scene_error(std::string message) {
-    return core::Error{core::ErrorCode::InvalidArgument, std::move(message)};
-}
-
-// Reads settings in turn, keeping the first error.
-class Reader {
+// The shared settings, plus the ones of sprites and tile maps.
+class Reader : public SettingReader {
 public:
-    explicit Reader(const ComponentData& data) : m_data(data) {}
+    using SettingReader::SettingReader;
 
-    template <typename Value, typename Read> void take(Read&& read, Value& into) {
-        if (m_failed.has_value()) {
-            return;
-        }
-        auto result = read();
-        if (!result.has_value()) {
-            m_failed = result.error();
-            return;
-        }
-        into = std::move(result).value();
-    }
-
-    void number(std::string_view key, float& into) {
-        take([&] { return m_data.number(key, into); }, into);
-    }
-    void flag(std::string_view key, bool& into) {
-        take([&] { return m_data.flag(key, into); }, into);
-    }
-    void vec2(std::string_view key, Vec2& into) {
-        take([&] { return m_data.vec2(key, into); }, into);
-    }
-    void whole(std::string_view key, std::uint32_t& into) {
-        float value = static_cast<float>(into);
-        number(key, value);
-        if (!m_failed.has_value() && (value < 0.0f || value != std::floor(value) ||
-                                      value > 16777216.0f)) {
-            m_failed = scene_error(std::format("'{}' must be a whole number, 0 or more", key));
-            return;
-        }
-        into = static_cast<std::uint32_t>(value);
-    }
-    void integer(std::string_view key, std::int32_t& into) {
-        float value = static_cast<float>(into);
-        number(key, value);
-        if (!m_failed.has_value() && (value != std::floor(value) || std::abs(value) > 1.0e6f)) {
-            m_failed = scene_error(std::format("'{}' must be a whole number", key));
-            return;
-        }
-        into = static_cast<std::int32_t>(value);
-    }
     // Color as [r, g, b] and opacity as `alpha`.
     void color(Vec4& into) {
         Vec3 rgb{into.x, into.y, into.z};
-        take([&] { return m_data.vec3("color", rgb); }, rgb);
+        vec3("color", rgb);
         number("alpha", into.w);
         into = Vec4{rgb.x, rgb.y, rgb.z, into.w};
     }
     void filter(renderer::SpriteFilter& into) {
-        std::string name;
-        take([&] { return m_data.text("filter", "pixel"); }, name);
-        if (m_failed.has_value()) {
+        std::string name = "pixel";
+        text("filter", name);
+        if (failed()) {
             return;
         }
         if (name == "pixel") {
@@ -88,40 +44,24 @@ public:
         } else if (name == "smooth") {
             into = renderer::SpriteFilter::Smooth;
         } else {
-            m_failed = scene_error(
-                std::format("'filter' is \"pixel\" or \"smooth\", not \"{}\"", name));
+            fail(std::format("'filter' is \"pixel\" or \"smooth\", not \"{}\"", name));
         }
     }
     void texture(std::string_view key, AssetManager& assets, AssetRef<TextureAsset>& into) {
         std::string path;
-        take([&] { return m_data.text(key, ""); }, path);
-        if (m_failed.has_value() || path.empty()) {
+        text(key, path);
+        if (failed() || path.empty()) {
             return;
         }
-        core::Result<AssetRef<TextureAsset>> loaded = assets.load<TextureAsset>(path);
-        if (!loaded.has_value()) {
-            m_failed = core::Error{loaded.error().code,
+        take([&]() -> core::Result<AssetRef<TextureAsset>> {
+            core::Result<AssetRef<TextureAsset>> loaded = assets.load<TextureAsset>(path);
+            if (!loaded.has_value()) {
+                return core::Error{loaded.error().code,
                                    std::format("'{}': {}", path, loaded.error().message)};
-            return;
-        }
-        into = std::move(loaded).value();
+            }
+            return loaded;
+        }, into);
     }
-    void fail(std::string message) {
-        if (!m_failed.has_value()) {
-            m_failed = scene_error(std::move(message));
-        }
-    }
-
-    [[nodiscard]] core::Result<void> result() const {
-        if (m_failed.has_value()) {
-            return *m_failed;
-        }
-        return {};
-    }
-
-private:
-    const ComponentData& m_data;
-    std::optional<core::Error> m_failed;
 };
 
 core::Result<void> read_camera_2d(ComponentContext& context) {
@@ -540,22 +480,14 @@ void register_sprite_components(SceneLoader& scenes) {
 }
 
 void gather_sprites(const World& world, const Mat4& view, std::vector<renderer::SpriteQuad>& quads,
-                    std::vector<renderer::SpriteBatch>& batches) {
+                    std::vector<renderer::SpriteBatch>& batches, SpriteScratch& scratch) {
     DREAM_PROFILE_ZONE("Gather sprites");
     quads.clear();
     batches.clear();
     const Registry& registry = world.registry();
 
-    // Everything drawn, in order: layer, order, then a sprite before a map, then the entity.
-    struct Item {
-        std::int32_t layer = 0;
-        std::int32_t order = 0;
-        bool map = false;
-        std::uint32_t id = 0;
-        Entity entity = k_no_entity;
-    };
-    // Kept from call to call, so gathering allocates nothing once they have grown.
-    thread_local std::vector<Item> items;
+    using Item = SpriteScratch::Item;
+    std::vector<Item>& items = scratch.items;
     items.clear();
     for (const auto [entity, sprite] : registry.view<const SpriteRenderer>().each()) {
         if (sprite.visible && registry.all_of<WorldTransform>(entity)) {
@@ -588,15 +520,8 @@ void gather_sprites(const World& world, const Mat4& view, std::vector<renderer::
         }
     }
 
-    struct Run {
-        std::size_t first = 0;
-        std::size_t count = 0;
-        rhi::TextureHandle texture;
-        std::uint32_t width = 1;
-        std::uint32_t height = 1;
-        renderer::SpriteFilter filter = renderer::SpriteFilter::Pixel;
-    };
-    thread_local std::vector<Run> runs;
+    using Run = SpriteScratch::Run;
+    std::vector<Run>& runs = scratch.runs;
     runs.clear();
     const auto add = [&](const renderer::SpriteQuad& quad, const AssetRef<TextureAsset>& texture,
                          renderer::SpriteFilter filter) {

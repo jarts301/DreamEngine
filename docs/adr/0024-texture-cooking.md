@@ -72,4 +72,5 @@ chooses per platform in its `[cook]` table.
   RGBA8. Cooked, the sample crate's file is 2.7 KB.
 - Textures that aren't colors, such as normal maps, would need a linear cook; none exist yet.
 - Images an interface document loads, through RmlUi or markup, aren't cooked: they are read as PNG.
-- Every game links libktx, with its transcoder, which makes it larger.
+- Every game links libktx, with its transcoder, which makes it larger. (Since ADR 0044, only games
+  that list the `ktx` texture decoder do.)

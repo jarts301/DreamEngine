@@ -40,10 +40,10 @@ void AssetManager::end_loading() {
     m_loading.pop_back();
 }
 
-void AssetManager::store(Key key, std::shared_ptr<void> slot, std::vector<std::string> files,
+void AssetManager::store(Key key, const std::shared_ptr<void>& slot, std::vector<std::string> files,
                          std::function<core::Result<void>()> reload) {
     std::erase_if(m_cache, [](const auto& entry) { return entry.second.slot.expired(); });
-    m_cache.insert_or_assign(key, Entry{std::move(slot), {}, std::move(reload)});
+    m_cache.insert_or_assign(key, Entry{slot, {}, std::move(reload)});
     set_files(key, std::move(files));
 }
 

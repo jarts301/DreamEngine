@@ -143,10 +143,34 @@ class SceneLoader;
 // For Renderer: lets scene files use "camera_2d", "sprite", "sprite_animator" and "tile_map".
 void register_sprite_components(SceneLoader& scenes);
 
+// The lists gather_sprites works with, which its caller keeps between calls, so gathering allocates
+// nothing once they have grown.
+struct SpriteScratch {
+    // Something drawn, in order: layer, order, then a sprite before a map, then the entity.
+    struct Item {
+        std::int32_t layer = 0;
+        std::int32_t order = 0;
+        bool map = false;
+        std::uint32_t id = 0;
+        Entity entity = k_no_entity;
+    };
+    // Quads in a row that one batch draws.
+    struct Run {
+        std::size_t first = 0;
+        std::size_t count = 0;
+        rhi::TextureHandle texture;
+        std::uint32_t width = 1;
+        std::uint32_t height = 1;
+        renderer::SpriteFilter filter = renderer::SpriteFilter::Pixel;
+    };
+    std::vector<Item> items;
+    std::vector<Run> runs;
+};
+
 // For Renderer: the world's sprites and the tiles of its tile maps that `view` sees, in drawing
 // order, as quads and the batches that draw them, which point into `quads`.
 void gather_sprites(const World& world, const core::Mat4& view,
                     std::vector<renderer::SpriteQuad>& quads,
-                    std::vector<renderer::SpriteBatch>& batches);
+                    std::vector<renderer::SpriteBatch>& batches, SpriteScratch& scratch);
 
 } // namespace dream::runtime

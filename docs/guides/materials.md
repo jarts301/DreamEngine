@@ -15,8 +15,9 @@ in it, and what to check when they don't. The design is recorded in
 - Always set **metallic** and **roughness** on every material. glTF's defaults are *fully metallic*
   and *fully rough*, which makes a plain material look like dull metal.
 - Textures that the model refers to as PNG files in a `textures/` folder beside it are compressed
-  by the build. Name data maps with a suffix such as `_normal` or `_orm` so they are cooked as
-  data, not as colors.
+  by the build, and read with the `ktx` texture decoder: list `texture_decoder = ["ktx", "null"]`
+  for each platform. Name data maps with a suffix such as `_normal` or `_orm` so they are cooked
+  as data, not as colors.
 - Normal maps use glTF's convention: green points **up** the image (the "OpenGL" style). Maps made
   for DirectX need their green channel flipped.
 

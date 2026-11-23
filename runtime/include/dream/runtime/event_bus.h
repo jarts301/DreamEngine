@@ -108,7 +108,8 @@ private:
 
     std::shared_ptr<detail::EventBusState> m_state = std::make_shared<detail::EventBusState>();
     std::vector<std::function<void()>> m_queue;
-    std::vector<std::function<void()>> m_delivering;
+    // An empty list kept for the next flush, so it needs no new memory.
+    std::vector<std::function<void()>> m_spare;
 };
 
 } // namespace dream::runtime

@@ -107,7 +107,8 @@ private:
         particles::EmitterDesc desc;
         std::uint64_t seen = 0;
     };
-    using Key = std::pair<const void*, std::uint32_t>;
+    // By World::id and entity.
+    using Key = std::pair<std::uint64_t, std::uint32_t>;
 
     [[nodiscard]] Live* find(const World& world, Entity entity);
     [[nodiscard]] const Live* find(const World& world, Entity entity) const;
@@ -115,6 +116,7 @@ private:
 
     std::unique_ptr<particles::ParticleSystem> m_system;
     std::map<Key, Live> m_live;
+    WorldLifetimes m_worlds;
     std::uint64_t m_update = 0;
 };
 

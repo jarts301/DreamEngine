@@ -161,7 +161,7 @@ void Animation::update(World& world, double seconds) {
         }
 
         // The entity's player, made again if its model changed.
-        Live& live = m_live[{&registry, static_cast<std::uint32_t>(entt::to_integral(entity))}];
+        Live& live = m_live[{world.id(), static_cast<std::uint32_t>(entt::to_integral(entity))}];
         if (live.model != &model) {
             release(live);
             live.model = &model;
@@ -211,15 +211,19 @@ void Animation::update(World& world, double seconds) {
         }
     }
 
-    // Players of entities no longer animated in this world go.
+    // Players of entities no longer animated in this world go, and those of destroyed worlds.
+    m_worlds.note(world);
     for (auto it = m_live.begin(); it != m_live.end();) {
-        if (it->first.first == &registry && it->second.seen != m_update) {
+        const bool gone = it->first.first == world.id() ? it->second.seen != m_update
+                                                        : m_worlds.destroyed(it->first.first);
+        if (gone) {
             release(it->second);
             it = m_live.erase(it);
         } else {
             ++it;
         }
     }
+    m_worlds.prune();
 }
 
 core::Result<void> Animation::play(World& world, Entity entity, std::string_view clip,

@@ -29,6 +29,7 @@ physics3d = ["impulse"]
 audio = ["portaudio"]
 ui = ["markup"]
 debug_ui = ["imgui"]
+texture_decoder = ["ktx", "null"]
 
 [audio]
 muted = true

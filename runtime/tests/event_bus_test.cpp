@@ -172,3 +172,26 @@ TEST_CASE("EventBus keeps events enqueued during a flush for the next flush") {
     bus.flush();
     CHECK(calls == 2);
 }
+
+TEST_CASE("EventBus lets a listener flush again while a flush delivers") {
+    EventBus bus;
+    std::vector<int> received;
+    const Subscription subscription = bus.subscribe<Hit>([&](const Hit& hit) {
+        received.push_back(hit.damage);
+        // The first hit queues another and delivers it at once, inside the outer flush.
+        if (hit.damage == 1) {
+            bus.enqueue(Hit{10});
+            bus.flush();
+        }
+    });
+
+    bus.enqueue(Hit{1});
+    bus.enqueue(Hit{2});
+    bus.flush();
+    CHECK(received == std::vector<int>{1, 10, 2});
+
+    // Both lists work as before afterwards.
+    bus.enqueue(Hit{3});
+    bus.flush();
+    CHECK(received == std::vector<int>{1, 10, 2, 3});
+}
