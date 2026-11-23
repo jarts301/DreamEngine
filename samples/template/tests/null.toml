@@ -1,0 +1,34 @@
+[app]
+window = "hidden"
+max_fps = 0
+
+[game]
+quit_after_frames = 10
+
+[input.actions]
+toggle_spin = ["key:space"]
+quit = ["key:escape"]
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["null"]
+renderer = ["forward"]
+texture_decoder = ["ktx", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["null"]
+renderer = ["forward"]
+texture_decoder = ["ktx", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["null"]
+renderer = ["forward"]
+texture_decoder = ["ktx", "null"]
+
+[audio]
+muted = true

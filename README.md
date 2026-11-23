@@ -36,6 +36,39 @@ cmake --workflow --preset android-arm64-debug
 
 Each preset also has a `-release` version. Output goes to `build/<preset>/`.
 
+## Make a game
+
+A game lives in a repository of its own and uses the engine as an SDK. Install the SDK from any
+Windows build, to a folder with a short path:
+
+```powershell
+cmake --install build/windows-release --prefix C:/DreamEngineSDK
+```
+
+The SDK is the engine's sources, which each game builds with its own module choices, and the
+`dream` tool in its `bin` folder. Make a game with it:
+
+```powershell
+C:/DreamEngineSDK/bin/dream.exe new space_crates --id com.studio.spacecrates
+```
+
+That makes `space_crates/`, a project ready for `git init`: a `CMakeLists.txt` that calls
+`find_package(DreamEngine)`, the engine's presets, a `vcpkg.json` made from the SDK's, a
+`dream.toml`, a small game that spins a crate from a scene file, and its assets. Its presets find the
+SDK through the `DREAM_ENGINE_SDK` environment variable, as they find vcpkg through `VCPKG_ROOT`:
+
+```powershell
+$env:DREAM_ENGINE_SDK = "C:/DreamEngineSDK"
+cd space_crates
+cmake --preset windows-debug
+cmake --build --preset windows-debug
+```
+
+A checkout of the engine works as an SDK too: point `DREAM_ENGINE_SDK` at it, and run the `dream`
+built in it, `build/<preset>/tools/dream/dream.exe`. Keep games at short paths on Windows, since the
+engine builds deep inside the game's build folder. See
+[ADR 0045](docs/adr/0045-installable-sdk.md) and the project's own `README.md`.
+
 ## Run the cube
 
 After building, run the cube on Windows. Space or a click toggles the spin, and Escape quits:

@@ -1,0 +1,44 @@
+# __GAME_TITLE__'s configuration: its window, its controls, and the modules each platform uses.
+# The engine's README lists every interface and its modules.
+
+[app]
+organization = "Example"
+name = "__GAME_NAME__"
+title = "__GAME_TITLE__"
+width = 1280
+height = 720
+
+[input.actions]
+toggle_spin = ["key:space", "mouse:left", "touch", "gamepad:south"]
+quit = ["key:escape", "gamepad:back"]
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "directx12", "directx", "opengl", "null"]
+renderer = ["forward", "null"]
+mesh_simplifier = ["meshoptimizer", "null"]
+tangent_generator = ["mikktspace", "null"]
+texture_decoder = ["ktx", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "opengles", "null"]
+renderer = ["forward", "null"]
+mesh_simplifier = ["meshoptimizer", "null"]
+tangent_generator = ["mikktspace", "null"]
+texture_decoder = ["ktx", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "null"]
+renderer = ["forward", "null"]
+mesh_simplifier = ["meshoptimizer", "null"]
+tangent_generator = ["mikktspace", "null"]
+texture_decoder = ["ktx", "null"]
+
+[game]
+# Quits after this many frames when above 0, for a quick check that the game runs.
+quit_after_frames = 0
