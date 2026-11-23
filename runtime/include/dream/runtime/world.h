@@ -6,8 +6,11 @@
 #include "dream/core/result.h"
 #include "dream/runtime/ecs.h"
 
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 namespace dream::runtime {
 
@@ -36,6 +39,8 @@ struct Parent {
 // and are added through registry(). Not thread-safe.
 class World {
 public:
+    World();
+
     // The entity starts with a Transform and a WorldTransform, plus a Name if one is given.
     Entity create_entity(std::string_view name = {});
 
@@ -60,11 +65,49 @@ public:
         return m_registry;
     }
 
+    // A number no other world in the program has had, for systems that keep state per world and
+    // entity, such as Animation and Particles. A world's address can be reused by the next one.
+    [[nodiscard]] std::uint64_t id() const noexcept {
+        return m_id;
+    }
+
+    // Expires when the world is destroyed, so those systems can release what they kept for it.
+    [[nodiscard]] std::weak_ptr<const void> lifetime() const noexcept {
+        return m_lifetime;
+    }
+
 private:
     Registry m_registry;
+    std::uint64_t m_id = 0;
+    std::shared_ptr<const void> m_lifetime;
     // For update_transforms: by entity index, the update in which each was last worked out.
     std::vector<std::uint32_t> m_resolved;
     std::uint32_t m_resolve_pass = 0;
+};
+
+// The worlds a system has seen, for one that keeps state per World::id to tell which have since
+// been destroyed.
+class WorldLifetimes {
+public:
+    void note(const World& world) {
+        if (!m_worlds.contains(world.id())) {
+            m_worlds.emplace(world.id(), world.lifetime());
+        }
+    }
+
+    // Whether the world with this id was noted and has since been destroyed.
+    [[nodiscard]] bool destroyed(std::uint64_t id) {
+        const auto found = m_worlds.find(id);
+        return found != m_worlds.end() && found->second.expired();
+    }
+
+    // Drops the destroyed worlds, once nothing is kept for them.
+    void prune() {
+        std::erase_if(m_worlds, [](const auto& entry) { return entry.second.expired(); });
+    }
+
+private:
+    std::unordered_map<std::uint64_t, std::weak_ptr<const void>> m_worlds;
 };
 
 } // namespace dream::runtime

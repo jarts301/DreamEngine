@@ -4,16 +4,61 @@
 #include "dream/core/profile.h"
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 #include <utility>
 #include <vector>
 
 namespace dream::runtime {
-namespace {
 
-core::Error scene_error(std::string_view message) {
-    return core::Error{core::ErrorCode::ParseError, std::string(message)};
+core::Error scene_error(std::string message) {
+    return core::Error{core::ErrorCode::ParseError, std::move(message)};
 }
+
+void SettingReader::angle(std::string_view key, std::optional<float>& into) {
+    if (failed() || !m_data.has(key)) {
+        return;
+    }
+    float degrees = 0.0f;
+    number(key, degrees);
+    if (!failed()) {
+        into = core::radians(degrees);
+    }
+}
+
+void SettingReader::whole(std::string_view key, std::uint32_t& into) {
+    float value = static_cast<float>(into);
+    number(key, value);
+    if (failed()) {
+        return;
+    }
+    if (value < 0.0f || value != std::floor(value) || value > 16777216.0f) {
+        fail(std::format("'{}' must be a whole number, 0 or more", key));
+        return;
+    }
+    into = static_cast<std::uint32_t>(value);
+}
+
+void SettingReader::integer(std::string_view key, std::int32_t& into) {
+    float value = static_cast<float>(into);
+    number(key, value);
+    if (failed()) {
+        return;
+    }
+    if (value != std::floor(value) || std::abs(value) > 1.0e6f) {
+        fail(std::format("'{}' must be a whole number", key));
+        return;
+    }
+    into = static_cast<std::int32_t>(value);
+}
+
+void SettingReader::fail(std::string message) {
+    if (!m_failed.has_value()) {
+        m_failed = scene_error(std::move(message));
+    }
+}
+
+namespace {
 
 core::Quat quat_from_euler_degrees(core::Vec3 degrees) {
     const core::Quat x =

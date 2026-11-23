@@ -224,7 +224,7 @@ private:
     [[nodiscard]] std::shared_ptr<void> find_cached(const Key& key) const;
     [[nodiscard]] bool begin_loading(const Key& key, std::vector<std::string>& files);
     void end_loading();
-    void store(Key key, std::shared_ptr<void> slot, std::vector<std::string> files,
+    void store(Key key, const std::shared_ptr<void>& slot, std::vector<std::string> files,
                std::function<core::Result<void>()> reload);
     void set_files(const Key& key, std::vector<std::string> files);
 

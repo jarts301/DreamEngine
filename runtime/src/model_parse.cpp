@@ -4,6 +4,7 @@
 // sends a model to the GPU.
 
 #include "dream/runtime/model.h"
+#include "dream/runtime/texture.h"
 
 #include "dream/core/log.h"
 #include "dream/core/math/matrix.h"
@@ -35,23 +36,17 @@
 #include <optional>
 
 namespace dream::runtime {
-namespace {
 
-// Whether a file is a KTX2 texture, by its identifier. The same as texture.h's is_ktx2, which
-// this file doesn't use, so the model cook tool needs no KTX library.
-bool is_ktx2_file(std::span<const std::byte> file) {
-    constexpr std::array<unsigned char, 12> k_identifier{0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32,
-                                                          0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A};
-    if (file.size() < k_identifier.size()) {
-        return false;
-    }
-    for (std::size_t index = 0; index < k_identifier.size(); ++index) {
-        if (static_cast<unsigned char>(file[index]) != k_identifier[index]) {
-            return false;
-        }
-    }
-    return true;
+// Here rather than in texture.cpp, so the model cook tool, which builds this file, needs no KTX
+// library.
+bool is_ktx2(std::span<const std::byte> file) noexcept {
+    constexpr std::array<unsigned char, 12> k_identifier{0xAB, 'K', 'T', 'X', ' ', '2',
+                                                          '0', 0xBB, 0x0D, 0x0A, 0x1A, 0x0A};
+    return file.size() >= k_identifier.size() &&
+           std::memcmp(file.data(), k_identifier.data(), k_identifier.size()) == 0;
 }
+
+namespace {
 
 core::Error model_error(std::string message) {
     return core::Error{core::ErrorCode::ParseError, std::move(message)};
@@ -98,7 +93,7 @@ core::Result<int> add_image(const cgltf_image& image, bool color, ModelData& mod
     }
 
     ImageData data;
-    if (is_ktx2_file(file)) {
+    if (is_ktx2(file)) {
         data.ktx2 = std::move(file);
     } else {
         core::Result<ImageData> decoded = decode_image(file);

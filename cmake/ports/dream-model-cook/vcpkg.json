@@ -1,6 +1,6 @@
 {
   "name": "dream-model-cook",
-  "version": "1",
+  "version": "2",
   "description": "DreamEngine's model cook tool, built for the build machine, which makes models' levels of detail at build time when the engine's build can't build it itself, as for Android (ADR 0042). Raise the version whenever runtime/src/model_parse.cpp or tools/model_cook change, so vcpkg rebuilds it",
   "license": "MIT",
   "dependencies": [

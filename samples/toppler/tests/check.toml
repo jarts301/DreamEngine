@@ -28,6 +28,7 @@ animation = ["ozz"]
 physics3d = ["jolt"]
 audio = ["miniaudio"]
 ui = ["rmlui"]
+texture_decoder = ["ktx", "null"]
 
 [modules.android]
 platform = ["sdl3"]
@@ -40,6 +41,7 @@ animation = ["ozz"]
 physics3d = ["jolt"]
 audio = ["miniaudio"]
 ui = ["rmlui"]
+texture_decoder = ["ktx", "null"]
 
 [modules.linux]
 platform = ["sdl3"]
@@ -52,6 +54,7 @@ animation = ["ozz"]
 physics3d = ["jolt"]
 audio = ["miniaudio"]
 ui = ["rmlui"]
+texture_decoder = ["ktx", "null"]
 
 [audio]
 muted = true

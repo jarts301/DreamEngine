@@ -65,13 +65,17 @@ void EventBus::dispatch(const void* type, const void* event) {
 }
 
 void EventBus::flush() {
-    // Swapped, so both lists keep their memory from frame to frame, and events queued while these
-    // are delivered wait for the next flush.
-    m_delivering.swap(m_queue);
-    for (const auto& deliver : m_delivering) {
+    // The queued events move to a list of their own, so events queued while they are delivered
+    // wait for the next flush, and a listener may flush again without disturbing this one. The
+    // lists are swapped rather than copied, so a flush allocates nothing once they have grown.
+    std::vector<std::function<void()>> delivering = std::move(m_spare);
+    delivering.clear();
+    delivering.swap(m_queue);
+    for (const auto& deliver : delivering) {
         deliver();
     }
-    m_delivering.clear();
+    delivering.clear();
+    m_spare = std::move(delivering);
 }
 
 } // namespace dream::runtime

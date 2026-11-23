@@ -2,8 +2,6 @@
 find_package(EnTT CONFIG REQUIRED GLOBAL)
 find_package(Stb REQUIRED)
 find_path(DREAM_CGLTF_INCLUDE_DIR cgltf.h REQUIRED)
-# Reads cooked KTX2 textures and transcodes them for the device. Apache 2.0.
-find_package(Ktx CONFIG REQUIRED)
 
 add_library(dream_runtime STATIC
     src/app.cpp
@@ -47,9 +45,8 @@ target_link_libraries(dream_runtime PUBLIC
     dream::interface_debug_ui dream::interface_profiler dream::interface_renderer
     dream::interface_mesh_simplifier dream::interface_tangent_generator
     dream::interface_input_device dream::interface_animation dream::interface_particles
-    dream::interface_crash_upload
+    dream::interface_crash_upload dream::interface_texture_decoder
     EnTT::EnTT)
-target_link_libraries(dream_runtime PRIVATE KTX::ktx)
 dream_configure_target(dream_runtime)
 
 if(DREAM_BUILD_TESTS)
@@ -84,7 +81,6 @@ if(DREAM_BUILD_TESTS)
             entry/heap_counting.cpp
         LIBRARIES
             dream::runtime
-            KTX::ktx
     )
 
     # Runs a game out of memory under a limit the program sets on itself, which can't be lifted,

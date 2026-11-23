@@ -121,8 +121,9 @@ private:
 
     std::unique_ptr<animation::AnimationSystem> m_system;
     std::unordered_map<const ModelAsset*, Built> m_built;
-    // By world registry and entity.
-    std::map<std::pair<const void*, std::uint32_t>, Live> m_live;
+    // By World::id and entity.
+    std::map<std::pair<std::uint64_t, std::uint32_t>, Live> m_live;
+    WorldLifetimes m_worlds;
     std::uint64_t m_update = 0;
     std::vector<animation::Layer> m_layers;
     std::vector<core::Mat4> m_model_space;

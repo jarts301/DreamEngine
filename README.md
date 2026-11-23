@@ -280,8 +280,13 @@ textures = "ktx2_uastc"      # The default. Or "ktx2_etc1s", smaller; or "none",
 textures = "ktx2_etc1s"
 ```
 
+A game whose textures are cooked reads them with the `ktx` texture decoder, which it lists for
+each platform, as `texture_decoder = ["ktx", "null"]`; the build stops with that line if it is
+missing. A game that cooks none needn't list it, and links no KTX library.
+
 Configure with `-DDREAM_COOK_TEXTURES=OFF` to ship the PNGs for every game. See
-[ADR 0043](docs/adr/0043-crash-uploads-and-texture-cookers.md).
+[ADR 0043](docs/adr/0043-crash-uploads-and-texture-cookers.md) and
+[ADR 0044](docs/adr/0044-code-health-review.md).
 
 On PC, `cmake --build <folder> --target <game>_package` puts the program and an `assets.pak`
 holding all its assets in `<game>_package/`, ready to hand out. See
@@ -359,6 +364,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 | `renderer` | `forward_plus`, `forward`, `null` | all | all | `forward_plus` takes up to 256 point and spot lights in clusters, `forward` the 16 nearest; both bring the same shaders. `null` only clears the window. |
 | `mesh_simplifier` | `meshoptimizer`, `null` | all | all | Makes the simpler versions of models that the renderer draws far away. Optional. |
 | `tangent_generator` | `mikktspace`, `null` | all | all | Makes tangents for normal maps on models exported without them. Optional. |
+| `texture_decoder` | `ktx`, `null` | all | all | Reads the textures the build cooked. Needed, first in the list, by every game whose textures are cooked; the build says so. |
 | `input_device` | `sdl3_gamepad`, `null` | all | all | Gamepads, bound to the same actions as keys. Optional. |
 | `animation` | `ozz`, `null` | all | all | Plays skeletal animation; `null` leaves models at rest. Optional. |
 | `physics3d` | `jolt`, `impulse`, `null` | all | all | `impulse` is the engine's own library. |

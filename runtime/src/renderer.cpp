@@ -428,8 +428,20 @@ core::Result<void> Renderer::initialize(App& app,
     }
     m_shaders = std::move(shaders).value();
     m_ui_textures = std::make_unique<UiTextures>(app, *device);
-    DREAM_LOG_INFO("Cooked textures load as {}",
-                   texture_format_name(cooked_color_format(*device)));
+
+    // Reads the textures the build cooked, when the project lists a decoder (ADR 0043). Without
+    // one, textures load from their PNG files.
+    m_texture_decoder.reset();
+    if (app.has_module<texture_decoder::TextureDecoder>()) {
+        core::Result<std::unique_ptr<texture_decoder::TextureDecoder>> decoder =
+            app.create_module<texture_decoder::TextureDecoder>();
+        if (!decoder.has_value()) {
+            return decoder.error();
+        }
+        m_texture_decoder = std::move(decoder).value();
+        DREAM_LOG_INFO("Cooked textures load as {}",
+                       texture_format_name(m_texture_decoder->color_format(*device)));
+    }
 
     // Simpler versions of models, when the project lists a simplifier (ADR 0032).
     core::Result<LodOptions> lod_options = read_lod_options(app.config());
@@ -461,31 +473,12 @@ core::Result<void> Renderer::initialize(App& app,
 
     // Textures drawn in the world, such as particles': the cooked one when the build made it.
     app.assets().register_loader<TextureAsset>(
-        [device](AssetLoadContext& context) -> core::Result<TextureAsset> {
-            const std::string path(context.path);
-            if (!path.ends_with(".ktx2")) {
-                if (const auto cooked = context.files.read(cooked_texture_path(path));
-                    cooked.has_value()) {
-                    core::Result<TextureData> loaded = load_ktx2(cooked.value(), *device);
-                    if (!loaded.has_value()) {
-                        return loaded.error();
-                    }
-                    const core::Result<rhi::TextureHandle> texture =
-                        device->create_texture(loaded.value().desc, loaded.value().pixels);
-                    if (!texture.has_value()) {
-                        return texture.error();
-                    }
-                    return TextureAsset{.texture = GpuTexture(*device, texture.value()),
-                                        .width = loaded.value().desc.width,
-                                        .height = loaded.value().desc.height};
-                }
-            }
-            const auto file = context.files.read(path);
-            if (!file.has_value()) {
-                return file.error();
-            }
-            if (is_ktx2(file.value())) {
-                core::Result<TextureData> loaded = load_ktx2(file.value(), *device);
+        [device, decoder = m_texture_decoder.get()](
+            AssetLoadContext& context) -> core::Result<TextureAsset> {
+            const auto from_cooked =
+                [&](std::span<const std::byte> cooked) -> core::Result<TextureAsset> {
+                core::Result<TextureData> loaded = decode_cooked_texture(
+                    decoder, cooked, *device, context.path);
                 if (!loaded.has_value()) {
                     return loaded.error();
                 }
@@ -497,6 +490,20 @@ core::Result<void> Renderer::initialize(App& app,
                 return TextureAsset{.texture = GpuTexture(*device, texture.value()),
                                     .width = loaded.value().desc.width,
                                     .height = loaded.value().desc.height};
+            };
+            const std::string path(context.path);
+            if (decoder != nullptr && !path.ends_with(".ktx2")) {
+                if (const auto cooked = context.files.read(cooked_texture_path(path));
+                    cooked.has_value()) {
+                    return from_cooked(cooked.value());
+                }
+            }
+            const auto file = context.files.read(path);
+            if (!file.has_value()) {
+                return file.error();
+            }
+            if (is_ktx2(file.value())) {
+                return from_cooked(file.value());
             }
             const core::Result<ImageData> image = decode_image(file.value());
             if (!image.has_value()) {
@@ -517,7 +524,7 @@ core::Result<void> Renderer::initialize(App& app,
 
     app.assets().register_loader<ModelAsset>(
         [device, simplifier = m_simplifier.get(), tangents = m_tangents.get(),
-         options = lod_options.value()](
+         decoder = m_texture_decoder.get(), options = lod_options.value()](
             AssetLoadContext& context) -> core::Result<ModelAsset> {
             const auto file = context.files.read(context.path);
             if (!file.has_value()) {
@@ -577,7 +584,7 @@ core::Result<void> Renderer::initialize(App& app,
                                                    context.path, made.error().message)};
                 }
             }
-            return create_model_asset(*device, data.value());
+            return create_model_asset(*device, data.value(), decoder);
         });
 
     app.scenes().register_component("mesh", &read_mesh);
@@ -727,7 +734,8 @@ void Renderer::render(const World& world, rhi::CommandList& commands, platform::
     m_sprite_quads.clear();
     m_sprite_batches.clear();
     if (frame.sprite_view.has_value()) {
-        gather_sprites(world, *frame.sprite_view, m_sprite_quads, m_sprite_batches);
+        gather_sprites(world, *frame.sprite_view, m_sprite_quads, m_sprite_batches,
+                       *m_sprite_scratch);
         frame.sprites = m_sprite_batches;
     }
     // Lines need a camera: the 3D one, or else the 2D one.

@@ -17,10 +17,6 @@
 namespace dream::runtime {
 namespace {
 
-core::Error scene_error(std::string message) {
-    return core::Error{core::ErrorCode::InvalidArgument, std::move(message)};
-}
-
 // A setting that is one number for every particle, or [min, max] to pick from.
 core::Result<particles::Range> read_range(const ComponentData& data, std::string_view key,
                                           particles::Range fallback, float scale = 1.0f) {
@@ -68,59 +64,48 @@ core::Result<void> read_particle_emitter(ComponentContext& context) {
     ParticleEmitter emitter;
     particles::EmitterDesc& desc = emitter.desc;
 
-    // Reads each setting in turn, stopping at the first wrong one.
-    std::optional<core::Error> failed;
-    const auto take = [&failed](auto result, auto& into) {
-        if (failed.has_value()) {
-            return;
-        }
-        if (!result.has_value()) {
-            failed = result.error();
-            return;
-        }
-        into = std::move(result).value();
-    };
+    SettingReader read(data);
 
     std::string texture;
-    std::string blend;
-    std::string shape;
-    take(data.text("texture", ""), texture);
-    take(data.text("blend", "alpha"), blend);
-    take(data.text("shape", "point"), shape);
-    take(data.flag("emitting", emitter.emitting), emitter.emitting);
-    take(data.number("time_scale", emitter.time_scale), emitter.time_scale);
-    take(data.number("rate", desc.rate), desc.rate);
+    std::string blend = "alpha";
+    std::string shape = "point";
+    read.text("texture", texture);
+    read.text("blend", blend);
+    read.text("shape", shape);
+    read.flag("emitting", emitter.emitting);
+    read.number("time_scale", emitter.time_scale);
+    read.number("rate", desc.rate);
     float burst = static_cast<float>(desc.burst);
     float max_particles = static_cast<float>(desc.max_particles);
     float seed = static_cast<float>(desc.seed);
-    take(data.number("burst", burst), burst);
-    take(data.number("max_particles", max_particles), max_particles);
-    take(data.number("seed", seed), seed);
-    take(data.number("duration", desc.duration), desc.duration);
-    take(data.flag("loop", desc.loop), desc.loop);
-    take(data.vec3("extents", desc.extents), desc.extents);
+    read.number("burst", burst);
+    read.number("max_particles", max_particles);
+    read.number("seed", seed);
+    read.number("duration", desc.duration);
+    read.flag("loop", desc.loop);
+    read.vec3("extents", desc.extents);
     float radius = desc.extents.x;
-    take(data.number("radius", radius), radius);
+    read.number("radius", radius);
     float cone_degrees = desc.cone_angle * 180.0f / core::k_pi;
-    take(data.number("cone_angle", cone_degrees), cone_degrees);
-    take(read_range(data, "lifetime", desc.lifetime), desc.lifetime);
-    take(read_range(data, "speed", desc.speed), desc.speed);
-    take(read_range(data, "size", desc.size), desc.size);
-    take(data.number("end_size", desc.end_size), desc.end_size);
+    read.number("cone_angle", cone_degrees);
+    read.take([&] { return read_range(data, "lifetime", desc.lifetime); }, desc.lifetime);
+    read.take([&] { return read_range(data, "speed", desc.speed); }, desc.speed);
+    read.take([&] { return read_range(data, "size", desc.size); }, desc.size);
+    read.number("end_size", desc.end_size);
     // Degrees in the file, radians in the settings.
-    take(read_range(data, "rotation", {}, core::k_pi / 180.0f), desc.rotation);
-    take(read_range(data, "spin", {}, core::k_pi / 180.0f), desc.spin);
+    read.take([&] { return read_range(data, "rotation", {}, core::k_pi / 180.0f); }, desc.rotation);
+    read.take([&] { return read_range(data, "spin", {}, core::k_pi / 180.0f); }, desc.spin);
     core::Vec3 start_color{desc.start_color.x, desc.start_color.y, desc.start_color.z};
     core::Vec3 end_color{desc.end_color.x, desc.end_color.y, desc.end_color.z};
-    take(data.vec3("start_color", start_color), start_color);
-    take(data.vec3("end_color", end_color), end_color);
-    take(data.number("start_alpha", desc.start_color.w), desc.start_color.w);
-    take(data.number("end_alpha", desc.end_color.w), desc.end_color.w);
-    take(data.vec3("gravity", desc.gravity), desc.gravity);
-    take(data.number("drag", desc.drag), desc.drag);
-    take(data.flag("local_space", desc.local_space), desc.local_space);
-    if (failed.has_value()) {
-        return *failed;
+    read.vec3("start_color", start_color);
+    read.vec3("end_color", end_color);
+    read.number("start_alpha", desc.start_color.w);
+    read.number("end_alpha", desc.end_color.w);
+    read.vec3("gravity", desc.gravity);
+    read.number("drag", desc.drag);
+    read.flag("local_space", desc.local_space);
+    if (core::Result<void> done = read.result(); !done.has_value()) {
+        return done;
     }
 
     for (const float count : {burst, max_particles, seed}) {
@@ -210,11 +195,11 @@ void Particles::update(World& world, double seconds) {
     }
     DREAM_PROFILE_ZONE("Particles");
     ++m_update;
-    const void* const registry = &world.registry();
+    const std::uint64_t world_id = world.id();
     std::uint32_t alive = 0;
     for (const auto [entity, transform, emitter] :
          world.registry().view<const WorldTransform, ParticleEmitter>().each()) {
-        Live& live = m_live[{registry, static_cast<std::uint32_t>(entt::to_integral(entity))}];
+        Live& live = m_live[{world_id, static_cast<std::uint32_t>(entt::to_integral(entity))}];
         const bool fresh = live.seen == 0;
         live.seen = m_update;
         // New, or with changed settings: a new emitter of the module.
@@ -242,15 +227,20 @@ void Particles::update(World& world, double seconds) {
         }
         alive += static_cast<std::uint32_t>(emitter.particles.size());
     }
-    // Emitters whose entities are gone, or lost their emitter, from this world.
+    // Emitters whose entities are gone, or lost their emitter, from this world, and those of
+    // destroyed worlds.
+    m_worlds.note(world);
     for (auto it = m_live.begin(); it != m_live.end();) {
-        if (it->first.first == registry && it->second.seen != m_update) {
+        const bool gone = it->first.first == world_id ? it->second.seen != m_update
+                                                      : m_worlds.destroyed(it->first.first);
+        if (gone) {
             release(it->second);
             it = m_live.erase(it);
         } else {
             ++it;
         }
     }
+    m_worlds.prune();
     DREAM_PROFILE_VALUE("Particles alive", alive);
 }
 
@@ -263,13 +253,13 @@ void Particles::warm_up(World& world, double seconds) {
 
 Particles::Live* Particles::find(const World& world, Entity entity) {
     const auto found = m_live.find(
-        {&world.registry(), static_cast<std::uint32_t>(entt::to_integral(entity))});
+        {world.id(), static_cast<std::uint32_t>(entt::to_integral(entity))});
     return found != m_live.end() && found->second.emitter.is_valid() ? &found->second : nullptr;
 }
 
 const Particles::Live* Particles::find(const World& world, Entity entity) const {
     const auto found = m_live.find(
-        {&world.registry(), static_cast<std::uint32_t>(entt::to_integral(entity))});
+        {world.id(), static_cast<std::uint32_t>(entt::to_integral(entity))});
     return found != m_live.end() && found->second.emitter.is_valid() ? &found->second : nullptr;
 }
 

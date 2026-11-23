@@ -30,7 +30,8 @@ rhi::TextureFormat with_color_space(rhi::TextureFormat format, bool srgb) {
 
 } // namespace
 
-core::Result<ModelAsset> create_model_asset(rhi::Device& device, const ModelData& data) {
+core::Result<ModelAsset> create_model_asset(rhi::Device& device, const ModelData& data,
+                                            texture_decoder::TextureDecoder* decoder) {
     const auto vertices =
         device.create_buffer(rhi::BufferUsage::Vertex, std::as_bytes(std::span(data.vertices)));
     if (!vertices.has_value()) {
@@ -50,7 +51,8 @@ core::Result<ModelAsset> create_model_asset(rhi::Device& device, const ModelData
     for (const ImageData& image : data.images) {
         core::Result<rhi::TextureHandle> texture = rhi::TextureHandle{};
         if (!image.ktx2.empty()) {
-            core::Result<TextureData> loaded = load_ktx2(image.ktx2, device);
+            core::Result<TextureData> loaded =
+                decode_cooked_texture(decoder, image.ktx2, device, image.name);
             if (!loaded.has_value()) {
                 return loaded.error();
             }

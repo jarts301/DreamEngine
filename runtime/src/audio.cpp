@@ -14,10 +14,6 @@ namespace {
 
 constexpr std::size_t k_stream_threshold_bytes = 256 * 1024;
 
-core::Error scene_error(std::string message) {
-    return core::Error{core::ErrorCode::ParseError, std::move(message)};
-}
-
 core::Result<void> read_audio_source(ComponentContext& context) {
     const ComponentData& data = context.data;
     if (core::Result<void> known =

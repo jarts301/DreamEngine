@@ -49,10 +49,10 @@ The engine's own were fixed by keeping memory from frame to frame:
 | Vulkan descriptor sets | A map of the frame's texture combinations, emptied every frame | The map keeps its entries, marked by the pool reset they were made after |
 | `World::update_transforms` | A hash set of resolved entities | A list by entity index, marked by update number |
 | `forward` light clusters | A copy of the cluster counts | A member, assigned |
-| `EventBus::flush` | The queue, swapped for a new one | Two lists swapped back and forth |
+| `EventBus::flush` | The queue, swapped for a new one | Two lists swapped back and forth (re-entrant since ADR 0044) |
 | Jolt contacts, `Physics3D::step` | A new list of contacts every step | Lists kept and swapped |
 | `UserInterface::update` | A copy of the interface's events | A member, assigned |
-| `gather_sprites` | Its sorting lists | Kept from call to call |
+| `gather_sprites` | Its sorting lists | Kept from call to call (in the Renderer's `SpriteScratch` since ADR 0044) |
 
 What remains is outside the engine's own code: RmlUi allocates as it updates and draws documents,
 and the timeline profiler as it records. On the A52s the render demo, with the profiler listed,

@@ -21,6 +21,7 @@
 namespace dream::runtime {
 
 class App;
+struct SpriteScratch;
 
 // Interface layers, drawn over the scene in this order.
 enum class UiLayer : std::uint8_t { Game, Debug, Count };
@@ -260,6 +261,8 @@ private:
     // Makes simpler versions of models as they load, when the project lists one.
     std::unique_ptr<mesh_simplifier::MeshSimplifier> m_simplifier;
     std::unique_ptr<tangent_generator::TangentGenerator> m_tangents;
+    // Null when the project lists no texture decoder for the platform.
+    std::unique_ptr<texture_decoder::TextureDecoder> m_texture_decoder;
     // After the backend, so the asset that reloads its shaders goes first.
     AssetRef<RendererShaders> m_shaders;
     std::unique_ptr<UiTextures> m_ui_textures;
@@ -272,6 +275,7 @@ private:
     std::vector<renderer::ParticleBatch> m_particles;
     std::vector<renderer::SpriteQuad> m_sprite_quads;
     std::vector<renderer::SpriteBatch> m_sprite_batches;
+    std::unique_ptr<SpriteScratch> m_sprite_scratch = std::make_unique<SpriteScratch>();
     renderer::FrameStats m_last_stats;
 };
 

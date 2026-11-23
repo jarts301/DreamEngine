@@ -9,6 +9,7 @@
 #include "dream/renderer/scene_renderer.h"
 #include "dream/rhi/rhi.h"
 #include "dream/tangent_generator/tangent_generator.h"
+#include "dream/texture_decoder/texture_decoder.h"
 
 #include <array>
 #include <cstddef>
@@ -251,7 +252,10 @@ struct ModelAsset {
     std::vector<std::vector<core::Mat4>> rest_skinning{};
 };
 
-[[nodiscard]] core::Result<ModelAsset> create_model_asset(rhi::Device& device,
-                                                          const ModelData& data);
+// Puts a model on the GPU. Its cooked images, if any, are read with `decoder`, the project's
+// texture decoder, and fail without one.
+[[nodiscard]] core::Result<ModelAsset>
+create_model_asset(rhi::Device& device, const ModelData& data,
+                   texture_decoder::TextureDecoder* decoder = nullptr);
 
 } // namespace dream::runtime

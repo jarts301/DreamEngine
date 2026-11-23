@@ -28,6 +28,7 @@ tangent_generator = ["mikktspace"]
 animation = ["ozz"]
 physics3d = ["jolt"]
 physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
 
 [modules.android]
 platform = ["sdl3"]
@@ -39,6 +40,7 @@ tangent_generator = ["mikktspace"]
 animation = ["ozz"]
 physics3d = ["jolt"]
 physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
 
 [modules.linux]
 platform = ["sdl3"]
@@ -50,6 +52,7 @@ tangent_generator = ["mikktspace"]
 animation = ["ozz"]
 physics3d = ["jolt"]
 physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
 
 [audio]
 muted = true

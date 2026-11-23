@@ -29,6 +29,7 @@ tangent_generator = ["mikktspace"]
 animation = ["ozz"]
 physics3d = ["jolt"]
 physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
 
 [audio]
 muted = true

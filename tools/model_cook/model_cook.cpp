@@ -1,12 +1,13 @@
 // Makes a model's levels of detail at build time (ADR 0042): reads a .glb as the runtime does,
 // gives it tangents if the game's platform lists a tangent generator, makes its simpler versions
-// with meshoptimizer, and writes them to a .lods file that the runtime reads in place of making
-// them as the model loads.
+// with the mesh simplifier that platform lists, and writes them to a .lods file that the runtime
+// reads in place of making them as the model loads.
 //
 //     dream_model_cook <model.glb> <model.lods> <dream.toml> <windows|android|linux>
 //
 // The game's dream.toml gives the [lods] settings and the platform's module lists. With
-// `[lods] cook = false`, or `levels = 0`, it writes an empty file, which the runtime ignores.
+// `[lods] cook = false`, `levels = 0`, or no mesh simplifier listed for the platform, it writes an
+// empty file, which the runtime ignores.
 
 #include "dream/core/config.h"
 #include "dream/core/module_registry.h"
@@ -32,6 +33,7 @@ namespace dream::modules {
     core::ModuleRegistry& registry);
 [[nodiscard]] core::Result<void> register_tangent_generator_mikktspace(
     core::ModuleRegistry& registry);
+[[nodiscard]] core::Result<void> register_mesh_simplifier_null(core::ModuleRegistry& registry);
 [[nodiscard]] core::Result<void> register_tangent_generator_null(core::ModuleRegistry& registry);
 } // namespace dream::modules
 
@@ -93,8 +95,12 @@ int main(int argc, char** argv) {
     if (!options.has_value()) {
         return fail(model_name, options.error().message);
     }
-    // Nothing to cook: an empty file, which the runtime ignores.
-    if (!options.value().cook || options.value().levels == 0) {
+    // Nothing to cook: an empty file, which the runtime ignores. A platform that lists no mesh
+    // simplifier makes no simpler versions as models load, so it gets none from the build either.
+    const std::string simplifier_key = std::format("modules.{}.mesh_simplifier", platform);
+    const auto simplifiers = config.value().get_string_list(simplifier_key);
+    if (!options.value().cook || options.value().levels == 0 || !simplifiers.has_value() ||
+        simplifiers->empty()) {
         return write_file(output_path, {}) ? 0 : fail(model_name, "can't write the output");
     }
 
@@ -121,6 +127,7 @@ int main(int argc, char** argv) {
 
     core::ModuleRegistry registry;
     if (!modules::register_mesh_simplifier_meshoptimizer(registry).has_value() ||
+        !modules::register_mesh_simplifier_null(registry).has_value() ||
         !modules::register_tangent_generator_mikktspace(registry).has_value() ||
         !modules::register_tangent_generator_null(registry).has_value()) {
         return fail(model_name, "the modules can't be registered");
@@ -144,9 +151,10 @@ int main(int argc, char** argv) {
         }
     }
 
-    const std::vector<std::string> simplifier_name{"meshoptimizer"};
+    // The platform's first choice, as the game would pick it.
+    const std::vector<std::string> simplifier_preference(simplifiers->begin(), simplifiers->end());
     auto simplifier =
-        registry.create<mesh_simplifier::MeshSimplifier>(simplifier_name, config.value());
+        registry.create<mesh_simplifier::MeshSimplifier>(simplifier_preference, config.value());
     if (!simplifier.has_value()) {
         return fail(model_name, simplifier.error().message);
     }

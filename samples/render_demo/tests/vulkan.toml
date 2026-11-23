@@ -40,6 +40,7 @@ mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
 animation = ["ozz"]
 particles = ["cpu"]
+texture_decoder = ["ktx", "null"]
 
 [modules.android]
 platform = ["sdl3"]
@@ -50,6 +51,7 @@ mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
 animation = ["ozz"]
 particles = ["cpu"]
+texture_decoder = ["ktx", "null"]
 
 [modules.linux]
 platform = ["sdl3"]
@@ -60,6 +62,7 @@ mesh_simplifier = ["meshoptimizer"]
 tangent_generator = ["mikktspace"]
 animation = ["ozz"]
 particles = ["cpu"]
+texture_decoder = ["ktx", "null"]
 
 [audio]
 muted = true

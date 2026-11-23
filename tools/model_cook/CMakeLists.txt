@@ -22,6 +22,7 @@ add_executable(dream_model_cook
     model_cook.cpp
     "${root}/runtime/src/model_parse.cpp"
     "${root}/modules/mesh_simplifier/meshoptimizer/src/meshoptimizer_simplifier.cpp"
+    "${root}/modules/mesh_simplifier/null/src/null_simplifier.cpp"
     "${root}/modules/tangent_generator/mikktspace/src/mikktspace_tangent_generator.cpp"
     "${root}/modules/tangent_generator/null/src/null_tangent_generator.cpp"
     "${root}/core/src/archive.cpp"

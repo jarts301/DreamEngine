@@ -120,7 +120,8 @@ TEST_CASE("Sprites are gathered in order of layer and order, with their frame an
 
     std::vector<renderer::SpriteQuad> quads;
     std::vector<renderer::SpriteBatch> batches;
-    gather_sprites(world, *camera_2d_view(world, k_size), quads, batches);
+    SpriteScratch scratch;
+    gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
     REQUIRE(quads.size() == 2);
     // Both without a texture, so one batch.
     REQUIRE(batches.size() == 1);
@@ -151,7 +152,8 @@ TEST_CASE("Tile maps give their tiles in view, from their bottom left corner") {
 
     std::vector<renderer::SpriteQuad> quads;
     std::vector<renderer::SpriteBatch> batches;
-    gather_sprites(world, *camera_2d_view(world, k_size), quads, batches);
+    SpriteScratch scratch;
+    gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
     REQUIRE(quads.size() == 2);
     CHECK(quads[0].position.x == Approx(0.0f));
     CHECK(quads[0].position.y == Approx(0.0f));

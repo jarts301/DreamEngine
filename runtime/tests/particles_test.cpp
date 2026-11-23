@@ -267,6 +267,47 @@ TEST_CASE_FIXTURE(ParticleFixture, "Emitters start again when their settings cha
     });
 }
 
+TEST_CASE_FIXTURE(ParticleFixture, "Emitters of a destroyed world go, and a new world at its "
+                                   "address starts with none") {
+    in_frame([&](App&, Renderer&, Particles& particles, rhi::CommandList&) {
+        World paused;
+        const Entity frozen = paused.create_entity();
+        paused.registry().emplace<ParticleEmitter>(frozen);
+        paused.update_transforms();
+        particles.update(paused, 0.5);
+        {
+            auto first = std::make_unique<World>();
+            const Entity entity = first->create_entity();
+            first->registry().emplace<ParticleEmitter>(entity);
+            first->update_transforms();
+            particles.update(*first, 2.0);
+            CHECK(particle_state.alive_emitters == 2);
+            first.reset();
+            // Very often at the same address, with the same entity.
+            auto second = std::make_unique<World>();
+            const Entity again = second->create_entity();
+            second->registry().emplace<ParticleEmitter>(again);
+            second->update_transforms();
+            particles.update(*second, 0.25);
+            // A new emitter, not the first world's, which is released.
+            CHECK(particle_state.created.size() == 3);
+            CHECK(particle_state.alive_emitters == 2);
+            const auto& drawn = second->registry().get<ParticleEmitter>(again).particles;
+            REQUIRE(drawn.size() == 1);
+            CHECK(drawn[0].size == Approx(0.25f));
+        }
+        // A world that isn't updated for a while keeps its emitter.
+        World other;
+        for (int i = 0; i < 1000; ++i) {
+            particles.update(other, 0.01);
+        }
+        particles.update(paused, 0.5);
+        const auto& drawn = paused.registry().get<ParticleEmitter>(frozen).particles;
+        REQUIRE(drawn.size() == 1);
+        CHECK(drawn[0].size == Approx(1.0f));
+    });
+}
+
 TEST_CASE_FIXTURE(ParticleFixture, "Warming up moves emitters on in steps of 1/60 s") {
     World world;
     float size = 0.0f;

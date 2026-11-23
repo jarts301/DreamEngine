@@ -37,10 +37,6 @@ Entity from_user_data(std::uint64_t value) {
     return static_cast<Entity>(static_cast<entt::id_type>(value));
 }
 
-core::Error scene_error(std::string message) {
-    return core::Error{core::ErrorCode::ParseError, std::move(message)};
-}
-
 Vec2 flat(Vec3 v) {
     return Vec2{v.x, v.y};
 }
@@ -54,41 +50,6 @@ Vec2 rotated(Vec2 v, float angle) {
 Vec2 to_world(const Transform& transform, Vec2 local) {
     return flat(transform.position) + rotated(local, angle_around_z(transform.rotation));
 }
-
-// Reads each setting into `target`, stopping at the first error.
-struct Reader {
-    const ComponentData& data;
-    std::optional<core::Error> error;
-
-    template <typename T, typename Get> void read(std::string_view key, T& target, Get get) {
-        if (error.has_value()) {
-            return;
-        }
-        core::Result<T> value = (data.*get)(key, target);
-        if (value.has_value()) {
-            target = value.value();
-        } else {
-            error = value.error();
-        }
-    }
-
-    void number(std::string_view key, float& target) {
-        read(key, target, &ComponentData::number);
-    }
-    void vec2(std::string_view key, Vec2& target) {
-        read(key, target, &ComponentData::vec2);
-    }
-    void flag(std::string_view key, bool& target) {
-        read(key, target, &ComponentData::flag);
-    }
-    void angle(std::string_view key, std::optional<float>& target) {
-        if (!error.has_value() && data.has(key)) {
-            float degrees = 0.0f;
-            number(key, degrees);
-            target = core::radians(degrees);
-        }
-    }
-};
 
 core::Result<void> read_rigid_body(ComponentContext& context) {
     const ComponentData& data = context.data;
@@ -119,7 +80,7 @@ core::Result<void> read_rigid_body(ComponentContext& context) {
     if (!shape.has_value()) {
         return shape.error();
     }
-    Reader read{data, std::nullopt};
+    SettingReader read(data);
     if (shape.value() == "box") {
         BoxShape box;
         read.vec2("half_extents", box.half_extents);
@@ -148,8 +109,8 @@ core::Result<void> read_rigid_body(ComponentContext& context) {
     read.flag("fixed_rotation", body.desc.fixed_rotation);
     read.flag("sensor", body.desc.is_sensor);
     read.flag("continuous", body.desc.continuous_collision);
-    if (read.error.has_value()) {
-        return *read.error;
+    if (core::Result<void> done = read.result(); !done.has_value()) {
+        return done;
     }
     if (core::Result<void> valid = validate(body.desc); !valid.has_value()) {
         return valid;
@@ -193,15 +154,15 @@ core::Result<void> read_joint(ComponentContext& context) {
         }
     }
 
-    Reader read{data, std::nullopt};
+    SettingReader read(data);
     read.vec2("anchor", joint.anchor);
     read.angle("min_angle", joint.min_angle_radians);
     read.angle("max_angle", joint.max_angle_radians);
     read.vec2("connected_anchor", joint.connected_anchor);
     read.number("min_distance", joint.min_distance);
     read.number("max_distance", joint.max_distance);
-    if (read.error.has_value()) {
-        return *read.error;
+    if (core::Result<void> done = read.result(); !done.has_value()) {
+        return done;
     }
     context.world.registry().emplace_or_replace<Joint2D>(context.entity, joint);
     return {};

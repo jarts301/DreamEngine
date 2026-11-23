@@ -26,7 +26,8 @@ model loads, with the same code:
    everything about reading models that doesn't touch the GPU, split from `model_loader.cpp`;
 2. makes its tangents with the tangent generator the game lists for the platform, if any, as they
    can add vertices;
-3. makes its simpler versions with meshoptimizer and the game's `[lods]` settings;
+3. makes its simpler versions with the platform's listed `mesh_simplifier` (since ADR 0044;
+   none listed, none made) and the game's `[lods]` settings;
 4. writes them to a `.lods` file beside the model's place in the game's assets: `models/ball.glb`
    gets `models/ball.lods`.
 
