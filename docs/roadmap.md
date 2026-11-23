@@ -82,6 +82,7 @@ and `null` modules ([ADR 0030](adr/0030-renderer-module.md)).
    renderer = ["forward", "null"]
    mesh_simplifier = ["meshoptimizer", "null"]
    tangent_generator = ["mikktspace", "null"]
+   texture_decoder = ["ktx", "null"]    # Reads the textures the build cooks.
    physics3d = ["jolt"]
    audio = ["miniaudio", "null"]
    ui = ["rmlui"]
@@ -92,6 +93,7 @@ and `null` modules ([ADR 0030](adr/0030-renderer-module.md)).
    renderer = ["forward", "null"]
    mesh_simplifier = ["meshoptimizer", "null"]
    tangent_generator = ["mikktspace", "null"]
+   texture_decoder = ["ktx", "null"]    # Reads the textures the build cooks.
    physics3d = ["jolt"]
    audio = ["miniaudio", "null"]
    ui = ["rmlui"]
