@@ -4,6 +4,8 @@
 
 #include <doctest/doctest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <ostream> // Needed for doctest to print std::string_view.
 #include <string>
 #include <vector>
@@ -79,4 +81,30 @@ TEST_CASE_FIXTURE(Fixture, "VirtualFileSystem rejects unsafe paths") {
 TEST_CASE_FIXTURE(Fixture, "VirtualFileSystem allows dots inside names") {
     state.assets["a..b/c.d.txt"] = bytes("x");
     CHECK(files.read("assets:/a..b/c.d.txt").has_value());
+}
+
+TEST_CASE_FIXTURE(Fixture, "Asset folders on disk are read before the platform's assets") {
+    const std::filesystem::path folder =
+        std::filesystem::temp_directory_path() / "dream_vfs_asset_folder_test";
+    std::filesystem::remove_all(folder);
+    std::filesystem::create_directories(folder / "scenes");
+    std::ofstream(folder / "scenes" / "main.toml", std::ios::binary) << "from disk";
+    state.assets["scenes/main.toml"] = bytes("packaged");
+    state.assets["shaders/lit.spv"] = bytes("shader");
+    state.reports_versions = true;
+    state.asset_versions["shaders/lit.spv"] = 7;
+
+    files.add_asset_folder(folder);
+    CHECK(files.read("assets:/scenes/main.toml").value() == bytes("from disk"));
+    // Others still come from the platform.
+    CHECK(files.read("assets:/shaders/lit.spv").value() == bytes("shader"));
+    CHECK(files.version("assets:/shaders/lit.spv") == 7);
+    const std::optional<std::int64_t> before = files.version("assets:/scenes/main.toml");
+    REQUIRE(before.has_value());
+    CHECK(*before != 0);
+    // Unsafe paths are refused before any folder is looked at.
+    CHECK_FALSE(files.read("assets:/../secret.txt").has_value());
+    // User files never come from asset folders.
+    CHECK_FALSE(files.read("user:/scenes/main.toml").has_value());
+    std::filesystem::remove_all(folder);
 }

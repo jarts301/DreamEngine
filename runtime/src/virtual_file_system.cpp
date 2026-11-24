@@ -1,6 +1,10 @@
 #include "dream/runtime/virtual_file_system.h"
 
+#include <chrono>
 #include <format>
+#include <fstream>
+#include <iterator>
+#include <system_error>
 
 namespace dream::runtime {
 namespace {
@@ -56,6 +60,23 @@ core::Result<ParsedPath> parse_path(std::string_view path) {
 
 } // namespace
 
+void VirtualFileSystem::add_asset_folder(std::filesystem::path folder) {
+    m_asset_folders.push_back(std::move(folder));
+}
+
+std::optional<std::filesystem::path>
+VirtualFileSystem::in_asset_folders(std::string_view relative) const {
+    for (auto folder = m_asset_folders.rbegin(); folder != m_asset_folders.rend(); ++folder) {
+        std::filesystem::path file = *folder / std::filesystem::path(std::u8string(
+                                                   relative.begin(), relative.end()));
+        std::error_code error;
+        if (std::filesystem::is_regular_file(file, error)) {
+            return file;
+        }
+    }
+    return std::nullopt;
+}
+
 core::Result<std::vector<std::byte>> VirtualFileSystem::read(std::string_view path) const {
     if (m_read_observer) {
         m_read_observer(path);
@@ -64,6 +85,22 @@ core::Result<std::vector<std::byte>> VirtualFileSystem::read(std::string_view pa
     if (!parsed.has_value()) {
         return parsed.error();
     }
+    if (parsed.value().root == FileRoot::Assets && !m_asset_folders.empty()) {
+        if (const std::optional<std::filesystem::path> file =
+                in_asset_folders(parsed.value().relative)) {
+            std::ifstream in(*file, std::ios::binary);
+            std::vector<char> chars((std::istreambuf_iterator<char>(in)),
+                                    std::istreambuf_iterator<char>());
+            if (!in.bad()) {
+                std::vector<std::byte> bytes(chars.size());
+                for (std::size_t index = 0; index < chars.size(); ++index) {
+                    bytes[index] = static_cast<std::byte>(chars[index]);
+                }
+                return bytes;
+            }
+            return core::Error{core::ErrorCode::IoError, std::format("Could not read '{}'", path)};
+        }
+    }
     return m_platform.read_file(parsed.value().root, parsed.value().relative);
 }
 
@@ -71,6 +108,16 @@ std::optional<std::int64_t> VirtualFileSystem::version(std::string_view path) co
     const core::Result<ParsedPath> parsed = parse_path(path);
     if (!parsed.has_value()) {
         return std::nullopt;
+    }
+    if (parsed.value().root == FileRoot::Assets && !m_asset_folders.empty()) {
+        if (const std::optional<std::filesystem::path> file =
+                in_asset_folders(parsed.value().relative)) {
+            std::error_code error;
+            const auto time = std::filesystem::last_write_time(*file, error);
+            if (!error) {
+                return static_cast<std::int64_t>(time.time_since_epoch().count());
+            }
+        }
     }
     return m_platform.file_version(parsed.value().root, parsed.value().relative);
 }

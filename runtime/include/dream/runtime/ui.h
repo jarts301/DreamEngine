@@ -56,9 +56,12 @@ public:
 private:
     std::unique_ptr<debug_ui::DebugUi> m_backend;
     Renderer* m_renderer = nullptr;
+    App* m_app = nullptr;
     std::vector<Subscription> m_subscriptions;
     core::Vec2 m_origin;
     bool m_visible = true;
+    // Whether the platform sends typed text, which a text field being typed in needs.
+    bool m_text_input = false;
 };
 
 // Published on the App's event bus by UserInterface::update for each ui::UiEvent.

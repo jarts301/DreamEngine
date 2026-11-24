@@ -1,0 +1,50 @@
+# The editor's own configuration (ADR 0046): its window, its controls, and its modules. The panels
+# are editor_panel modules; a project can build an editor of its own with more.
+
+[app]
+organization = "DreamEngine"
+name = "DreamEditor"
+title = "Dream Editor"
+width = 1600
+height = 900
+
+[input.actions]
+select = ["mouse:left"]
+orbit = ["mouse:right"]
+pan = ["mouse:middle"]
+control = ["key:left_control", "key:right_control"]
+save = ["key:s"]
+undo = ["key:z"]
+redo = ["key:y"]
+delete = ["key:delete"]
+focus = ["key:f"]
+
+# Models and textures reload when their files change, in release builds too.
+[hot_reload]
+enabled = true
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["vulkan", "directx12", "directx", "opengl", "null"]
+renderer = ["forward", "null"]
+mesh_simplifier = ["meshoptimizer", "null"]
+tangent_generator = ["mikktspace", "null"]
+texture_decoder = ["ktx", "null"]
+animation = ["ozz", "null"]
+particles = ["cpu", "null"]
+debug_ui = ["imgui", "null"]
+editor_panel = ["hierarchy", "inspector"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["vulkan", "null"]
+renderer = ["forward", "null"]
+mesh_simplifier = ["meshoptimizer", "null"]
+tangent_generator = ["mikktspace", "null"]
+texture_decoder = ["ktx", "null"]
+animation = ["ozz", "null"]
+particles = ["cpu", "null"]
+debug_ui = ["imgui", "null"]
+editor_panel = ["hierarchy", "inspector"]

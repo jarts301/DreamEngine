@@ -160,6 +160,26 @@ TEST_CASE("camera_ray goes from the eye through the pixel, as the camera draws i
     CHECK(ahead->direction.z == Approx(-1.0f));
 }
 
+TEST_CASE("The camera with the highest priority draws the world") {
+    World world;
+    CHECK(active_camera(world) == k_no_entity);
+    const Entity first = add_camera(world);
+    const Entity second = add_camera(world);
+    world.registry().get<Transform>(second).position = Vec3{0.0f, 0.0f, 5.0f};
+    world.update_transforms();
+    // Equal priorities: the first the registry gives, whichever that is, consistently.
+    const Entity either = active_camera(world);
+    CHECK((either == first || either == second));
+    CHECK(active_camera(world) == either);
+
+    const Entity other = either == first ? second : first;
+    world.registry().get<Camera>(other).priority = 10;
+    CHECK(active_camera(world) == other);
+    const std::optional<CameraView> view = camera_view(world, platform::SurfaceSize{800, 600});
+    REQUIRE(view.has_value());
+    CHECK(view->eye.z == Approx(other == second ? 5.0f : 0.0f));
+}
+
 TEST_CASE_FIXTURE(RenderFixture, "Renderer starts its module and loads its shaders through the game's files") {
     in_frame([](App&, Renderer& renderer, rhi::CommandList&) {
         CHECK(renderer.backend() != nullptr);

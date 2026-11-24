@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <span>
@@ -41,8 +42,16 @@ public:
         m_read_observer = std::move(observer);
     }
 
+    // A folder on disk whose files are "assets:/" files too, read before the platform's: a
+    // project's own assets, as the editor reads them (ADR 0046). The last added is read first.
+    void add_asset_folder(std::filesystem::path folder);
+
 private:
+    [[nodiscard]] std::optional<std::filesystem::path> in_asset_folders(
+        std::string_view relative) const;
+
     platform::Platform& m_platform;
+    std::vector<std::filesystem::path> m_asset_folders;
     std::function<void(std::string_view)> m_read_observer;
 };
 

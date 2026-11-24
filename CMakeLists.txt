@@ -11,6 +11,8 @@ option(DREAM_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(DREAM_COOK_TEXTURES "Cook game textures into compressed KTX2 files" ON)
 option(DREAM_COOK_MODELS "Make models' levels of detail at build time (ADR 0042)" ON)
 option(DREAM_PROFILING "Compile profiling zones into the engine and games" ON)
+# The editor (ADR 0046), a program like a game, built where the build is for the build machine.
+option(DREAM_BUILD_EDITOR "Build the editor" ${PROJECT_IS_TOP_LEVEL})
 # Off when a game builds the engine through find_package, so the game's own install doesn't copy it.
 option(DREAM_INSTALL_SDK "Install the SDK with cmake --install (ADR 0045)" ${PROJECT_IS_TOP_LEVEL})
 
@@ -49,6 +51,9 @@ add_subdirectory(runtime)
 if(NOT CMAKE_CROSSCOMPILING)
     add_subdirectory(tools/pack)
     add_subdirectory(tools/dream)
+    if(DREAM_BUILD_EDITOR)
+        add_subdirectory(tools/editor)
+    endif()
     # Cross-compiled builds, such as Android's, take it from vcpkg instead (ADR 0042).
     if(DREAM_COOK_MODELS)
         add_subdirectory(tools/model_cook)

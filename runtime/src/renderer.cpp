@@ -37,6 +37,91 @@ Vec4 extend(Vec3 v, float w) {
     return Vec4{v.x, v.y, v.z, w};
 }
 
+core::Result<void> read_mesh(ComponentContext& context);
+core::Result<void> read_camera(ComponentContext& context);
+core::Result<void> read_directional_light(ComponentContext& context);
+core::Result<void> read_point_light(ComponentContext& context);
+core::Result<void> read_spot_light(ComponentContext& context);
+
+// The renderer's components, with their fields described for tools (ADR 0046).
+void register_components(SceneLoader& scenes) {
+    using core::FieldInfo;
+    using core::FieldKind;
+    const auto vec3 = [](double x, double y, double z) {
+        return core::ConfigValue{std::vector<double>{x, y, z}};
+    };
+    const FieldInfo color{.name = "color", .kind = FieldKind::Color, .fallback = vec3(1, 1, 1)};
+    const FieldInfo casts_shadows{
+        .name = "casts_shadows", .kind = FieldKind::Flag, .fallback = true};
+    scenes.register_component(
+        "mesh", &read_mesh,
+        {FieldInfo{.name = "model",
+                   .kind = FieldKind::Asset,
+                   .fallback = std::string(),
+                   .help = "A .glb model, such as assets:/models/crate.glb"},
+         FieldInfo{.name = "tint", .kind = FieldKind::Color, .fallback = vec3(1, 1, 1)},
+         casts_shadows});
+    scenes.register_component(
+        "camera", &read_camera,
+        {FieldInfo{.name = "vertical_fov",
+                   .kind = FieldKind::Number,
+                   .fallback = 60.0,
+                   .minimum = 5.0f,
+                   .maximum = 170.0f,
+                   .help = "Degrees"},
+         FieldInfo{.name = "target",
+                   .kind = FieldKind::Vec3,
+                   .fallback = vec3(0, 0, 0),
+                   .help = "A point to look at; without one, it looks along its -Z axis"},
+         FieldInfo{.name = "priority",
+                   .kind = FieldKind::Integer,
+                   .fallback = std::int64_t{0},
+                   .help = "The camera with the highest priority draws the scene"}});
+    scenes.register_component(
+        "directional_light", &read_directional_light,
+        {FieldInfo{.name = "direction", .kind = FieldKind::Vec3, .fallback = vec3(-0.4, -1, -0.5)},
+         color,
+         FieldInfo{.name = "intensity",
+                   .kind = FieldKind::Number,
+                   .fallback = 1.3,
+                   .minimum = 0.0f,
+                   .maximum = 10.0f},
+         FieldInfo{.name = "ambient",
+                   .kind = FieldKind::Number,
+                   .fallback = 0.3,
+                   .minimum = 0.0f,
+                   .maximum = 2.0f},
+         casts_shadows});
+    const std::vector<FieldInfo> light{
+        color,
+        FieldInfo{.name = "intensity",
+                  .kind = FieldKind::Number,
+                  .fallback = 1.0,
+                  .minimum = 0.0f,
+                  .maximum = 50.0f},
+        FieldInfo{.name = "range",
+                  .kind = FieldKind::Number,
+                  .fallback = 10.0,
+                  .minimum = 0.1f,
+                  .maximum = 100.0f,
+                  .help = "Meters"}};
+    scenes.register_component("point_light", &read_point_light, light);
+    std::vector<FieldInfo> spot = light;
+    spot.push_back(FieldInfo{.name = "inner_angle",
+                             .kind = FieldKind::Number,
+                             .fallback = 20.0,
+                             .minimum = 0.0f,
+                             .maximum = 89.0f,
+                             .help = "Degrees from the middle of the cone"});
+    spot.push_back(FieldInfo{.name = "outer_angle",
+                             .kind = FieldKind::Number,
+                             .fallback = 35.0,
+                             .minimum = 1.0f,
+                             .maximum = 89.0f,
+                             .help = "Degrees from the middle of the cone"});
+    scenes.register_component("spot_light", &read_spot_light, std::move(spot));
+}
+
 core::Result<void> read_mesh(ComponentContext& context) {
     const core::Result<std::string> path = context.data.text("model");
     if (!path.has_value()) {
@@ -67,6 +152,15 @@ core::Result<void> read_camera(ComponentContext& context) {
         return fov.error();
     }
     camera.vertical_fov_degrees = fov.value();
+    const core::Result<float> priority = context.data.number("priority", 0.0f);
+    if (!priority.has_value()) {
+        return priority.error();
+    }
+    if (priority.value() != std::floor(priority.value()) || std::abs(priority.value()) > 1.0e6f) {
+        return core::Error{core::ErrorCode::InvalidArgument,
+                           "A camera's priority must be a whole number"};
+    }
+    camera.priority = static_cast<std::int32_t>(priority.value());
 
     if (context.data.has("target")) {
         const core::Result<Vec3> target = context.data.vec3("target", Vec3{});
@@ -331,10 +425,23 @@ float fitted_vertical_fov(float vertical_fov_radians, float aspect) noexcept {
     return 2.0f * std::atan(std::tan(vertical_fov_radians * 0.5f) / aspect);
 }
 
+Entity active_camera(const World& world) {
+    const auto cameras = world.registry().view<const Camera, const WorldTransform>();
+    Entity chosen = k_no_entity;
+    std::int32_t highest = 0;
+    for (const auto [entity, camera, transform] : cameras.each()) {
+        if (chosen == k_no_entity || camera.priority > highest) {
+            chosen = entity;
+            highest = camera.priority;
+        }
+    }
+    return chosen;
+}
+
 std::optional<CameraView> camera_view(const World& world, platform::SurfaceSize size) {
     const Registry& registry = world.registry();
     const auto cameras = registry.view<const Camera, const WorldTransform>();
-    const Entity camera_entity = cameras.front();
+    const Entity camera_entity = active_camera(world);
     if (camera_entity == k_no_entity || size.width == 0 || size.height == 0) {
         return std::nullopt;
     }
@@ -587,11 +694,7 @@ core::Result<void> Renderer::initialize(App& app,
             return create_model_asset(*device, data.value(), decoder);
         });
 
-    app.scenes().register_component("mesh", &read_mesh);
-    app.scenes().register_component("camera", &read_camera);
-    app.scenes().register_component("directional_light", &read_directional_light);
-    app.scenes().register_component("point_light", &read_point_light);
-    app.scenes().register_component("spot_light", &read_spot_light);
+    register_components(app.scenes());
     register_sprite_components(app.scenes());
     register_environment(app.scenes(), app.assets(), *device);
     return {};

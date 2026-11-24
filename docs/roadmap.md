@@ -114,7 +114,7 @@ and `null` modules ([ADR 0030](adr/0030-renderer-module.md)).
    `on_render`, `on_stop`, `on_pause`/`on_resume`, the surface events and `on_low_memory`. The `App`
    gives you:
    - the graphics device;
-   - the ECS world, and scenes loaded from TOML files;
+   - the ECS world, and scenes loaded from TOML files, which the editor edits (ADR 0046);
    - assets that hot-reload, and events;
    - input actions, and files under `assets:/` (read-only) and `user:/` (saves);
    - the renderer, 3D and 2D physics, audio, game UI, debug UI and the profiler.
@@ -187,7 +187,7 @@ battery and almost no heap allocations per frame (ADR 0041); levels of detail ma
 | Need | Today | Missing |
 |---|---|---|
 | Project setup | An installable SDK of the engine's sources, `find_package(DreamEngine)`, `dream new` with a template, games in their own repositories (ADR 0045) | A binary SDK if first builds get too slow; `dream` commands to add modules and update a game's `vcpkg.json` |
-| Editor | None | Scene editing, an entity inspector, an asset browser and play-in-editor. It would be a tool program built on the engine, with its panels as modules on `debug_ui` |
+| Editor | Editor v1 (ADR 0046): a scene view, an entity tree, an inspector built from components' field descriptions, saving to TOML with undo, and Play through hot reload, with its panels as `editor_panel` modules | An asset browser, handles to move entities in the view, editing 2D scenes, multi-selection and copying, field descriptions for the remaining components |
 | Asset pipeline | glTF with levels of detail made at build time; PNG to KTX2 by a texture cooker chosen per platform; Slang | Importers for FBX and audio, an asset database with dependencies, per-platform bundles |
 | Release pipeline | CI builds and tests on push (paused for now) | Release builds with symbols kept and uploaded, versioning, signed artifacts, store uploads |
 
@@ -278,15 +278,17 @@ on the five PC graphics backends and on a phone.
   `cmake --install`; `find_package(DreamEngine)`; `dream new <name>` with a project template; and
   games in their own repositories. Still open: a binary SDK if first builds get too slow, and
   `dream` commands that add modules or update a game's `vcpkg.json`.
-- **Editor v1:** a program built on the engine, with its interface in Dear ImGui (decided in
-  section 5). It needs:
-  - a scene view;
-  - an entity tree and component inspector, with components describing their fields through a
-    reflection registry;
-  - saving scenes to TOML;
-  - play-in-editor using the existing hot reload.
+- **Editor v1:** done (ADR 0046): `dream_editor`, a program built on the engine with its
+  interface in Dear ImGui. It has:
+  - a scene view, from a camera of its own, where a click selects;
+  - an entity tree and an inspector, with components describing their fields through a reflection
+    registry, and a game's own components edited by their values' types;
+  - saving scenes to TOML, keeping their order, with undo;
+  - Play, which builds and starts the game, and sends it each save through hot reload.
 
-  Panels are `editor_panel` modules over `debug_ui`, so a project can add its own.
+  Panels are `editor_panel` modules over `debug_ui`, so a project can add its own. Still open for
+  later versions: an asset browser, handles to move entities in the view, editing 2D scenes from a
+  2D camera, multi-selection and copying, and field descriptions for the remaining components.
 - **Asset database:** dependencies, cooking per platform, bundles (`asset_source: bundles`).
 - **Release pipeline:**
   - CI release builds, with symbols archived;
@@ -402,7 +404,7 @@ crash uploads included, that professional work needs. Before a commercial releas
 - shadows from point and spot lights, reflection probes, and gamepad navigation in menus;
 - a settings menu, localization and store services;
 - release packaging: AAB and real signing on Android, depots on Steam;
-- an editor.
+- an editor beyond scene editing: an asset browser and handles in the view.
 
 Each of those is planned as a module, as is everything for online play, macOS and iOS, so a
 project only carries what it uses.

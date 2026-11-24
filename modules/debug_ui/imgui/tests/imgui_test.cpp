@@ -124,3 +124,86 @@ TEST_CASE("ImGui grows its windows with the display scale") {
     const float doubled = widest(draw_panel(*tools, value, flag, 2.0f));
     CHECK(doubled > normal * 1.3f);
 }
+
+TEST_CASE("ImGui's text field keeps what is typed until it is left, then hands it over") {
+    tests::FakeHost host;
+    const auto tools = make_ui(host);
+    std::string name = "crate";
+    std::string other = "lid";
+    bool committed = false;
+    const auto frame = [&] {
+        tools->begin_frame(k_frame);
+        tools->next_window_placement(core::Vec2{0.0f, 0.0f}, core::Vec2{400.0f, 200.0f});
+        if (tools->begin_window("Inspector")) {
+            committed = tools->input_text("Name", name) || committed;
+            // Another field in the same window doesn't disturb the one being typed in.
+            tools->input_text("Other", other);
+        }
+        tools->end_window();
+        static_cast<void>(tools->end_frame());
+    };
+    frame();
+    frame();
+    // The first field, just under the title bar.
+    tools->handle_event(platform::PointerMoved{40.0f, 32.0f});
+    frame();
+    tools->handle_event(platform::PointerButtonChanged{platform::PointerButton::Left, true});
+    frame();
+    tools->handle_event(platform::PointerButtonChanged{platform::PointerButton::Left, false});
+    frame();
+    REQUIRE(tools->wants_keyboard());
+    tools->handle_event(platform::TextEntered{"_box"});
+    frame();
+    frame();
+    // Nothing yet: the field is still being typed in.
+    CHECK_FALSE(committed);
+    CHECK(name == "crate");
+    tools->handle_event(platform::KeyChanged{platform::Key::Enter, true});
+    frame();
+    tools->handle_event(platform::KeyChanged{platform::Key::Enter, false});
+    frame();
+    frame();
+    CHECK(committed);
+    // Typed where the click put the cursor, keeping the rest.
+    CAPTURE(name);
+    CHECK(name.size() == std::string("crate_box").size());
+    CHECK(name.find("_box") != std::string::npos);
+    CHECK(name.starts_with("c"));
+    CHECK(other == "lid");
+    CHECK_FALSE(tools->wants_keyboard());
+}
+
+TEST_CASE("ImGui draws the editor's widgets") {
+    tests::FakeHost host;
+    const auto tools = make_ui(host);
+    for (int pass = 0; pass < 2; ++pass) {
+        tools->begin_frame(k_frame);
+        if (tools->begin_window("Widgets")) {
+            bool clicked = false;
+            if (tools->tree_node("root", false, true, clicked)) {
+                tools->tree_node("leaf", true, false, clicked);
+                tools->tree_pop();
+                tools->tree_pop();
+            }
+            tools->selectable("row", false);
+            if (tools->collapsing_header("transform")) {
+                std::array<float, 3> position{1.0f, 2.0f, 3.0f};
+                tools->drag("position", position, 0.01f);
+                int count = 2;
+                tools->drag("count", count, 0.1f);
+                std::array<float, 3> rgb{1.0f, 0.5f, 0.0f};
+                tools->color("color", rgb);
+                const std::array<std::string, 2> items{"pixel", "smooth"};
+                int chosen = 0;
+                tools->combo("filter", chosen, items);
+                tools->tooltip("help");
+                tools->text_disabled("(default)");
+            }
+        }
+        tools->end_window();
+        const ui::DrawList& list = tools->end_frame();
+        if (pass == 1) {
+            CHECK(list.vertices.size() > 100);
+        }
+    }
+}

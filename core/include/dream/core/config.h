@@ -50,6 +50,11 @@ public:
     [[nodiscard]] std::optional<std::span<const double>>
     get_float_list(std::string_view key) const;
 
+    // The value at `key`, whatever its type, or null. Valid for as long as this Config exists.
+    [[nodiscard]] const ConfigValue* value(std::string_view key) const {
+        return find(key);
+    }
+
 private:
     [[nodiscard]] const ConfigValue* find(std::string_view key) const;
 

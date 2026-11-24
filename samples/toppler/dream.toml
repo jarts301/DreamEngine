@@ -47,3 +47,10 @@ physics3d = ["jolt", "impulse"]
 audio = ["miniaudio", "null"]
 ui = ["rmlui", "markup"]
 texture_decoder = ["ktx", "null"]
+
+# What the editor opens (ADR 0046): dream_editor samples/toppler
+[editor]
+scene = "assets:/levels/level01.toml"
+game = "dream_toppler"
+assets = ["assets", "../assets"]
+build = "../../build/windows-debug"

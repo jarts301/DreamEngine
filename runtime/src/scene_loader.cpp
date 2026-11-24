@@ -217,15 +217,57 @@ ComponentData::check_keys(std::initializer_list<std::string_view> known) const {
 
 SceneLoader::SceneLoader(VirtualFileSystem& files, AssetManager& assets)
     : m_files(files), m_assets(assets) {
-    register_component("transform", &read_transform);
+    using core::FieldInfo;
+    using core::FieldKind;
+    const auto vec3 = [](double x, double y, double z) {
+        return core::ConfigValue{std::vector<double>{x, y, z}};
+    };
+    register_component(
+        "transform", &read_transform,
+        {FieldInfo{.name = "position", .kind = FieldKind::Vec3, .fallback = vec3(0, 0, 0)},
+         FieldInfo{.name = "rotation",
+                   .kind = FieldKind::Vec3,
+                   .fallback = vec3(0, 0, 0),
+                   .help = "Degrees around X, Y and Z, applied Y, then X, then Z"},
+         FieldInfo{.name = "scale", .kind = FieldKind::Vec3, .fallback = vec3(1, 1, 1)}});
 }
 
-void SceneLoader::register_component(std::string name, ComponentReader reader) {
-    m_readers.insert_or_assign(std::move(name), std::move(reader));
+void SceneLoader::register_component(std::string name, ComponentReader reader,
+                                     std::vector<core::FieldInfo> fields) {
+    core::ComponentInfo info{.name = name, .fields = std::move(fields)};
+    m_readers.insert_or_assign(std::move(name),
+                               Registered{.reader = std::move(reader), .info = std::move(info)});
+}
+
+std::vector<core::ComponentInfo> SceneLoader::components() const {
+    std::vector<core::ComponentInfo> infos;
+    for (const auto& [name, registered] : m_readers) {
+        infos.push_back(registered.info);
+    }
+    return infos;
+}
+
+const core::ComponentInfo* SceneLoader::component(std::string_view name) const {
+    const auto found = m_readers.find(name);
+    return found == m_readers.end() ? nullptr : &found->second.info;
+}
+
+std::vector<std::string> SceneLoader::changed_scenes() {
+    std::vector<std::string> changed;
+    for (auto& [path, version] : m_loaded) {
+        const std::int64_t now = m_files.version(path).value_or(version);
+        if (now != version) {
+            version = now;
+            changed.push_back(path);
+        }
+    }
+    return changed;
 }
 
 core::Result<std::unique_ptr<World>> SceneLoader::load(std::string_view path) {
     DREAM_PROFILE_ZONE_DETAIL("Load scene", path);
+    // Before reading, so a change while it loads is still seen.
+    m_loaded.insert_or_assign(std::string(path), m_files.version(path).value_or(0));
     const auto bytes = m_files.read(path);
     if (!bytes.has_value()) {
         return bytes.error();
@@ -282,6 +324,9 @@ core::Result<std::unique_ptr<World>> SceneLoader::parse(std::string_view text) {
 
         for (const std::string_view component : config.tables_in(prefix)) {
             const auto reader = m_readers.find(component);
+            if (reader == m_readers.end() && m_skip_unknown) {
+                continue;
+            }
             if (reader == m_readers.end()) {
                 return scene_error(
                     std::format("Entity '{}': unknown component '{}'", name, component));
@@ -289,7 +334,8 @@ core::Result<std::unique_ptr<World>> SceneLoader::parse(std::string_view text) {
 
             const ComponentData data(config, std::format("{}.{}", prefix, component));
             ComponentContext context{*world, entity, data, m_assets};
-            if (const core::Result<void> read = reader->second(context); !read.has_value()) {
+            if (const core::Result<void> read = reader->second.reader(context);
+                !read.has_value()) {
                 return core::Error{read.error().code,
                                    std::format("Entity '{}', component '{}': {}", name, component,
                                                read.error().message)};

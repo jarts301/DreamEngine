@@ -379,6 +379,11 @@ core::Result<void> App::run(Game& game) {
                 if (!reloaded.empty()) {
                     m_events.publish(AssetsReloaded{std::move(reloaded)});
                 }
+                // Scenes are the game's to load again, as only it knows what to keep.
+                std::vector<std::string> scenes = m_scenes.changed_scenes();
+                if (!scenes.empty()) {
+                    m_events.publish(ScenesChanged{std::move(scenes)});
+                }
             }
             {
                 DREAM_PROFILE_ZONE("Queued events");

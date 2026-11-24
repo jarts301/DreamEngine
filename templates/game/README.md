@@ -35,6 +35,17 @@ cmake --build --preset android-arm64-debug --target __GAME_NAME___apk
 
 A PC release ready to hand out is the `__GAME_NAME___package` target of a `windows-release` build.
 
+## Editing the scene
+
+The SDK's editor opens this project's scene, as `[editor]` in `dream.toml` says:
+
+```powershell
+& "$env:DREAM_ENGINE_SDK/editor/dream_editor.exe" .
+```
+
+Its Play button builds and starts the game, and while the game runs each save reaches it: the game
+loads its scene again when the file changes. See the editor's section in the engine's README.
+
 ## What is where
 
 | Path | Holds |

@@ -21,7 +21,8 @@ extern "C" __attribute__((visibility("default"))) int dream_android_main(int arg
 
 #else
 
-int main() {
+int main(int argc, char** argv) {
+    dream::runtime::set_program_arguments(argc, argv);
     return dream::runtime::run_program();
 }
 

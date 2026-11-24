@@ -26,12 +26,15 @@ struct SpriteScratch;
 // Interface layers, drawn over the scene in this order.
 enum class UiLayer : std::uint8_t { Game, Debug, Count };
 
-// Looks along its entity's -Z axis, or at `target` if one is set.
+// Looks along its entity's -Z axis, or at `target` if one is set. The world's camera with the
+// highest priority draws it, the first of them when several share it, so a cutscene's camera or
+// the editor's can take over without removing the others.
 struct Camera {
     float vertical_fov_degrees = 60.0f;
     float z_near = 0.1f;
     float z_far = 500.0f;
     std::optional<core::Vec3> target;
+    std::int32_t priority = 0;
 };
 
 // A texture from an image file, drawn in the world, such as particles' (ADR 0038). Load it with
@@ -86,7 +89,10 @@ struct SpotLight {
 // portrait screen this widens the view, so a scene framed for landscape isn't cropped at the sides.
 [[nodiscard]] float fitted_vertical_fov(float vertical_fov_radians, float aspect) noexcept;
 
-// How the world's first camera sees it on a surface of `size`, as Renderer::render draws it.
+// The camera that draws the world: the one with the highest priority. k_no_entity for none.
+[[nodiscard]] Entity active_camera(const World& world);
+
+// How the world's active camera sees it on a surface of `size`, as Renderer::render draws it.
 struct CameraView {
     core::Mat4 view_projection;
     core::Vec3 eye;
@@ -177,7 +183,7 @@ public:
     [[nodiscard]] core::Result<void> initialize(App& app,
                                                 std::unique_ptr<renderer::SceneRenderer> backend);
 
-    // Draws the world's first camera and light, its models, then the debug lines, which it clears,
+    // Draws the world from its active camera, with its first light, its models, then the debug lines, which it clears,
     // and the interface layers over them. Without a camera, this draws only the interface layers
     // over the clear color.
     void render(const World& world, rhi::CommandList& commands, platform::SurfaceSize size,

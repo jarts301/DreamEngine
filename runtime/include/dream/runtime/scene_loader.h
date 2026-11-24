@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dream/core/config.h"
+#include "dream/core/fields.h"
 #include "dream/core/math/vector.h"
 #include "dream/core/result.h"
 #include "dream/runtime/asset_manager.h"
@@ -166,6 +167,9 @@ using ComponentReader = std::function<core::Result<void>(ComponentContext&)>;
 //
 // "transform" is built in. A scene fails to load as a whole, leaving nothing half-built, if it has
 // a component nobody registered or any other mistake.
+//
+// A component may describe its fields when it is registered, for tools such as the editor, which
+// show its settings with the right controls (ADR 0046).
 class SceneLoader {
 public:
     SceneLoader(VirtualFileSystem& files, AssetManager& assets);
@@ -173,7 +177,23 @@ public:
     SceneLoader(const SceneLoader&) = delete;
     SceneLoader& operator=(const SceneLoader&) = delete;
 
-    void register_component(std::string name, ComponentReader reader);
+    void register_component(std::string name, ComponentReader reader,
+                            std::vector<core::FieldInfo> fields = {});
+
+    // Every registered component, by name, with the fields it described, if any.
+    [[nodiscard]] std::vector<core::ComponentInfo> components() const;
+    // Null when no such component is registered.
+    [[nodiscard]] const core::ComponentInfo* component(std::string_view name) const;
+
+    // Whether a component nobody registered is skipped rather than failing the scene, as the
+    // editor needs for a game's own components. Off by default.
+    void set_skip_unknown_components(bool skip) noexcept {
+        m_skip_unknown = skip;
+    }
+
+    // The scene files loaded so far that have changed since, each once, for hot reload; the App
+    // publishes them as ScenesChanged.
+    [[nodiscard]] std::vector<std::string> changed_scenes();
 
     // `path` is a virtual path such as "assets:/scenes/level1.toml".
     [[nodiscard]] core::Result<std::unique_ptr<World>> load(std::string_view path);
@@ -184,7 +204,20 @@ public:
 private:
     VirtualFileSystem& m_files;
     AssetManager& m_assets;
-    std::map<std::string, ComponentReader, std::less<>> m_readers;
+    struct Registered {
+        ComponentReader reader;
+        core::ComponentInfo info;
+    };
+    std::map<std::string, Registered, std::less<>> m_readers;
+    // Each loaded scene file, with its version when it was loaded.
+    std::map<std::string, std::int64_t, std::less<>> m_loaded;
+    bool m_skip_unknown = false;
+};
+
+// Published on the App's event bus when hot reload finds scene files the SceneLoader loaded have
+// changed, so a game can load them again (ADR 0046).
+struct ScenesChanged {
+    std::vector<std::string> paths;
 };
 
 } // namespace dream::runtime

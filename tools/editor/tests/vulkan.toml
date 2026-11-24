@@ -1,0 +1,44 @@
+[app]
+window = "hidden"
+width = 1600
+height = 900
+max_fps = 0
+
+[editor]
+select = "crate"
+
+[input.actions]
+select = ["mouse:left"]
+orbit = ["mouse:right"]
+pan = ["mouse:middle"]
+control = ["key:left_control"]
+save = ["key:s"]
+undo = ["key:z"]
+redo = ["key:y"]
+delete = ["key:delete"]
+focus = ["key:f"]
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["vulkan"]
+renderer = ["forward"]
+texture_decoder = ["ktx", "null"]
+debug_ui = ["imgui"]
+editor_panel = ["hierarchy", "inspector"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["vulkan"]
+renderer = ["forward"]
+texture_decoder = ["ktx", "null"]
+debug_ui = ["imgui"]
+editor_panel = ["hierarchy", "inspector"]
+
+[audio]
+muted = true
+
+[screenshot]
+frame = 30
+save = "editor.png"

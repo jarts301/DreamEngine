@@ -50,3 +50,10 @@ animation = ["ozz", "null"]
 physics3d = ["jolt"]
 physics2d = ["box2d"]
 texture_decoder = ["ktx", "null"]
+
+# What the editor opens (ADR 0046): dream_editor samples/physics_demo
+[editor]
+scene = "assets:/scenes/playground.toml"
+game = "dream_physics_demo"
+assets = ["assets", "../assets"]
+build = "../../build/windows-debug"
