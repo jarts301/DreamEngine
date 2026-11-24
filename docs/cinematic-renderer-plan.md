@@ -9,7 +9,9 @@ should take an experienced engineer **15 to 40 minutes**. That is only possible 
 is cut narrowly: each one has an **Out of scope** line. If a task runs long, stop at that line,
 write down what is left, and make it a task of its own. Don't let the task grow.
 
-It reflects the repository on 2026-11-24 (after Editor v1, `e4e68b9`).
+It reflects the repository on 2026-11-24 (after Editor v1, `e4e68b9`), and is written for a
+**macOS workstation**: an Apple M1 Pro (14-core GPU, 16 GB unified memory) on macOS 27 with Xcode 27
+and CLion. See [Working on macOS](#working-on-macos) for what that changes.
 
 ---
 
@@ -37,9 +39,11 @@ Every task has the same parts:
 2. **Licenses** ([ADR 0022](adr/0022-licenses-and-frozen-libraries.md)): MIT, Apache 2.0, BSD,
    zlib or public domain only. This rules out OpenVDB/NanoVDB (MPL 2.0) and linking FFmpeg (LGPL),
    so the plan works around both (tasks 28 and 35).
-3. **Platforms:** the offline path tracer is PC-only (Vulkan and Direct3D 12 on the RTX 5080). The
-   real-time preview features (motion vectors, TAA, ACES output, depth of field) must keep running
-   on the phones, since Android never falls behind for features a game can use.
+3. **Platforms:** the offline path tracer runs on desktop Vulkan: on this Mac through MoltenVK
+   (Vulkan over Metal), and on Windows/Linux natively. The real-time preview features (motion
+   vectors, TAA, ACES output, depth of field) must keep running on the phones, since Android never
+   falls behind for features a game can use. Direct3D 11/12 and WARP can't run on a Mac; their
+   checks stay as they are and are run on a Windows machine before a change merges.
 4. **One task, one branch, one ADR** when a decision is made. ADR numbers continue from 0047.
 5. **Every pass check is automated** where possible: a CTest test, a screenshot check, or a script
    whose output is committed under `docs/reports/cinematic/`.
@@ -48,18 +52,56 @@ Every task has the same parts:
 
 | Tool | Used for | License |
 |---|---|---|
-| CLion (CMake presets `local-windows-*`, MSVC 14.38) | Everything | — |
-| RenderDoc | Frame captures on every backend | MIT |
-| NVIDIA Nsight Graphics | Ray tracing, shader profiling, GPU traces on the RTX 5080 | Free tool |
-| Vulkan validation layers (with synchronization validation) | Barrier and hazard checks | Apache 2.0 |
-| PIX on Windows | Direct3D 12 captures and timing | Free tool |
+| CLion (CMake presets `macos-debug` / `macos-release`, AppleClang from Xcode 27, LLDB) | Everything | — |
+| vcpkg (triplet `arm64-osx`, `VCPKG_ROOT=~/vcpkg`) | Dependencies | MIT |
+| Xcode: Metal debugger (GPU frame capture), shader profiler, Metal API validation | Frame captures and shader timing; MoltenVK work shows up as Metal | Free tool |
+| Instruments: *Metal System Trace*, *Allocations*, *Time Profiler* | GPU timelines, memory, CPU profiling | Free tool |
+| LunarG Vulkan SDK for macOS (MoltenVK, validation layers with synchronization validation) | Vulkan on Metal; barrier and hazard checks | Apache 2.0 |
 | NVIDIA FLIP (`flip` CLI and Python) | Perceptual image difference, the judge of most checks | BSD-3 |
 | tev | Viewing and comparing HDR/EXR images pixel by pixel | BSD-3 |
 | OpenImageIO `oiiotool` / `idiff` | EXR inspection, OCIO reference conversions | Apache 2.0 |
-| Mitsuba 3 | Reference images for light transport | BSD-3 |
+| Mitsuba 3 (`pip install mitsuba`, variants `scalar_rgb` / `llvm_ad_rgb`; no CUDA on a Mac) | Reference images for light transport | BSD-3 |
 | Blender | Test assets, reference animation curves, Cryptomatte checks | Tool only |
-| FFmpeg / ffprobe (as separate programs) | Encoding and checking video | Run as a process, never linked |
+| FFmpeg / ffprobe (`brew install ffmpeg`, as separate programs; VideoToolbox encoders) | Encoding and checking video | Run as a process, never linked |
 | Python 3 + NumPy | Analysis scripts, run from CLion's Python support | — |
+
+RenderDoc, NVIDIA Nsight and PIX don't run on macOS; Xcode and Instruments take their place. When a
+task needs them anyway (D3D12, NVIDIA-only profiling), it says so and that step runs on Windows.
+
+---
+
+## Working on macOS
+
+What the Mac changes, decided once here so tasks don't repeat it:
+
+| Topic | On this Mac | Consequence for the plan |
+|---|---|---|
+| Graphics backends | Vulkan through MoltenVK only. macOS stops at OpenGL 4.1; the GL backend needs 4.3, so it can't run. No Direct3D | "All PC backends" means MoltenVK here plus a Windows run before merge |
+| Vulkan portability | MoltenVK is a *portability* implementation: the instance needs `VK_KHR_portability_enumeration`, the device `VK_KHR_portability_subset`, surfaces come from `VK_EXT_metal_surface` | Task 00 adds this; later tasks check `portability_subset` limits (e.g. no triangle fans, limited image view swizzles) |
+| Ray tracing | MoltenVK has no `VK_KHR_acceleration_structure` / `ray_query`, and the M1 has no ray-tracing hardware (M3 and later do) | Tasks 23–24 build a BVH and traverse it in a compute shader; hardware RT stays a Windows/Linux module option |
+| Memory | 16 GB *unified* memory shared by CPU and GPU; no PCIe copy | Read-back (Task 03) is cheap; memory pressure (Task 08) is the hard limit |
+| GPU watchdog | macOS aborts command buffers that run too long or hurt interactivity (`MTLCommandBufferErrorTimeout`, seen as `VK_ERROR_DEVICE_LOST`). No `TdrDelay` to raise | Task 34 must tile by time; there is no workaround |
+| Display | Built-in Display P3 panel with EDR (HDR headroom) | Task 10 adds a P3-D65 view; the swapchain must say which colour space it holds |
+| Video | QuickTime applies its own display gamma to BT.709 files | Task 35 must judge with measured values, not QuickTime |
+| Toolchain | AppleClang + libc++, LLDB, ASan/UBSan/TSan built in | Natvis becomes LLDB data formatters (CLion reads Natvis through LLDB, or a Python formatter) |
+
+### Task 00 — macOS bring-up (prerequisite)
+
+- **Input:** the repository as it is; Xcode 27, CLion, Homebrew.
+- **Problem:** the engine has never been built on a Mac. vcpkg isn't installed, there are no macOS
+  presets, the Vulkan backend doesn't enable portability, and no sample lists `[modules.macos]`.
+- **Build:** presets `macos-debug`/`macos-release` (triplet `arm64-osx`); vcpkg in `~/vcpkg`; the
+  LunarG SDK; the Vulkan backend enables the portability extensions and flag; samples get a
+  `[modules.macos]` table (`rhi = ["vulkan"]`).
+- **CLion:** *Settings → Build → CMake* picks the presets; set `VCPKG_ROOT` in the preset environment.
+- **Pass check:** `cmake --workflow --preset macos-debug` builds and the CPU tests pass; the cube's
+  Vulkan check renders a window on MoltenVK with validation clean.
+- **Found so far (2026-11-24):** the presets and vcpkg work (all dependencies build for
+  `arm64-osx` in about 6 minutes) and the runtime compiles with AppleClang and warnings as errors.
+  Still open: configure stops at `tools/editor/editor.toml has no [modules.macos] table` (configure
+  with `-DDREAM_BUILD_EDITOR=OFF -DDREAM_BUILD_SAMPLES=OFF` until then), and the memory-budget test
+  fails because the resource monitor can't read a process's memory on macOS yet.
+- **Output:** a Mac that builds, tests and renders; every task after this assumes it.
 
 ---
 
@@ -76,8 +118,9 @@ instruments the other 34 depend on.
   or soft differences like a changed blur. Path-traced images are never bit-identical. A wrong
   threshold either passes broken images or fails good ones on every backend.
 - **Phases:**
-  1. *Analysis:* render every existing GPU reference on all five PC backends and collect the
-     differences between backends. This is the noise floor today.
+  1. *Analysis:* render every existing GPU reference on MoltenVK (and on the Windows backends when a
+     Windows machine is at hand) and collect the differences. Apple's GPU against references made
+     on an RTX 5080 is the widest gap there is, so it sets the noise floor.
   2. *Decision:* choose the metric(s) and their thresholds.
   3. *Build:* add an `[screenshot] metric = "flip"` option with mean and 99th-percentile limits,
      and a float comparison mode (relative error with an epsilon) for EXR.
@@ -87,10 +130,11 @@ instruments the other 34 depend on.
 - **Decision:** FLIP (perceptual, made for rendering) vs SSIM vs PSNR/RMSE. Criteria: does the
   metric see the errors renderers make (fireflies, aliasing, colour shifts), can it compare HDR,
   is it cheap enough to run in CTest? Thresholds come from the measured noise floor, not by guess.
-- **CLion:** CTest run configurations with arguments; debugger *View as Array* on the pixel buffer
+- **CLion:** CTest run configurations with arguments; LLDB *View as Array* on the pixel buffer
   pointer; a conditional breakpoint that stops only on pixels whose error is above the limit;
   *Evaluate Expression* to sample pixel values while stopped.
-- **Other tools:** FLIP, tev, Python + NumPy for the noise-floor histogram.
+- **Other tools:** NVIDIA's `flip-evaluator` (pip) as the reference implementation, tev (macOS
+  build), Python + NumPy for the noise-floor histogram.
 - **Pass check:** (a) an image against itself scores 0; (b) the existing references still pass on
   all backends; (c) a deliberately changed image (a 1-pixel shift, a 2% exposure change) fails;
   (d) `docs/reports/cinematic/noise-floor.md` lists the per-backend floor and the chosen limits.
@@ -120,7 +164,8 @@ instruments the other 34 depend on.
   *Parallel Stacks* view to see which job threads run the reduction.
 - **Other tools:** none.
 - **Pass check:** a CTest that renders frames 0–47 twice and gets identical hashes, and renders
-  frame 24 alone and gets the same hash as frame 24 of the full run. Done on Vulkan and D3D12.
+  frame 24 alone and gets the same hash as frame 24 of the full run. Done on MoltenVK (and D3D12 on
+  Windows).
 - **Output:** an offline clock that later tasks use for subframes, sequences and batch rendering.
 
 ### Task 03 — Reading back HDR frames and writing EXR
@@ -134,17 +179,19 @@ instruments the other 34 depend on.
   2. *Decision:* the read-back design and the EXR library.
   3. *Build:* an `image_writer` interface (`exr`, `png`, `null`) and a read-back ring of N staging
      buffers with fences; in offline mode the renderer forces an Rgba16Float or Rgba32Float target.
-  4. *Diagnose:* the EXR shows the right picture but flipped, or with rows shifted. Find the
-     row-pitch alignment (256 bytes on D3D12) or the GL origin difference.
+  4. *Diagnose:* the EXR shows the right picture but with rows shifted, or with red and blue
+     swapped. Find the row pitch the copy really used (MoltenVK pads buffer rows for some formats;
+     D3D12 to 256 bytes) or the BGRA swapchain format Metal prefers.
   5. *Verify:* see the pass check.
 - **Decision:** OpenEXR (BSD-3, full features, multi-part for Task 33) vs tinyexr (BSD-3, one
   file, fewer features). Half vs float per channel. Ring depth (2 or 3) vs added latency.
 - **CLion:** *Memory View* on the mapped staging buffer to see the real row pitch; CMake presets to
   add the vcpkg dependency per platform; the timeline profiler's markers in the debugger's output.
+  On unified memory the read-back costs no bus copy, so measure the *wait*, not the transfer.
 - **Other tools:** tev, `oiiotool --info --stats`.
 - **Pass check:** an emissive test patch of exactly 4.0 reads 4.0 ± half-float precision in tev;
-  writing every frame adds no GPU idle gap in the timeline capture; Vulkan and D3D12 EXRs compare
-  equal under the Task 01 float metric.
+  writing every frame adds no GPU idle gap in Instruments' Metal System Trace; MoltenVK and (on
+  Windows) D3D12 EXRs compare equal under the Task 01 float metric.
 - **Output:** linear EXR frames, which every later visual check uses as its source.
 
 ---
@@ -161,7 +208,8 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   reads need explicit synchronization, and the choice made here shapes Tasks 06–08.
 - **Phases:**
   1. *Analysis:* list how each of the six backends expresses compute and barriers (Vulkan
-     pipeline barriers, D3D12 resource states, D3D11 implicit, GL `glMemoryBarrier`).
+     pipeline barriers, D3D12 resource states, D3D11 implicit, GL `glMemoryBarrier`), and how
+     MoltenVK maps Vulkan barriers onto Metal (fences and `memoryBarrier` inside encoders).
   2. *Decision:* the barrier model.
   3. *Build:* `create_compute_pipeline`, `bind_storage_texture/buffer`, `dispatch`, resource
      states, on Vulkan only; `Device::supports_compute()`.
@@ -174,7 +222,8 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   backends, and how much of it Task 06 would duplicate.
 - **CLion:** *Change Signature* and *Implement Methods* across the six device classes; *Type
   Hierarchy* of `CommandList`; a logging breakpoint (no suspend) that prints each barrier.
-- **Other tools:** Vulkan validation with synchronization validation; RenderDoc.
+- **Other tools:** Vulkan validation with synchronization validation (LunarG SDK); Xcode GPU capture
+  (`MVK_CONFIG_AUTO_GPU_CAPTURE_SCOPE=2` makes MoltenVK write a `.gputrace`).
 - **Pass check:** a compute shader writes a known gradient that matches its reference exactly;
   sync validation reports nothing; the `null` RHI and the other backends report
   `supports_compute() == false` and the forward renderer still runs on them.
@@ -197,9 +246,11 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   module may assume, vs per-device queries that modules must handle.
 - **CLion:** the **CMake debugger** (breakpoints inside `DreamCrossCompileShader.cmake`) to see
   the exact SPIRV-Cross command; *Compare Files* on generated GLSL between two runs.
-- **Other tools:** RenderDoc on GL and the phone; PIX for D3D12; Android GPU Inspector.
-- **Pass check:** the Task 04 compute test matches its reference on all five PC backends and on
-  the A57 and A52s; D3D12 debug layer and GL debug output are clean.
+- **Other tools:** Android GPU Inspector (macOS build) for the phones; RenderDoc and PIX on Windows
+  only. macOS GL (4.1) has no compute, so GL compute is tested on the phones' GL ES 3.1.
+- **Pass check:** the Task 04 compute test matches its reference on MoltenVK, on the Windows
+  backends (run there), and on the A57 and A52s; the D3D12 debug layer and GL debug output are
+  clean.
 - **Output:** compute everywhere, with documented limits.
 
 ### Task 06 — A render graph: the core
@@ -222,7 +273,7 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   `cinematic` (a library), or a new interface? Rebuilt each frame vs compiled once and cached
   until the pass list changes. Criteria: the modularity rule, cost per frame, hot reload.
 - **CLion:** Google Test/Catch2 integration with *Rerun Failed Tests*; *Extract Function* and
-  *Extract Interface*-style refactors; ASan with the MSVC toolchain on the test target.
+  *Extract Interface*-style refactors; ASan with AppleClang on the test target.
 - **Other tools:** Graphviz to dump the compiled graph (`.dot`) for a visual check.
 - **Pass check:** unit tests: a culled pass, a diamond dependency, a resource read before it is
   written (error), and a golden barrier list; zero heap allocations per `compile()` after warm-up
@@ -245,9 +296,10 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
 - **Decision:** uploads as their own graph passes vs a pre-frame upload phase outside the graph.
 - **CLion:** *Local History* and *Compare with Branch* to diff behaviour against `main`; dependent
   breakpoints (enable a breakpoint in the shadow pass only after the bloom pass was hit).
-- **Other tools:** RenderDoc (compare event lists before and after); the timeline profiler.
-- **Pass check:** every existing GPU screenshot check passes under the Task 01 limits on five PC
-  backends and both phones; frame time within ±3% of `main` on the RTX 5080 and the A57.
+- **Other tools:** Xcode GPU capture (compare command lists before and after); the timeline
+  profiler.
+- **Pass check:** every existing GPU screenshot check passes under the Task 01 limits on MoltenVK,
+  the Windows backends and both phones; frame time within ±3% of `main` on the M1 Pro and the A57.
 - **Output:** the forward renderer on the graph; the old path removed.
 
 ### Task 08 — Transient memory aliasing
@@ -260,8 +312,9 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
 - **Phases:**
   1. *Analysis:* print each transient texture's first and last use and its size.
   2. *Decision:* the packing algorithm and where aliasing is supported.
-  3. *Build:* lifetime intervals, placement into heaps (Vulkan memory aliasing, D3D12 placed
-     resources); other backends keep separate textures.
+  3. *Build:* lifetime intervals, placement into heaps (Vulkan memory aliasing, which MoltenVK
+     implements with `MTLHeap` placement; D3D12 placed resources); other backends keep separate
+     textures. On 16 GB of unified memory this is what makes 4K film frames fit at all.
   4. *Diagnose:* bloom flickers in one frame out of fifty. Find the missing aliasing barrier or
      the texture used before its "discard/clear" on the first use.
   5. *Verify:* see the pass check.
@@ -269,7 +322,8 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   persistent pool. Criteria: memory saved, compile time, determinism (Task 02).
 - **CLion:** *Memory View* of the heap offsets; a conditional breakpoint when two live intervals
   share an offset range.
-- **Other tools:** validation layers (memory aliasing checks); PIX memory view; RenderDoc.
+- **Other tools:** validation layers (memory aliasing checks); Xcode's Memory viewer in a GPU
+  capture; Instruments *Allocations*.
 - **Pass check:** transient GPU memory at 4K drops by at least 30% (memory budget counters);
   1000 frames of the render demo show no flicker (Task 01 judge on every 10th frame); validation
   clean.
@@ -424,10 +478,10 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   5. *Verify:* see the pass check.
 - **Decision:** previous world matrices per instance (more memory) vs previous model-view-
   projection (less flexible); velocity in pixels vs NDC; keeping history in the ECS vs in the renderer.
-- **CLion:** *Natvis* visualizers for the engine's math types so matrices read clearly in the
-  debugger; a watchpoint on the previous-palette buffer; *Parallel Stacks* when the animator runs
+- **CLion:** LLDB data formatters (Natvis files, which CLion's LLDB reads) for the engine's math
+  types so matrices read clearly in the debugger; a watchpoint on the previous-palette buffer; *Parallel Stacks* when the animator runs
   on jobs.
-- **Other tools:** RenderDoc (pixel history on the velocity target).
+- **Other tools:** Xcode GPU capture (inspect the velocity attachment per pixel).
 - **Pass check:** a synthetic pan test: a camera moving 3.5 px/frame gives measured vectors of
   3.5 ± 0.01 px; skinned and static objects show no spikes over 200 frames; vectors are zero on the
   first frame of each shot. Runs on the phones too.
@@ -451,7 +505,7 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   where TAA sits relative to tone mapping and bloom.
 - **CLion:** Slang editing with a TextMate bundle; hot reload of shaders while the demo runs;
   a run configuration that sets TAA settings through environment variables or a test TOML.
-- **Other tools:** FLIP (Task 01); RenderDoc.
+- **Other tools:** FLIP (Task 01); Xcode GPU capture.
 - **Pass check:** FLIP against the 16× reference better than no AA on all three scenes; temporal
   flicker (per-pixel variance over 60 frames of the static scene) below a limit; ghost length under
   2 px in the moving test. A57 cost under 1 ms.
@@ -528,7 +582,7 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   without copying code.
 - **CLion:** *Extract* refactorings to move shared BRDF code into a common Slang module; *Find in
   Files* with scope set to `modules/renderer`; a new CMake target via the module template.
-- **Other tools:** RenderDoc; Nsight Graphics.
+- **Other tools:** Xcode GPU capture and shader profiler.
 - **Pass check:** with `renderer = ["cinematic"]`, the render demo matches the `forward` image
   under the Task 01 limits; `forward` remains the default for games; `cinematic` falls back to
   `null` cleanly on a device without the needed features.
@@ -573,7 +627,7 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   5. *Verify:* see the pass check.
 - **Decision:** a fixed fat material struct vs a feature-bit-indexed variable layout in a buffer
   vs material graphs compiled to shaders; which lobes the `forward` renderer also supports.
-- **CLion:** *Natvis* for the packed material struct; *Find Usages* of the old material fields;
+- **CLion:** LLDB formatters (Natvis) for the packed material struct; *Find Usages* of the old material fields;
   `static_assert` sizes checked by the compiler.
 - **Other tools:** Mitsuba 3 (reference spheres with the same parameters); the Khronos glTF sample
   models for clearcoat/sheen/anisotropy.
@@ -621,7 +675,7 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   stochastic transparency vs weighted blended OIT vs alpha-to-coverage.
 - **CLion:** unit test of the BSDF's numerical integral on the CPU; *Run to Cursor* for single-pixel
   shader debugging done in the CPU port of the BSDF.
-- **Other tools:** a hair card asset from Blender; RenderDoc.
+- **Other tools:** a hair card asset from Blender; Xcode GPU capture.
 - **Pass check:** the hair BSDF integrates to 1.0 ± 2% (white furnace, CPU test); the hair test
   scene converges with accumulation to a stable image (no flicker across 24 frames).
 - **Output:** a complete set of surface materials for the path tracer.
@@ -634,24 +688,28 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
 
 - **Input:** compute (Tasks 04–05); the cinematic renderer (Task 18).
 - **Problem:** path tracing needs acceleration structures (BLAS per mesh, TLAS per frame) and ray
-  queries. Vulkan (`VK_KHR_acceleration_structure`, `ray_query`) and DXR differ in build inputs,
-  scratch memory and compaction. Only two of the six backends can support it.
+  queries. On this Mac neither exists in hardware or in MoltenVK, so the engine builds its own
+  BVH and traverses it in compute; Vulkan/DXR hardware ray tracing is the fast path on Windows.
+  Both must give the same hits.
 - **Phases:**
   1. *Analysis:* map the two APIs side by side.
-  2. *Decision:* ray query in compute vs ray tracing pipelines with shader tables.
-  3. *Build:* `create_blas/tlas`, build and compaction, `supports_ray_tracing()`, on Vulkan and
-     D3D12.
+  2. *Decision:* software BVH in compute (portable, runs on MoltenVK) vs a new Metal backend for
+     Metal's ray-tracing API vs hardware RT only on Windows.
+  3. *Build:* a BVH builder (SAH binning on the CPU, refit on the GPU) and a `trace_ray` Slang
+     function over it; `supports_ray_tracing()` reports hardware RT, `supports_compute()` is
+     enough for the software path.
   4. *Diagnose:* the TLAS build crashes the driver (device lost) on the second frame. Find the
      scratch buffer alignment or the instance buffer reused while the GPU still reads it.
   5. *Verify:* see the pass check.
-- **Decision:** inline ray queries (simpler, one compute shader, good for the path tracer) vs
-  pipelines with shader binding tables (flexible, harder to port); compaction always vs never.
+- **Decision:** software BVH (works everywhere, slower: no RT cores) vs Metal backend (fast on M3,
+  a seventh backend to maintain) vs hardware-only (no path tracer on this Mac). Node layout: BVH2
+  vs BVH4/8 (wider nodes suit SIMD-groups of 32).
 - **CLion:** *Implement Methods* for the two backends; *Type Hierarchy*; device-lost breakpoints
   in the error path; ASan on the build code.
-- **Other tools:** Nsight Graphics (acceleration structure viewer); PIX; validation layers.
+- **Other tools:** Xcode shader profiler; validation layers; a Graphviz/Python dump of the BVH.
 - **Pass check:** ray-traced hard shadows in the render demo match the shadow-mapped image's
-  shadow shapes (judge on a shadow-only AOV); validation and the D3D12 debug layer are clean; all
-  other backends report no support and nothing breaks.
+  shadow shapes (judge on a shadow-only AOV) on MoltenVK; a million random rays give the same
+  hits as a brute-force CPU test; validation is clean; backends without compute fall back.
 - **Output:** ray queries on PC.
 
 ### Task 24 — Acceleration structures for animated scenes
@@ -665,12 +723,12 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   2. *Decision:* the rebuild/refit policy.
   3. *Build:* compute skinning into a vertex buffer the BLAS reads; refit with a rebuild trigger.
   4. *Diagnose:* after a few hundred frames of refit, tracing gets 3× slower. Explain the BVH
-     quality loss and confirm with Nsight.
+     quality loss and confirm with the BVH's SAH cost printed per frame.
   5. *Verify:* see the pass check.
 - **Decision:** refit always / rebuild every N frames / rebuild when bounding volume grows by X%;
   a BLAS per subframe vs a motion-blur-aware structure (not portable).
 - **CLion:** the timeline profiler; conditional breakpoints on the rebuild trigger.
-- **Other tools:** Nsight Graphics.
+- **Other tools:** Xcode shader profiler; Instruments Metal System Trace.
 - **Pass check:** a 10-second animation keeps trace cost within 20% of a freshly built structure on
   every frame; shadows match a full-rebuild run under the Task 01 limit.
 - **Output:** correct, fast acceleration structures for animated shots.
@@ -783,7 +841,8 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   1. *Analysis:* render a 24-frame shot at 64 spp and a 16k spp reference for frames 0, 12, 23.
   2. *Decision:* auxiliary images and temporal handling.
   3. *Build:* a `denoiser` interface (`oidn`, `null`); albedo and normal AOVs at the first
-     non-specular hit; GPU buffer sharing with OIDN where possible, read-back otherwise.
+     non-specular hit; OIDN's Metal device on the Mac, sharing buffers through MoltenVK's
+     `VK_EXT_metal_objects` where possible, read-back otherwise (cheap on unified memory).
   4. *Diagnose:* mirrors and glass come out blurred. Find that the albedo/normal AOV is taken at
      the mirror instead of at the first diffuse-like hit behind it.
   5. *Verify:* see the pass check.
@@ -817,7 +876,7 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   5. *Verify:* see the pass check.
 - **Decision:** dense vs sparse delta storage; morph on the GPU vs on the CPU for small counts;
   normal deltas from the file vs recomputed.
-- **CLion:** *Natvis* for the sparse delta structures; a conditional breakpoint on a chosen vertex
+- **CLion:** LLDB formatters (Natvis) for the sparse delta structures; a conditional breakpoint on a chosen vertex
   index; *Parallel Stacks* if weights are evaluated in jobs.
 - **Other tools:** Blender (export a face with shape keys and the reference positions at set
   weights).
@@ -841,7 +900,7 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   5. *Verify:* see the pass check.
 - **Decision:** LBS vs DQS vs a blend of both per vertex vs "optimized centres of rotation";
   what happens with joint scale.
-- **CLion:** *Natvis* for dual quaternions; unit tests of the math in `core/math`.
+- **CLion:** LLDB formatters (Natvis) for dual quaternions; unit tests of the math in `core/math`.
 - **Other tools:** Blender (the same rig with "Preserve Volume" on as a reference).
 - **Pass check:** the twist test keeps ≥ 95% of the rest volume at 180° (LBS drops near 0 at the
   joint); positions match Blender's preserve-volume result to 1e-3 of the model size.
@@ -904,25 +963,30 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
 
 - **Input:** everything above: sequences, path tracer, AOVs.
 - **Problem:** films are rendered unattended for hours. The renderer must run without a window,
-  render frame ranges, survive and resume after a crash or device loss, and avoid the Windows GPU
-  timeout (TDR) that resets the driver when one dispatch runs longer than ~2 s.
+  render frame ranges, survive and resume after a crash or device loss, and avoid the GPU
+  watchdog: macOS aborts a command buffer that runs too long (`MTLCommandBufferErrorTimeout`,
+  reported by MoltenVK as device lost), as Windows' TDR does after ~2 s.
 - **Phases:**
-  1. *Analysis:* what can fail in a 10-hour render (TDR, device lost, disk full, a corrupt frame).
-  2. *Decision:* the resume and TDR strategy.
+  1. *Analysis:* what can fail in a 10-hour render (watchdog, device lost, disk full, the Mac
+     sleeping, a corrupt frame).
+  2. *Decision:* the resume and watchdog strategy.
   3. *Build:* a `dream render shot.toml --frames 1-240 --spp 512 --out ...` command; headless mode
      (no swapchain); tiled dispatches with a time budget; per-frame atomic writes (temp file then
      rename); a progress log and resume.
-  4. *Diagnose:* a 4K frame at high spp triggers a device lost. Confirm it is TDR, then size the
-     tiles from measured time per tile instead of a fixed size.
+  4. *Diagnose:* a 4K frame at high spp triggers a device lost. Confirm it is the watchdog (the
+     command buffer's error, Console.app's GPU log), then size the tiles from measured time per
+     tile instead of a fixed size.
   5. *Verify:* see the pass check.
-- **Decision:** tiles sized by time vs fixed; raising `TdrDelay` (needs admin, affects the user's
-  machine) vs never relying on it; resume by "frame file exists and is valid" vs a job journal.
+- **Decision:** tiles sized by time vs fixed (macOS has no `TdrDelay` to raise, so time-sized tiles
+  are required); keeping the Mac awake (`caffeinate -i` around the render, or an IOKit power
+  assertion) vs documenting it; resume by "frame file exists and is valid" vs a job journal.
 - **CLion:** run configurations with program arguments and environment; *Attach to Process* to a
   running render; the crash handler's minidump opened in the debugger.
-- **Other tools:** Windows Event Viewer (TDR events); Task Manager GPU view.
+- **Other tools:** Console.app (GPU and `kernel` messages); Activity Monitor's GPU History;
+  `caffeinate`.
 - **Pass check:** kill the process at frame 50 of 100, run again, and the result is
-  byte-identical to an uninterrupted run (Task 02); a 4K frame at 4096 spp completes without a
-  device lost; frames are never left half-written.
+  byte-identical to an uninterrupted run (Task 02); a 4K frame at 1024 spp (M1 Pro; 4096 on a
+  Windows RTX machine) completes without a device lost; frames are never left half-written.
 - **Output:** reliable unattended rendering.
 
 ### Task 35 — Video encoding without linking FFmpeg
@@ -938,14 +1002,16 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
   2. *Decision:* the encoder boundary.
   3. *Build:* a `video_encoder` interface (`ffmpeg_process`, `null`) that pipes frames already
      converted by the display transform; correct `color_primaries`, `color_trc`, `colorspace` and range flags.
-  4. *Diagnose:* the video is darker than the EXR shown in tev. Decide whether the cause is the
-     transfer curve (sRGB vs BT.1886), limited-range scaling, or the player, using measured values.
+  4. *Diagnose:* the video looks lighter in QuickTime than the EXR in tev. Decide whether the cause
+     is the transfer curve (sRGB vs BT.1886), limited-range scaling, or QuickTime's own gamma
+     handling of BT.709 tags, using measured values from decoded frames, not the player.
   5. *Verify:* see the pass check.
 - **Decision:** pipe raw frames vs write an image sequence and run FFmpeg after; where the display
   transform is applied (engine vs FFmpeg filter); 8-bit vs 10-bit.
 - **CLion:** step through the new process-launch code in the debugger; a logging breakpoint on pipe
   write sizes; run configuration with FFmpeg's path as an environment variable.
-- **Other tools:** FFmpeg and ffprobe; a colour patch test chart; tev.
+- **Other tools:** FFmpeg and ffprobe (Homebrew; `prores_videotoolbox` and `hevc_videotoolbox` use
+  the M1's media engine); a colour patch test chart; tev.
 - **Pass check:** `ffprobe` shows the intended colour tags; decoding the video back gives each
   colour patch within 1 code value (10-bit) of the expected value; the `null` encoder leaves the
   EXRs as the deliverable.
@@ -955,22 +1021,24 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
 
 - **Input:** the complete path tracer (Tasks 25–33); the capstone-like test scene.
 - **Problem:** render time decides whether a film can be made at all. A single "megakernel" path
-  tracer suffers from divergence (different materials in one warp) and register pressure. The fix
+  tracer suffers from divergence (different materials in one SIMD-group) and register pressure. The fix
   (wavefront: separate kernels per stage with queues) is a large structural change, and its benefit
   must be proven, not assumed.
 - **Phases:**
-  1. *Analysis:* an Nsight GPU trace: occupancy, warp divergence, registers, memory throughput.
+  1. *Analysis:* an Xcode GPU capture with the shader profiler and GPU counters: occupancy, ALU
+     and memory limiters, register spills per pipeline.
   2. *Decision:* what to change.
   3. *Build:* the chosen change (material sorting, wavefront split, or register reductions).
   4. *Diagnose:* the faster version gives a slightly different image. Prove whether it's noise
      (different sample order) or a bug, using the converged comparison.
   5. *Verify:* see the pass check.
-- **Decision:** megakernel with sorting vs wavefront vs shader execution reordering
-  (vendor-specific; would it stay a module option?); the measure of success (samples/second at
+- **Decision:** megakernel with sorting vs wavefront vs BVH layout changes (the software traversal
+  from Task 23 is likely the bottleneck on the M1); the measure of success (samples/second at
   equal image error).
 - **CLion:** the timeline profiler and CPU profiling of the host side; *Compare with Branch* to keep
   the old kernel as a baseline.
-- **Other tools:** Nsight Graphics (GPU Trace, shader profiler); FLIP.
+- **Other tools:** Xcode GPU capture (shader profiler, performance counters); Instruments Metal
+  System Trace; FLIP.
 - **Pass check:** at least 1.5× more samples per second on the capstone scene at an equal
   converged image (FLIP of converged images below the Task 01 floor); results recorded in
   `docs/reports/cinematic/performance.md`.
@@ -1008,6 +1076,7 @@ The renderer has no compute shaders yet (ADR 0037 notes this). A film renderer i
 
 | # | Task | Takes from | Gives to |
 |---|---|---|---|
+| 00 | macOS bring-up | — | everything |
 | 01 | Perceptual image judge | screenshot checks | every check |
 | 02 | Deterministic offline time | 01 | 03, 12, 13, 16, 32, 34 |
 | 03 | HDR read-back and EXR | 02 | 04, 09, 33, 35 |

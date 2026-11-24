@@ -40,6 +40,18 @@
       }
     },
     {
+      "name": "macos-base",
+      "hidden": true,
+      "inherits": "base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "arm64-osx",
+        "VCPKG_HOST_TRIPLET": "arm64-osx",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "14.0"
+      }
+    },
+    {
       "name": "windows-debug",
       "displayName": "Windows x64 Debug",
       "inherits": "windows-base",
@@ -62,13 +74,27 @@
       "displayName": "Android arm64 Release",
       "inherits": "android-arm64-base",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "macos-debug",
+      "displayName": "macOS arm64 Debug",
+      "inherits": "macos-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "macos-release",
+      "displayName": "macOS arm64 Release",
+      "inherits": "macos-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     }
   ],
   "buildPresets": [
     { "name": "windows-debug", "configurePreset": "windows-debug" },
     { "name": "windows-release", "configurePreset": "windows-release" },
     { "name": "android-arm64-debug", "configurePreset": "android-arm64-debug" },
-    { "name": "android-arm64-release", "configurePreset": "android-arm64-release" }
+    { "name": "android-arm64-release", "configurePreset": "android-arm64-release" },
+    { "name": "macos-debug", "configurePreset": "macos-debug" },
+    { "name": "macos-release", "configurePreset": "macos-release" }
   ],
   "testPresets": [
     {
@@ -79,6 +105,16 @@
     {
       "name": "windows-release",
       "configurePreset": "windows-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "macos-debug",
+      "configurePreset": "macos-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "macos-release",
+      "configurePreset": "macos-release",
       "output": { "outputOnFailure": true }
     }
   ],
@@ -111,6 +147,14 @@
       "steps": [
         { "type": "configure", "name": "android-arm64-release" },
         { "type": "build", "name": "android-arm64-release" }
+      ]
+    },
+    {
+      "name": "macos-debug",
+      "steps": [
+        { "type": "configure", "name": "macos-debug" },
+        { "type": "build", "name": "macos-debug" },
+        { "type": "test", "name": "macos-debug" }
       ]
     }
   ]
