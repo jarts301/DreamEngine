@@ -5,8 +5,11 @@
 #include "dream/core/result.h"
 
 #include <format>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace dream::core {
 
@@ -42,6 +45,27 @@ public:
             return missing_list(key);
         }
         return m_registry.create<Interface>(*preference, m_config);
+    }
+
+    // Creates every backend in the configured list for `Interface`, in its order, for interfaces
+    // of which a program uses several at once, such as editor panels. A backend that can't start
+    // is logged and left out; an empty list, or none, gives none.
+    template <ModuleInterface Interface>
+    [[nodiscard]] std::vector<CreatedModule<Interface>> create_all() const {
+        std::vector<CreatedModule<Interface>> created;
+        const auto names = m_config.get_string_list(
+            std::format("modules.{}.{}", m_platform, Interface::k_module_interface));
+        if (!names.has_value()) {
+            return created;
+        }
+        for (const std::string& name : *names) {
+            Result<CreatedModule<Interface>> one =
+                m_registry.create<Interface>(std::span<const std::string>(&name, 1), m_config);
+            if (one.has_value()) {
+                created.push_back(std::move(one).value());
+            }
+        }
+        return created;
     }
 
     // Whether the configuration has a list for `Interface` on this platform. A subsystem a project

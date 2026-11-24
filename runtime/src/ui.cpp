@@ -79,6 +79,7 @@ core::Result<void> DebugOverlay::initialize(App& app, Renderer& renderer,
     }
     m_backend = std::move(backend);
     m_renderer = &renderer;
+    m_app = &app;
     m_subscriptions = subscribe_input(app.events(), &m_origin, [this](const platform::Event& event) {
         if (m_visible) {
             m_backend->handle_event(event);
@@ -99,6 +100,11 @@ void DebugOverlay::end_frame() {
         m_renderer->set_ui_layer(UiLayer::Debug, list, m_origin);
     } else {
         m_renderer->clear_ui_layer(UiLayer::Debug);
+    }
+    // Typed text reaches the tools only while a field of theirs is being typed in.
+    if (const bool wants_text = m_visible && m_backend->wants_text(); wants_text != m_text_input) {
+        m_text_input = wants_text;
+        m_app->set_text_input(wants_text);
     }
 }
 

@@ -466,7 +466,24 @@ void register_environment(SceneLoader& scenes, AssetManager& assets, rhi::Device
             return EnvironmentAsset{.radiance = GpuTexture(*target, texture.value()),
                                     .levels = data.desc.mip_levels};
         });
-    scenes.register_component("environment", &read_environment);
+    scenes.register_component(
+        "environment", &read_environment,
+        {core::FieldInfo{.name = "map",
+                         .kind = core::FieldKind::Asset,
+                         .fallback = std::string(),
+                         .help = "An .hdr image of the sky all around"},
+         core::FieldInfo{.name = "intensity",
+                         .kind = core::FieldKind::Number,
+                         .fallback = 1.0,
+                         .minimum = 0.0f,
+                         .maximum = 5.0f},
+         core::FieldInfo{.name = "rotation",
+                         .kind = core::FieldKind::Number,
+                         .fallback = 0.0,
+                         .minimum = -180.0f,
+                         .maximum = 180.0f,
+                         .help = "Degrees around the up axis"},
+         core::FieldInfo{.name = "background", .kind = core::FieldKind::Flag, .fallback = true}});
 }
 
 } // namespace dream::runtime

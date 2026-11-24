@@ -1,0 +1,38 @@
+[app]
+window = "hidden"
+max_fps = 0
+
+[editor]
+quit_after_frames = 5
+
+[input.actions]
+select = ["mouse:left"]
+orbit = ["mouse:right"]
+pan = ["mouse:middle"]
+control = ["key:left_control"]
+save = ["key:s"]
+undo = ["key:z"]
+redo = ["key:y"]
+delete = ["key:delete"]
+focus = ["key:f"]
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["null"]
+renderer = ["forward"]
+texture_decoder = ["ktx", "null"]
+debug_ui = ["imgui"]
+editor_panel = ["hierarchy", "inspector"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["null"]
+renderer = ["forward"]
+texture_decoder = ["ktx", "null"]
+debug_ui = ["imgui"]
+editor_panel = ["hierarchy", "inspector"]
+
+[audio]
+muted = true

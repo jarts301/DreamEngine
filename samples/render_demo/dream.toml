@@ -46,3 +46,10 @@ tangent_generator = ["mikktspace", "null"]
 animation = ["ozz", "null"]
 particles = ["cpu", "null"]
 texture_decoder = ["ktx", "null"]
+
+# What the editor opens (ADR 0046): dream_editor samples/render_demo
+[editor]
+scene = "assets:/scenes/yard.toml"
+game = "dream_render_demo"
+assets = ["assets", "../assets"]
+build = "../../build/windows-debug"

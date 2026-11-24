@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <format>
 #include <memory>
+#include <vector>
 #include <span>
 
 namespace dream::runtime {
@@ -173,6 +174,20 @@ public:
         core::set_crash_detail(std::format("{} module", Interface::k_module_interface),
                                created.value().name);
         return std::move(created.value().instance);
+    }
+
+    // Creates every backend the project configuration lists for `Interface`, in order, for
+    // interfaces of which a program uses several at once, such as editor panels.
+    template <core::ModuleInterface Interface>
+    [[nodiscard]] std::vector<std::unique_ptr<Interface>> create_modules() const {
+        std::vector<std::unique_ptr<Interface>> instances;
+        if (m_modules == nullptr) {
+            return instances;
+        }
+        for (core::CreatedModule<Interface>& created : m_modules->create_all<Interface>()) {
+            instances.push_back(std::move(created.instance));
+        }
+        return instances;
     }
 
 private:

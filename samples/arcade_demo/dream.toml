@@ -76,3 +76,10 @@ ui = ["rmlui"]
 debug_ui = ["imgui"]
 profiler = ["timeline"]
 texture_decoder = ["ktx", "null"]
+
+# What the editor opens (ADR 0046): dream_editor samples/arcade_demo
+[editor]
+scene = "assets:/scenes/range.toml"
+game = "dream_arcade_demo"
+assets = ["assets", "../assets"]
+build = "../../build/windows-debug"

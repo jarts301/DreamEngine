@@ -4,8 +4,10 @@
 #include "dream/core/log.h"
 #include "dream/core/math/quaternion.h"
 #include "dream/runtime/app.h"
+#include "dream/runtime/event_bus.h"
 #include "dream/runtime/game.h"
 #include "dream/runtime/renderer.h"
+#include "dream/runtime/scene_loader.h"
 #include "dream/runtime/world.h"
 
 #include <cstdint>
@@ -45,18 +47,24 @@ public:
             return ready;
         }
         app.scenes().register_component("spin", &read_spin);
-
-        core::Result<std::unique_ptr<runtime::World>> world =
-            app.scenes().load("assets:/scenes/main.toml");
-        if (!world.has_value()) {
-            return world.error();
-        }
-        m_world = std::move(world).value();
-        return {};
+        // The scene is loaded again when its file changes, as when the editor saves it while the
+        // game runs (hot reload, in debug builds).
+        m_scene_changed = app.events().subscribe<runtime::ScenesChanged>(
+            [this](const runtime::ScenesChanged&) { m_reload = true; });
+        return load_scene(app);
     }
 
     void on_update(runtime::App& app, const core::FrameTime& time) override {
         ++m_frames;
+        if (m_reload) {
+            m_reload = false;
+            if (const core::Result<void> loaded = load_scene(app); !loaded.has_value()) {
+                // The last scene that loaded stays, so a mistake in the file doesn't end the game.
+                DREAM_LOG_WARNING("The scene didn't load again: {}", loaded.error().message);
+            } else {
+                DREAM_LOG_INFO("Loaded the scene again");
+            }
+        }
         if (app.input().was_pressed("toggle_spin")) {
             m_spinning = !m_spinning;
         }
@@ -86,7 +94,19 @@ public:
     }
 
 private:
+    core::Result<void> load_scene(runtime::App& app) {
+        core::Result<std::unique_ptr<runtime::World>> world =
+            app.scenes().load("assets:/scenes/main.toml");
+        if (!world.has_value()) {
+            return world.error();
+        }
+        m_world = std::move(world).value();
+        return {};
+    }
+
     runtime::Renderer m_renderer;
+    runtime::Subscription m_scene_changed;
+    bool m_reload = false;
     std::unique_ptr<runtime::World> m_world;
     std::int64_t m_quit_after_frames = 0;
     std::int64_t m_frames = 0;

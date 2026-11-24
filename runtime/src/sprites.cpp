@@ -473,8 +473,54 @@ core::Result<std::vector<Entity>> make_tile_colliders(World& world, Entity map_e
 }
 
 void register_sprite_components(SceneLoader& scenes) {
-    scenes.register_component("camera_2d", &read_camera_2d);
-    scenes.register_component("sprite", &read_sprite);
+    using core::FieldInfo;
+    using core::FieldKind;
+    const auto vec2 = [](double x, double y) {
+        return core::ConfigValue{std::vector<double>{x, y}};
+    };
+    scenes.register_component(
+        "camera_2d", &read_camera_2d,
+        {FieldInfo{.name = "height",
+                   .kind = FieldKind::Number,
+                   .fallback = 10.0,
+                   .minimum = 0.1f,
+                   .maximum = 200.0f,
+                   .help = "World units seen from the bottom of the window to the top"},
+         FieldInfo{.name = "min_width",
+                   .kind = FieldKind::Number,
+                   .fallback = 0.0,
+                   .minimum = 0.0f,
+                   .maximum = 200.0f,
+                   .help = "World units always seen across; 0 for none"}});
+    scenes.register_component(
+        "sprite", &read_sprite,
+        {FieldInfo{.name = "texture", .kind = FieldKind::Asset, .fallback = std::string()},
+         FieldInfo{.name = "columns", .kind = FieldKind::Integer, .fallback = std::int64_t{1}},
+         FieldInfo{.name = "rows", .kind = FieldKind::Integer, .fallback = std::int64_t{1}},
+         FieldInfo{.name = "frame", .kind = FieldKind::Integer, .fallback = std::int64_t{0}},
+         FieldInfo{.name = "size",
+                   .kind = FieldKind::Vec2,
+                   .fallback = vec2(0, 0),
+                   .help = "World units; 0 takes the frame's pixels over pixels_per_unit"},
+         FieldInfo{.name = "pixels_per_unit", .kind = FieldKind::Number, .fallback = 16.0},
+         FieldInfo{.name = "pivot", .kind = FieldKind::Vec2, .fallback = vec2(0.5, 0.5)},
+         FieldInfo{.name = "color",
+                   .kind = FieldKind::Color,
+                   .fallback = std::vector<double>{1.0, 1.0, 1.0}},
+         FieldInfo{.name = "alpha",
+                   .kind = FieldKind::Number,
+                   .fallback = 1.0,
+                   .minimum = 0.0f,
+                   .maximum = 1.0f},
+         FieldInfo{.name = "flip_x", .kind = FieldKind::Flag, .fallback = false},
+         FieldInfo{.name = "flip_y", .kind = FieldKind::Flag, .fallback = false},
+         FieldInfo{.name = "layer", .kind = FieldKind::Integer, .fallback = std::int64_t{0}},
+         FieldInfo{.name = "order", .kind = FieldKind::Integer, .fallback = std::int64_t{0}},
+         FieldInfo{.name = "filter",
+                   .kind = FieldKind::Choice,
+                   .fallback = std::string("pixel"),
+                   .choices = {"pixel", "smooth"}},
+         FieldInfo{.name = "visible", .kind = FieldKind::Flag, .fallback = true}});
     scenes.register_component("sprite_animator", &read_sprite_animator);
     scenes.register_component("tile_map", &read_tile_map);
 }

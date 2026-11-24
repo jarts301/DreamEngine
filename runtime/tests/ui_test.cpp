@@ -108,10 +108,14 @@ public:
         return true;
     }
     bool wants_keyboard() const override {
-        return false;
+        return typing;
+    }
+    bool wants_text() const override {
+        return typing;
     }
 
     ui::Host* host = nullptr;
+    bool typing = false;
     std::vector<platform::Event> events;
     ui::FrameInfo frame;
     ui::DrawList list = quads({ui::DrawCommand{}});
@@ -266,6 +270,28 @@ TEST_CASE_FIXTURE(UiFixture, "DebugOverlay passes input on and draws over the ga
     renderer.clear_ui_layer(UiLayer::Game);
     frame();
     CHECK(renderer.last_ui_command_count() == 0);
+}
+
+TEST_CASE_FIXTURE(UiFixture, "DebugOverlay turns text input on while a field is typed in") {
+    auto backend = std::make_unique<FakeDebugUi>();
+    FakeDebugUi& tools = *backend;
+    DebugOverlay overlay;
+    REQUIRE(overlay.initialize(app, renderer, std::move(backend)).has_value());
+    overlay.begin_frame(app, 0.016f);
+    overlay.end_frame();
+    CHECK_FALSE(platform.text_input);
+
+    tools.typing = true;
+    overlay.begin_frame(app, 0.016f);
+    overlay.end_frame();
+    CHECK(platform.text_input);
+    CHECK(overlay.wants_keyboard());
+
+    // Hidden tools take no typing.
+    overlay.set_visible(false);
+    overlay.begin_frame(app, 0.016f);
+    overlay.end_frame();
+    CHECK_FALSE(platform.text_input);
 }
 
 TEST_CASE_FIXTURE(UiFixture, "UserInterface publishes events and turns text input on and off") {

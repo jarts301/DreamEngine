@@ -50,6 +50,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0043](0043-crash-uploads-and-texture-cookers.md) | Crash uploads as the `crash_upload` interface over `Platform::post_http`, module-declared Android permissions, and texture cookers chosen per platform |
 | [0044](0044-code-health-review.md) | A code health review: per-world state keyed by a world's id, a re-entrant event flush, shared scene readers, the cook tool following the mesh simplifier list, and reading cooked textures as the `texture_decoder` module |
 | [0045](0045-installable-sdk.md) | An installable SDK of the engine's sources, found with `find_package(DreamEngine)`, `dream new` with a project template, and games in their own repositories |
+| [0046](0046-editor-v1.md) | Editor v1: the scene file edited as a document and the world built from it, components describing their fields, `editor_panel` modules over `debug_ui`, and Play through hot reload |
 
 ## Template
 

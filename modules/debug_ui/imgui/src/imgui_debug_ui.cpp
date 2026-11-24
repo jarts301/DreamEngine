@@ -186,8 +186,12 @@ public:
         // Wide enough for a label beside each slider, but within a narrow phone screen, where new
         // windows open 60 pixels from the left. The height fits the contents.
         const float room = ImGui::GetIO().DisplaySize.x - 70.0f;
-        ImGui::SetNextWindowSize(ImVec2(std::min(380.0f * m_scale, std::max(room, 200.0f)), 0.0f),
-                                 ImGuiCond_FirstUseEver);
+        if (!m_placed) {
+            ImGui::SetNextWindowSize(
+                ImVec2(std::min(380.0f * m_scale, std::max(room, 200.0f)), 0.0f),
+                ImGuiCond_FirstUseEver);
+        }
+        m_placed = false;
         return ImGui::Begin(Label(title).c_str(), open);
     }
 
@@ -229,11 +233,126 @@ public:
         ImGui::SameLine();
     }
 
+    void next_window_placement(core::Vec2 position, core::Vec2 size) override {
+        ImGui::SetNextWindowPos(ImVec2(position.x, position.y), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(size.x, size.y), ImGuiCond_FirstUseEver);
+        m_placed = true;
+    }
+
+    void text_disabled(std::string_view text) override {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextUnformatted(text.data(), text.data() + text.size());
+        ImGui::PopStyleColor();
+    }
+
+    void tooltip(std::string_view text) override {
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
+            ImGui::SetTooltip("%s", Label(text).c_str());
+        }
+    }
+
+    bool selectable(std::string_view label, bool selected) override {
+        return ImGui::Selectable(Label(label).c_str(), selected);
+    }
+
+    bool tree_node(std::string_view label, bool leaf, bool selected, bool& clicked) override {
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                                   ImGuiTreeNodeFlags_SpanAvailWidth |
+                                   ImGuiTreeNodeFlags_DefaultOpen;
+        if (leaf) {
+            flags |= ImGuiTreeNodeFlags_Leaf;
+        }
+        if (selected) {
+            flags |= ImGuiTreeNodeFlags_Selected;
+        }
+        const bool open = ImGui::TreeNodeEx(Label(label).c_str(), flags);
+        clicked = ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen();
+        return open;
+    }
+
+    void tree_pop() override {
+        ImGui::TreePop();
+    }
+
+    bool collapsing_header(std::string_view label) override {
+        return ImGui::CollapsingHeader(Label(label).c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+    }
+
+    bool drag(std::string_view label, std::span<float> values, float speed, float minimum,
+              float maximum) override {
+        return ImGui::DragScalarN(Label(label).c_str(), ImGuiDataType_Float, values.data(),
+                                  static_cast<int>(values.size()), speed,
+                                  minimum < maximum ? &minimum : nullptr,
+                                  minimum < maximum ? &maximum : nullptr, "%.3f");
+    }
+
+    bool drag(std::string_view label, int& value, float speed) override {
+        return ImGui::DragInt(Label(label).c_str(), &value, speed);
+    }
+
+    bool color(std::string_view label, std::span<float> rgb) override {
+        if (rgb.size() == 4) {
+            return ImGui::ColorEdit4(Label(label).c_str(), rgb.data(), ImGuiColorEditFlags_Float);
+        }
+        return rgb.size() == 3 &&
+               ImGui::ColorEdit3(Label(label).c_str(), rgb.data(), ImGuiColorEditFlags_Float);
+    }
+
+    bool input_text(std::string_view label, std::string& value) override {
+        // The field being typed in keeps its text here between frames, until it is left; the
+        // others show `value`. ImGui edits a fixed-size buffer, so it has room to grow.
+        const Label name(label);
+        const ImGuiID id = ImGui::GetID(name.c_str());
+        std::string shown;
+        if (id != m_editing) {
+            shown = value;
+            shown.resize(std::max<std::size_t>(value.size() + 64, 256));
+        }
+        std::string& buffer = id == m_editing ? m_edit_buffer : shown;
+        ImGui::InputText(name.c_str(), buffer.data(), buffer.size());
+        if (ImGui::IsItemActive()) {
+            if (id != m_editing) {
+                m_editing = id;
+                m_edit_buffer = buffer;
+            }
+            return false;
+        }
+        if (id == m_editing) {
+            m_editing = 0;
+            const std::string edited(m_edit_buffer.c_str());
+            if (ImGui::IsItemDeactivatedAfterEdit() && edited != value) {
+                value = edited;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool combo(std::string_view label, int& selected, std::span<const std::string> items) override {
+        const char* const preview =
+            selected >= 0 && static_cast<std::size_t>(selected) < items.size()
+                ? items[static_cast<std::size_t>(selected)].c_str()
+                : "";
+        bool changed = false;
+        if (ImGui::BeginCombo(Label(label).c_str(), preview)) {
+            for (std::size_t index = 0; index < items.size(); ++index) {
+                const bool is_selected = static_cast<int>(index) == selected;
+                if (ImGui::Selectable(items[index].c_str(), is_selected) && !is_selected) {
+                    selected = static_cast<int>(index);
+                    changed = true;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        return changed;
+    }
+
     const ui::DrawList& end_frame() override {
         ImGui::Render();
         const ImGuiIO& io = ImGui::GetIO();
         m_wants_pointer = io.WantCaptureMouse;
         m_wants_keyboard = io.WantCaptureKeyboard || io.WantTextInput;
+        m_wants_text = io.WantTextInput;
         ImDrawData* const data = ImGui::GetDrawData();
         update_textures(*data);
         convert(*data);
@@ -246,6 +365,10 @@ public:
 
     bool wants_keyboard() const override {
         return m_wants_keyboard;
+    }
+
+    bool wants_text() const override {
+        return m_wants_text;
     }
 
 private:
@@ -351,8 +474,14 @@ private:
     ui::Host* m_host = nullptr;
     ui::DrawList m_list;
     float m_scale = 0.0f;
+    // Whether the next window was placed, so begin_window leaves its size alone.
+    bool m_placed = false;
+    // The text field being typed in, if any, and its text.
+    ImGuiID m_editing = 0;
+    std::string m_edit_buffer;
     bool m_wants_pointer = false;
     bool m_wants_keyboard = false;
+    bool m_wants_text = false;
     bool m_control[2] = {false, false};
     bool m_shift[2] = {false, false};
     bool m_alt[2] = {false, false};

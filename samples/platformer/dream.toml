@@ -35,3 +35,10 @@ rhi = ["vulkan", "null"]
 renderer = ["forward", "null"]
 physics2d = ["box2d"]
 texture_decoder = ["ktx", "null"]
+
+# What the editor opens (ADR 0046): dream_editor samples/platformer
+[editor]
+scene = "assets:/scenes/level.toml"
+game = "dream_platformer"
+assets = ["assets", "../assets"]
+build = "../../build/windows-debug"

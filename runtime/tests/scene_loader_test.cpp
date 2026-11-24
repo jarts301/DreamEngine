@@ -175,3 +175,42 @@ TEST_CASE_FIXTURE(Fixture, "SceneLoader reports every kind of mistake") {
     expect_error("[entities.a.spin]\nspeed = \"fast\"\n", "'speed' must be a number");
     expect_error("[entities.a.label]\nother = 1\n", "'text' must be a string");
 }
+
+TEST_CASE_FIXTURE(Fixture, "Components describe their fields for tools") {
+    scenes.register_component(
+        "glow", [](ComponentContext&) -> core::Result<void> { return {}; },
+        {core::FieldInfo{.name = "strength", .kind = core::FieldKind::Number, .fallback = 2.0}});
+    const core::ComponentInfo* glow = scenes.component("glow");
+    REQUIRE(glow != nullptr);
+    REQUIRE(glow->fields.size() == 1);
+    CHECK(glow->fields[0].name == "strength");
+    // Built in, and described.
+    const core::ComponentInfo* transform = scenes.component("transform");
+    REQUIRE(transform != nullptr);
+    CHECK(transform->fields.size() == 3);
+    // Registered without fields.
+    REQUIRE(scenes.component("spin") != nullptr);
+    CHECK(scenes.component("spin")->fields.empty());
+    CHECK(scenes.component("missing") == nullptr);
+    CHECK(scenes.components().size() == 4);
+}
+
+TEST_CASE_FIXTURE(Fixture, "A scene loader can skip components nobody registered") {
+    constexpr const char* k_scene = "[entities.a.unknown_thing]\nx = 1\n[entities.a.spin]\n";
+    expect_error(k_scene, "unknown component 'unknown_thing'");
+    scenes.set_skip_unknown_components(true);
+    const auto world = scenes.parse(k_scene);
+    REQUIRE(world.has_value());
+    CHECK(world.value()->registry().all_of<Spin>(world.value()->find("a")));
+}
+
+TEST_CASE_FIXTURE(Fixture, "Scene files that changed since they loaded are reported once") {
+    state.assets["scenes/a.toml"] = std::vector<std::byte>{};
+    state.reports_versions = true;
+    state.asset_versions["scenes/a.toml"] = 1;
+    REQUIRE(scenes.load("assets:/scenes/a.toml").has_value());
+    CHECK(scenes.changed_scenes().empty());
+    state.asset_versions["scenes/a.toml"] = 2;
+    CHECK(scenes.changed_scenes() == std::vector<std::string>{"assets:/scenes/a.toml"});
+    CHECK(scenes.changed_scenes().empty());
+}

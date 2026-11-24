@@ -15,8 +15,30 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace dream::runtime {
+namespace {
+
+std::vector<std::string>& arguments() {
+    static std::vector<std::string> held;
+    return held;
+}
+
+} // namespace
+
+void set_program_arguments(int argc, const char* const* argv) {
+    arguments().clear();
+    for (int index = 1; index < argc; ++index) {
+        if (argv[index] != nullptr) {
+            arguments().emplace_back(argv[index]);
+        }
+    }
+}
+
+std::span<const std::string> program_arguments() noexcept {
+    return arguments();
+}
 
 int run_program() {
     const core::Result<core::ModuleProject> project =

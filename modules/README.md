@@ -33,6 +33,11 @@ A module depends only on interfaces and Core. See
 
 Then list it in a project's TOML file. Nothing else needs to change.
 
+A program usually creates one backend per interface, the first in its list that starts. A few
+interfaces are used several at once, such as the editor's panels, `editor_panel`: there the program
+calls `App::create_modules`, which creates every backend listed, in order
+([ADR 0046](../docs/adr/0046-editor-v1.md)).
+
 A graphics backend also declares the compiled shader format it loads, and `dream_add_game` compiles
 each game's shaders for every format its selected backends need:
 

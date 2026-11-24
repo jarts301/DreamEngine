@@ -39,6 +39,12 @@ mesh_simplifier = ["meshoptimizer", "null"]
 tangent_generator = ["mikktspace", "null"]
 texture_decoder = ["ktx", "null"]
 
+# What the editor opens, and how its Play button builds and starts the game:
+#     <SDK>/editor/dream_editor .
+[editor]
+scene = "assets:/scenes/main.toml"
+game = "__GAME_NAME__"
+
 [game]
 # Quits after this many frames when above 0, for a quick check that the game runs.
 quit_after_frames = 0

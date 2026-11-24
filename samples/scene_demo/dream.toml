@@ -23,3 +23,10 @@ rhi = ["vulkan", "opengles", "null"]
 platform = ["sdl3"]
 input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "null"]
+
+# What the editor opens (ADR 0046): dream_editor samples/scene_demo
+[editor]
+scene = "assets:/scenes/orbit.toml"
+game = "dream_scene_demo"
+assets = ["assets"]
+build = "../../build/windows-debug"

@@ -26,6 +26,7 @@ add_library(dream_runtime STATIC
     src/program.cpp
     src/renderer.cpp
     src/resource_monitor.cpp
+    src/scene_document.cpp
     src/scene_loader.cpp
     src/screenshot.cpp
     src/sprites.cpp
@@ -71,6 +72,7 @@ if(DREAM_BUILD_TESTS)
             tests/physics_test.cpp
             tests/profiling_test.cpp
             tests/renderer_test.cpp
+            tests/scene_document_test.cpp
             tests/scene_loader_test.cpp
             tests/screenshot_test.cpp
             tests/texture_test.cpp

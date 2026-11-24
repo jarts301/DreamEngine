@@ -69,6 +69,35 @@ built in it, `build/<preset>/tools/dream/dream.exe`. Keep games at short paths o
 engine builds deep inside the game's build folder. See
 [ADR 0045](docs/adr/0045-installable-sdk.md) and the project's own `README.md`.
 
+## Edit scenes
+
+The editor opens a project's scene file, shows it, and saves it back:
+
+```powershell
+C:/DreamEngineSDK/editor/dream_editor.exe space_crates
+```
+
+It opens the scene that the project's `[editor] scene` names, `assets:/scenes/main.toml` by
+default, or a scene file given in its place. `[editor] assets` lists the project's asset folders, as
+its build's `ASSETS` does, `["assets"]` by default. Each sample has an `[editor]` table, so
+`dream_editor samples/render_demo` opens the yard. The Entities panel shows the scene's entities under
+their parents, and the Inspector the selected one's components, with a control for each setting:
+components describe their fields, and settings they don't describe, such as a game's own
+components', get a control by their values' types. Every change shows at once in the view.
+
+| Do | How |
+|---|---|
+| Select | Click a model, or a light's or camera's cross, or a name in Entities |
+| Look around | Right drag turns, middle drag moves, the wheel goes nearer, F frames the selection |
+| Save, undo, redo | Ctrl+S, Ctrl+Z, Ctrl+Y |
+| Remove the selected entity | Delete |
+| Play | Saves, builds the game with CMake, and starts it. While it runs, each save reaches it through hot reload |
+
+Play needs CMake on the PATH and a debug build, as `[editor] build` names (`build/windows-debug` by
+default). What the game prints goes to `editor_game.log` in that folder. The editor's panels are `editor_panel` modules, so a project can add its own. Comments in
+a scene, other than those at its top, aren't kept when the editor saves it. See
+[ADR 0046](docs/adr/0046-editor-v1.md).
+
 ## Run the cube
 
 After building, run the cube on Windows. Space or a click toggles the spin, and Escape quits:
@@ -328,7 +357,8 @@ holding all its assets in `<game>_package/`, ready to hand out. See
 ## Hot reload
 
 In debug builds on PC, a running game reloads its shaders, models and textures when their files
-change. Edit the source, then build only the game's assets while it keeps running:
+change, and publishes `ScenesChanged` when a scene file it loaded changed, so the game can load it
+again. Edit the source, then build only the game's assets while it keeps running:
 
 ```bash
 cmake --build build/windows-debug --target dream_render_demo_assets
@@ -405,6 +435,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 | `audio` | `miniaudio`, `portaudio`, `null` | all | `miniaudio`, `null` | PortAudio has no Android output. |
 | `ui` | `rmlui`, `markup`, `null` | all | all | Both read the same RML and RCSS files. `markup` is the engine's own library. |
 | `debug_ui` | `imgui`, `null` | all | all | |
+| `editor_panel` | `hierarchy`, `inspector` | all | — | The editor's panels: every one listed is created. Only the editor lists them; see [Edit scenes](#edit-scenes). |
 | `platform` | `sdl3`, `null` | all | all | |
 | `profiler` | `timeline`, `null` | all | all | `timeline` saves a trace to open in Perfetto; see [Profiling](#profiling). |
 | `crash_upload` | `sentry`, `backtrace`, `null` | all | all | Uploads saved crash reports in the background at the next start; Windows and Android. Optional; see [crash reports](docs/reports/crash-reports.md). |
