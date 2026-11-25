@@ -85,6 +85,66 @@ What the Mac changes, decided once here so tasks don't repeat it:
 | Video | QuickTime applies its own display gamma to BT.709 files | Task 35 must judge with measured values, not QuickTime |
 | Toolchain | AppleClang + libc++, LLDB, ASan/UBSan/TSan built in | Natvis becomes LLDB data formatters (CLion reads Natvis through LLDB, or a Python formatter) |
 
+### Setting up a Mac for this plan
+
+Do this once per Mac. Steps 1–6 were run on the M1 Pro on 2026-11-24 and build and test the
+engine's runtime; steps 7–8 are needed before the engine can draw on the Mac (Task 00).
+
+1. **Xcode.** Install Xcode 27 from the App Store, open it once to accept the licence, and make it
+   the active toolchain. It provides AppleClang, the macOS SDK and Metal.
+
+       sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+       xcode-select -p        # /Applications/Xcode.app/Contents/Developer
+
+2. **CLion.** Install CLion. It ships its own CMake (4.0) and Ninja, which is all the build needs.
+   To use them from Terminal too, put them on the `PATH` (or `brew install cmake ninja`):
+
+       export PATH="$HOME/Applications/CLion.app/Contents/bin/cmake/mac/aarch64/bin:$HOME/Applications/CLion.app/Contents/bin/ninja/mac/aarch64:$PATH"
+
+3. **vcpkg.** Clone and bootstrap it in your home folder, and tell the presets where it is. Add the
+   `export` line to `~/.zshrc` so every Terminal has it.
+
+       git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
+       ~/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+       export VCPKG_ROOT="$HOME/vcpkg"
+
+4. **Configure.** The presets `macos-debug` and `macos-release` use the vcpkg triplet `arm64-osx`
+   (Apple Silicon, macOS 14 or later). The first configure builds every dependency in
+   `vcpkg.json`, about 6 minutes on the M1 Pro; later ones reuse vcpkg's cache. Until Task 00 adds
+   a `[modules.macos]` table to the editor and the samples, configure without them:
+
+       cd ~/Dev/DreamEngine
+       cmake --preset macos-debug -DDREAM_BUILD_EDITOR=OFF -DDREAM_BUILD_SAMPLES=OFF
+
+5. **Build and test.** The build folder is `build/macos-debug`. Warnings are errors, as on Windows.
+
+       cmake --build build/macos-debug --target dream_runtime_tests
+       build/macos-debug/runtime/dream_runtime_tests
+
+   All runtime tests pass except one, *A game over its memory budget knows it from the start*:
+   the resource monitor can't read a process's memory on macOS yet (Task 00).
+
+6. **CLion.** Open the `DreamEngine` folder. CLion reads `CMakePresets.json` and offers
+   `macos-debug` and `macos-release` as CMake profiles (*Settings → Build, Execution, Deployment →
+   CMake*). Enable `macos-debug`, and in that profile:
+   - set **Environment** to `VCPKG_ROOT=/Users/<you>/vcpkg`, because CLion started from the Dock
+     doesn't read `~/.zshrc`;
+   - add `-DDREAM_BUILD_EDITOR=OFF -DDREAM_BUILD_SAMPLES=OFF` to **CMake options** (until Task 00).
+
+   Then *Reload CMake Project*. Run configurations for the tests and tools appear in the toolbar,
+   and the debugger is LLDB.
+
+7. **Vulkan on the Mac (for Task 00 onwards).** Install the LunarG Vulkan SDK for macOS. It brings
+   MoltenVK (Vulkan on Metal), the validation layers and `vulkaninfo`. Check that the GPU is seen:
+
+       vulkaninfo --summary   # should list "Apple M1 Pro" through MoltenVK
+
+8. **Python for the analysis scripts.** Use a separate environment so the system Python stays
+   untouched; the scripts in `tools/` that measure images need these packages:
+
+       python3 -m venv ~/flip-venv
+       ~/flip-venv/bin/pip install flip-evaluator numpy pillow
+
 ### Task 00 — macOS bring-up (prerequisite)
 
 - **Input:** the repository as it is; Xcode 27, CLion, Homebrew.
