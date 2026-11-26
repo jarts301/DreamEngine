@@ -38,6 +38,9 @@ if(DREAM_BUILD_TESTS)
     if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME dream_module_config_reader
             COMMAND ${CMAKE_COMMAND} -P "${PROJECT_SOURCE_DIR}/cmake/tests/module_config_test.cmake")
+        add_test(NAME dream_asset_database
+            COMMAND ${CMAKE_COMMAND} "-DOUTPUT=${PROJECT_BINARY_DIR}/asset_database_test"
+                -P "${PROJECT_SOURCE_DIR}/cmake/tests/asset_database_test.cmake")
     endif()
 endif()
 

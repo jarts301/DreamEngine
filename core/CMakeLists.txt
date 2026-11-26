@@ -5,6 +5,7 @@ find_path(DREAM_TOMLPLUSPLUS_INCLUDE_DIR toml++/toml.hpp REQUIRED)
 
 add_library(dream_core STATIC
     src/archive.cpp
+    src/asset_database.cpp
     src/assert.cpp
     src/config.cpp
     src/crash_handler_linux.cpp
@@ -48,6 +49,7 @@ if(DREAM_BUILD_TESTS)
         SOURCES
             tests/test_main.cpp
             tests/archive_test.cpp
+            tests/asset_database_test.cpp
             tests/assert_test.cpp
             tests/clock_test.cpp
             tests/config_test.cpp

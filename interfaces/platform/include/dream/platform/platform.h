@@ -108,6 +108,13 @@ public:
         return std::nullopt;
     }
 
+    // An optional capability: the folder the program is in, ending with a separator, where a
+    // packaged game on PC keeps its asset archives. Nothing where there is none to read files
+    // from, which is the default, as on Android, whose assets are inside the APK.
+    [[nodiscard]] virtual std::optional<std::string> program_folder() const {
+        return std::nullopt;
+    }
+
     // An optional capability: whether the device runs on its battery now, unplugged. Nothing when
     // the platform can't tell, which is the default. It may take a moment, so ask now and then.
     [[nodiscard]] virtual std::optional<bool> on_battery() {

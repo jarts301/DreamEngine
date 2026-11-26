@@ -103,10 +103,37 @@ function(dream_add_game name)
         string(APPEND staged_dir "/assets")
     endif()
     list(JOIN asset_dirs "|" joined_dirs)
+    # After staging, the asset database: what each file is and needs, and its bundle (ADR 0047).
+    # A file that names one the assets don't have fails the build here.
+    dream_read_cook_config("${ARG_CONFIG}" "${DREAM_PLATFORM}" texture_cooker)
+    if(NOT textures_cooked)
+        set(texture_cooker none)
+    endif()
+    dream_read_bundle_config("${ARG_CONFIG}" bundles)
+    # A packaged game reads its bundles from archives of their own, which only the bundles source
+    # knows: the game must read through it.
+    if(bundles)
+        cmake_path(ABSOLUTE_PATH ARG_CONFIG NORMALIZE OUTPUT_VARIABLE config_path)
+        dream_read_module_config("${config_path}" "${DREAM_PLATFORM}" modules)
+        set(first_source "")
+        if(modules_BACKENDS_asset_source)
+            list(GET modules_BACKENDS_asset_source 0 first_source)
+        endif()
+        if(NOT first_source STREQUAL "bundles")
+            message(FATAL_ERROR "${config_path} names bundles, which a game reads through the "
+                "\"bundles\" asset source: list it first in [modules.${DREAM_PLATFORM}], as "
+                "asset_source = [\"bundles\"].")
+        endif()
+    endif()
+    # Joined with |, as a ; in a command's argument would split it.
+    list(JOIN bundles "|" bundles)
     add_custom_target(${name}_assets
         COMMAND ${CMAKE_COMMAND} "-DSOURCES=${joined_dirs}" "-DDESTINATION=${staged_dir}"
             "-DCOOKED=${textures_cooked}"
             -P "${DreamEngine_SOURCE_DIR}/cmake/DreamStageAssets.cmake"
+        COMMAND ${CMAKE_COMMAND} "-DASSETS=${staged_dir}" "-DPLATFORM=${DREAM_PLATFORM}"
+            "-DTEXTURE_COOKER=${texture_cooker}" "-DBUNDLES=${bundles}"
+            -P "${DreamEngine_SOURCE_DIR}/cmake/DreamAssetDatabase.cmake"
         VERBATIM)
     foreach(made IN ITEMS shaders textures models)
         if(TARGET ${name}_${made})

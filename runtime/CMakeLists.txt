@@ -46,7 +46,7 @@ target_link_libraries(dream_runtime PUBLIC
     dream::interface_debug_ui dream::interface_profiler dream::interface_renderer
     dream::interface_mesh_simplifier dream::interface_tangent_generator
     dream::interface_input_device dream::interface_animation dream::interface_particles
-    dream::interface_crash_upload dream::interface_texture_decoder
+    dream::interface_crash_upload dream::interface_texture_decoder dream::interface_asset_source
     EnTT::EnTT)
 dream_configure_target(dream_runtime)
 

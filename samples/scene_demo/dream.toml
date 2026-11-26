@@ -10,16 +10,19 @@ switch_scene = ["key:space", "mouse:left", "touch", "gamepad:south"]
 quit = ["key:escape", "gamepad:back"]
 
 [modules.windows]
+asset_source = ["bundles"]
 platform = ["sdl3"]
 input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
 
 [modules.android]
+asset_source = ["bundles"]
 platform = ["sdl3"]
 input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "opengles", "null"]
 
 [modules.linux]
+asset_source = ["bundles"]
 platform = ["sdl3"]
 input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "null"]
@@ -30,3 +33,11 @@ scene = "assets:/scenes/orbit.toml"
 game = "dream_scene_demo"
 assets = ["assets"]
 build = "../../build/windows-debug"
+
+# Each scene ships in a bundle of its own (ADR 0047), with what only it needs; the pipeline both use
+# stays in the base.
+[bundles.orbit]
+roots = ["assets:/scenes/orbit.toml"]
+
+[bundles.row]
+roots = ["assets:/scenes/row.toml"]

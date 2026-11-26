@@ -1,4 +1,5 @@
 add_subdirectory(animation)
+add_subdirectory(asset_source)
 add_subdirectory(audio)
 add_subdirectory(crash_upload)
 add_subdirectory(debug_ui)

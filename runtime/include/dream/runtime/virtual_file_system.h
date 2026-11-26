@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dream/asset_source/asset_source.h"
 #include "dream/core/result.h"
 #include "dream/platform/platform.h"
 
@@ -46,12 +47,20 @@ public:
     // project's own assets, as the editor reads them (ADR 0046). The last added is read first.
     void add_asset_folder(std::filesystem::path folder);
 
+    // Where "assets:/" files come from, after the asset folders, in place of the platform: the
+    // project's asset_source module, such as "bundles" (ADR 0047). Null for the platform. It must
+    // outlive this object's reads.
+    void set_asset_source(asset_source::AssetSource* source) noexcept {
+        m_asset_source = source;
+    }
+
 private:
     [[nodiscard]] std::optional<std::filesystem::path> in_asset_folders(
         std::string_view relative) const;
 
     platform::Platform& m_platform;
     std::vector<std::filesystem::path> m_asset_folders;
+    asset_source::AssetSource* m_asset_source = nullptr;
     std::function<void(std::string_view)> m_read_observer;
 };
 

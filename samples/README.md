@@ -10,7 +10,7 @@ and never include platform or backend headers.
 | [render_demo](render_demo) | A lit, textured 3D scene drawn by the engine's renderer from a scene file |
 | [platformer](platformer) | A 2D platformer: a tile map level with collisions, an animated pixel-art hero moved by Box2D, coins and a following camera, on keyboard, gamepad and touch |
 | [physics_demo](physics_demo) | 3D and 2D physics from scene files, with shooting, sensors, joints and debug shapes, checked with Jolt and Box2D and with impulse and Chipmunk |
-| [scene_demo](scene_demo) | Scenes in TOML files, built from components, using shared assets and events |
+| [scene_demo](scene_demo) | Scenes in TOML files, built from components, using shared assets and events, each scene shipped in a bundle of its own |
 | [hello_game](hello_game) | A complete game on PC and Android: window, lifecycle, files and input actions. A check runs it with the profiler and reads the trace |
 | [template](template) | The project template that `dream new` copies, from `templates/game`, built and run here so the engine's tests catch a change that breaks new games |
 | [module_demo](module_demo) | Choosing a backend from `dream.toml`, with no backend named in the code |

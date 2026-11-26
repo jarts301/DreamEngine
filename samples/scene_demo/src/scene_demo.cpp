@@ -255,9 +255,18 @@ public:
     }
 
     void on_stop(runtime::App& app) override {
+        // Which bundles are mounted at the end: only the open scene's.
+        std::string mounted;
+        if (has_bundles(app)) {
+            for (const std::string& bundle : app.asset_database().bundles()) {
+                if (app.asset_source()->mounted(bundle)) {
+                    mounted += mounted.empty() ? bundle : "," + bundle;
+                }
+            }
+        }
         const std::string report =
-            std::format("frames={} scene={} switches={} pipeline_loads={}", m_frames, m_scene_path,
-                        m_switches, m_pipeline_loads);
+            std::format("frames={} scene={} switches={} pipeline_loads={} mounted={}", m_frames,
+                        m_scene_path, m_switches, m_pipeline_loads, mounted);
         DREAM_LOG_INFO("{}", report);
         std::puts(report.c_str());
 
@@ -279,13 +288,32 @@ public:
 private:
     using Registry = runtime::Registry;
 
+    // Whether the game reads its assets through a source that ships bundles; the checks run it
+    // without one too.
+    static bool has_bundles(runtime::App& app) {
+        return app.asset_source() != nullptr;
+    }
+
     core::Result<void> open_scene(runtime::App& app, const char* path) {
+        // Each scene ships in a bundle of its own (ADR 0047), mounted before it loads. The old
+        // scene's goes once the old scene does; what both use is in the base.
+        const std::string bundle(app.asset_database().bundle_of(path));
+        if (has_bundles(app)) {
+            if (const core::Result<void> mounted = app.asset_source()->mount(bundle);
+                !mounted.has_value()) {
+                return mounted.error();
+            }
+        }
         // The new scene loads before the old one goes away, so assets they share aren't reloaded.
         core::Result<std::unique_ptr<runtime::World>> world = app.scenes().load(path);
         if (!world.has_value()) {
             return world.error();
         }
         m_world = std::move(world).value();
+        if (has_bundles(app) && !m_bundle.empty() && m_bundle != bundle) {
+            app.asset_source()->unmount(m_bundle);
+        }
+        m_bundle = bundle;
         m_scene_path = path;
         DREAM_LOG_INFO("Opened {}", path);
         return {};
@@ -306,6 +334,8 @@ private:
     rhi::BufferHandle m_vertices;
     rhi::BufferHandle m_indices;
     std::string m_scene_path;
+    // The bundle of the open scene.
+    std::string m_bundle;
     std::int64_t m_quit_after_frames = 0;
     std::int64_t m_switch_every_frames = 0;
     std::int64_t m_frames = 0;
