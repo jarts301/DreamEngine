@@ -104,7 +104,7 @@ if(DREAM_BUILD_TESTS)
             endif()
             foreach(kind IN LISTS kinds)
                 set(folder "${CMAKE_CURRENT_BINARY_DIR}/crash_reports_${kind}")
-                set(expected "Application: Crash probe" "Frame: 42" "Probe: about to crash"
+                set(expected "Application: Crash probe" "Version: 1.4.2" "Frame: 42" "Probe: about to crash"
                     "The probe is about to crash with ${kind}" "Stack trace" "${reason_${kind}}")
                 list(JOIN expected "|" expected)
                 add_test(NAME dream_crash_report_${kind}

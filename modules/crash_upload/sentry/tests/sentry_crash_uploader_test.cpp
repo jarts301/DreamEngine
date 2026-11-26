@@ -40,7 +40,8 @@ Report report(bool minidump) {
                 .minidump = {},
                 .application = "Toppler",
                 .platform = minidump ? "windows" : "android",
-                .engine_version = "0.1.0"};
+                .engine_version = "0.1.0",
+                .application_version = "1.4.2"};
     if (minidump) {
         made.minidump = {std::byte{'M'}, std::byte{'D'}, std::byte{'M'}, std::byte{'P'}};
     }
@@ -80,6 +81,8 @@ TEST_CASE("Sentry gets a minidump with the report attached") {
     CHECK(body.find("Crash: access violation") != std::string::npos);
     CHECK(body.find("\"environment\":\"test\"") != std::string::npos);
     CHECK(body.find("\"application\":\"Toppler\"") != std::string::npos);
+    // The release its symbols are uploaded for.
+    CHECK(body.find("\"release\":\"Toppler@1.4.2\"") != std::string::npos);
 }
 
 TEST_CASE("Sentry gets an envelope with a fatal event where there is no minidump") {
@@ -104,6 +107,7 @@ TEST_CASE("Sentry gets an envelope with a fatal event where there is no minidump
     CHECK(body.find("\"formatted\":\"Crash: access violation\"") != std::string::npos);
     CHECK(body.find("{\"type\":\"attachment\"") != std::string::npos);
     CHECK(body.find("stack...") != std::string::npos);
+    CHECK(body.find("\"release\":\"Toppler@1.4.2\"") != std::string::npos);
 }
 
 TEST_CASE("Sentry uploads fail on a refusal or a network error, keeping the report") {

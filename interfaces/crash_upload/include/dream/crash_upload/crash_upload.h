@@ -29,6 +29,9 @@ struct Report {
     std::string application;
     std::string platform;
     std::string engine_version;
+    // The game's version when it crashed, as its report says, such as "1.4.2", or empty (ADR 0048).
+    // Services match it with the symbols uploaded for that release.
+    std::string application_version;
 };
 
 // Sends one request, and gives the answer. Fails when the network does.

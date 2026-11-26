@@ -1,0 +1,97 @@
+name: Release
+
+# A release of __GAME_TITLE__: pushing a tag such as v1.4.2 builds the game at that version for
+# Windows and Android, and publishes what ships and, apart, its symbols, which read its crash
+# reports, as a draft GitHub release, which goes out when you publish it on GitHub.
+#
+# "Run workflow" on the Actions tab makes a dry run: the same builds, at the version given, whose
+# files are kept as the run's artifacts and published nowhere.
+#
+# It runs on a self-hosted runner: a machine of yours with the tools of the README, registered with
+# the labels self-hosted and windows, and these environment variables set for the runner, as in a
+# .env file in its folder: DREAM_ENGINE_SDK, VCPKG_ROOT, and for Android ANDROID_NDK_HOME,
+# ANDROID_HOME and JAVA_HOME, with CMake and Ninja on its PATH. Its build folders stay between runs,
+# so a release rebuilds only what changed. It needs only Windows PowerShell, which Windows has.
+#
+# Optional: with a SENTRY_AUTH_TOKEN secret and SENTRY_ORG and SENTRY_PROJECT variables in the
+# repository's settings, the symbols are uploaded to Sentry too, which needs Node.js on the runner.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version to build, such as 1.4.2"
+        required: true
+        default: "0.0.1"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.preset }})
+    runs-on: [self-hosted, windows]
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        preset: [windows-release, android-arm64-release]
+    env:
+      VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          clean: false
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build the release
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:VERSION.TrimStart("v")
+          cmake --preset ${{ matrix.preset }} "-DDREAM_GAME_VERSION=$version"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build --preset ${{ matrix.preset }} --target __GAME_NAME___release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload the symbols to Sentry
+        if: ${{ vars.SENTRY_ORG != '' && vars.SENTRY_PROJECT != '' }}
+        shell: powershell
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $folder = "build/${{ matrix.preset }}/__GAME_NAME___release"
+          $symbols = "$env:RUNNER_TEMP/symbols-${{ matrix.preset }}"
+          if (Test-Path $symbols) { Remove-Item -Recurse -Force $symbols }
+          Expand-Archive -Path (Get-ChildItem "$folder/*-symbols.zip").FullName -DestinationPath $symbols
+          npx --yes @sentry/cli debug-files upload --org "${{ vars.SENTRY_ORG }}" --project "${{ vars.SENTRY_PROJECT }}" $symbols
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Keep the files with the run
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.preset }}
+          path: build/${{ matrix.preset }}/__GAME_NAME___release/*
+
+  publish:
+    name: Publish a draft release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: [self-hosted, windows]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: __GAME_TITLE__ ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release/*

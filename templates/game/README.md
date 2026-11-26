@@ -35,6 +35,29 @@ cmake --build --preset android-arm64-debug --target __GAME_NAME___apk
 
 A PC release ready to hand out is the `__GAME_NAME___package` target of a `windows-release` build.
 
+## Releasing
+
+The game's version is in `CMakeLists.txt`, as `project(__GAME_NAME__ VERSION ...)`. A release is a
+tag: pushing `v1.4.2` runs `.github/workflows/release.yml`, which builds the Windows and Android
+releases at version 1.4.2 and publishes them as a draft of this repository's GitHub release, with
+their symbols apart, which read the game's crash reports; publish the draft on GitHub once it looks
+right. "Run workflow" on the Actions tab makes a dry run, which keeps the files with the run and
+publishes nothing.
+
+It runs on a self-hosted runner: register one of your machines in the repository's settings, under
+Actions, with the labels `self-hosted` and `windows`, and set for it the environment variables of
+Building above. For Sentry, add a `SENTRY_AUTH_TOKEN` secret and `SENTRY_ORG` and `SENTRY_PROJECT`
+variables, and the symbols are uploaded there too.
+
+The same release can be made by hand, which the workflow does:
+
+```powershell
+cmake --preset windows-release -DDREAM_GAME_VERSION=1.4.2
+cmake --build --preset windows-release --target __GAME_NAME___release
+```
+
+It lands in `build/windows-release/__GAME_NAME___release`.
+
 ## Editing the scene
 
 The SDK's editor opens this project's scene, as `[editor]` in `dream.toml` says:
@@ -54,6 +77,7 @@ loads its scene again when the file changes. See the editor's section in the eng
 | `dream.toml` | The window, the controls, and the modules each platform uses |
 | `assets/scenes/main.toml` | The first scene |
 | `assets/models/` | Models, with their textures in `textures/`, which the build cooks |
+| `.github/workflows/release.yml` | The release workflow, run by a tag such as `v1.4.2` |
 | `vcpkg.json` | The engine's libraries. Keep it the same as the SDK's own `vcpkg.json` when you update the SDK |
 
 The engine's guides, in the SDK's `docs/guides/`, cover materials, lighting, sprites, particles,

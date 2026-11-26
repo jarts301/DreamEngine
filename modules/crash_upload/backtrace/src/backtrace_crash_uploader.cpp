@@ -56,6 +56,9 @@ private:
         body.add_field("application", report.application);
         body.add_field("platform", report.platform);
         body.add_field("engine", report.engine_version);
+        if (!report.application_version.empty()) {
+            body.add_field("version", report.application_version);
+        }
         return platform::HttpRequest{.url = m_url + "/minidump",
                                      .headers = {{"Content-Type", body.content_type()}},
                                      .body = body.finish(),
@@ -73,11 +76,13 @@ private:
             "\"agent\":\"dreamengine\",\"agentVersion\":{},"
             "\"mainThread\":\"main\",\"threads\":{{\"main\":{{\"name\":\"main\",\"fault\":true,"
             "\"stack\":[]}}}},"
-            "\"attributes\":{{\"application\":{},\"platform\":{},\"error.message\":{}}},"
+            "\"attributes\":{{\"application\":{},\"version\":{},\"platform\":{},"
+            "\"error.message\":{}}},"
             "\"annotations\":{{\"Report\":{}}}}}",
             uuid, unix_seconds(), json_string(report.engine_version),
-            json_string(report.application), json_string(report.platform),
-            json_string(first_line(report.text)), json_string(report.text));
+            json_string(report.application), json_string(report.application_version),
+            json_string(report.platform), json_string(first_line(report.text)),
+            json_string(report.text));
         return platform::HttpRequest{.url = m_url + "/json",
                                      .headers = {{"Content-Type", "application/json"}},
                                      .body = bytes_of(json),

@@ -117,16 +117,25 @@ void CrashUploads::run() {
         if (!text.has_value()) {
             continue;
         }
+        const std::string report_text(reinterpret_cast<const char*>(text->data()), text->size());
         std::filesystem::path minidump_path = text_path;
         minidump_path.replace_extension(".dmp");
+        // The version that crashed, as the report says, which may be older than this one.
+        std::string application_version;
+        constexpr std::string_view k_version_line = "\nVersion: ";
+        if (const std::size_t at = report_text.find(k_version_line); at != std::string::npos) {
+            const std::size_t start = at + k_version_line.size();
+            application_version = report_text.substr(start, report_text.find('\n', start) - start);
+        }
         crash_upload::Report report{
             .name = text_path.stem().string(),
-            .text = std::string(reinterpret_cast<const char*>(text->data()), text->size()),
+            .text = report_text,
             .minidump = read_file(minidump_path).value_or(std::vector<std::byte>{}),
             .application = m_settings.application,
             .platform = m_settings.platform,
             .engine_version = std::format("{}.{}.{}", version.major_number,
-                                          version.minor_number, version.patch_number)};
+                                          version.minor_number, version.patch_number),
+            .application_version = std::move(application_version)};
         const core::Result<void> uploaded = m_uploader->upload(report, send);
         if (!uploaded.has_value()) {
             ++m_failed;

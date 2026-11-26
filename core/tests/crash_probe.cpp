@@ -22,7 +22,8 @@ int main(int argc, char** argv) {
     }
 
     const auto handler = CrashHandler::install(
-        CrashReportSettings{.directory = argv[2], .application = "Crash probe"});
+        CrashReportSettings{
+            .directory = argv[2], .application = "Crash probe", .version = "1.4.2"});
     if (!handler.has_value()) {
         std::fprintf(stderr, "%s\n", handler.error().message.c_str());
         return 3;

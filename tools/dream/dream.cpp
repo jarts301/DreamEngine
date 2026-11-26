@@ -190,7 +190,7 @@ bool is_text(const fs::path& path) {
     const std::string extension = path.extension().string();
     const std::string name = path.filename().string();
     constexpr std::string_view k_text[] = {".txt", ".cmake", ".json", ".toml", ".cpp", ".h",
-                                           ".md",  ".rml",   ".rcss", ".slang"};
+                                           ".md",  ".rml",   ".rcss", ".slang", ".yml", ".yaml"};
     return name == ".gitignore" || name == ".gitattributes" ||
            std::ranges::find(k_text, extension) != std::end(k_text);
 }

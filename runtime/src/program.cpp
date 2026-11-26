@@ -2,6 +2,7 @@
 
 #include "dream/core/crash_handler.h"
 #include "dream/core/log.h"
+#include "dream/core/version.h"
 #include "dream/core/module_project.h"
 #include "dream/platform/platform.h"
 #include "dream/rhi/rhi.h"
@@ -40,6 +41,23 @@ std::span<const std::string> program_arguments() noexcept {
     return arguments();
 }
 
+namespace {
+
+std::string& version_text() {
+    static std::string held;
+    return held;
+}
+
+} // namespace
+
+void set_game_version(std::string_view version) {
+    version_text() = version;
+}
+
+std::string_view game_version() noexcept {
+    return version_text();
+}
+
 int run_program() {
     const core::Result<core::ModuleProject> project =
         core::ModuleProject::load(core::generated_module_project());
@@ -63,6 +81,7 @@ int run_program() {
                 .directory = crash_config.value().directory,
                 .application = std::string(
                     project.value().config().get_string("app.title").value_or("Dream Engine")),
+                .version = std::string(game_version()),
                 .minidump = crash_config.value().minidump,
             });
         if (installed.has_value()) {
@@ -73,6 +92,13 @@ int run_program() {
         }
     }
     core::set_crash_detail("Module lists", std::format("[modules.{}]", project.value().platform()));
+    {
+        const core::Version engine = core::engine_version();
+        DREAM_LOG_INFO("{} {}, on DreamEngine {}.{}.{}",
+                       project.value().config().get_string("app.title").value_or("Dream Engine"),
+                       game_version().empty() ? std::string_view("(no version)") : game_version(),
+                       engine.major_number, engine.minor_number, engine.patch_number);
+    }
 
     // Started before everything else and ended after it, so it sees every zone, including those of
     // threads that other systems start and stop. Ending it saves the profile.

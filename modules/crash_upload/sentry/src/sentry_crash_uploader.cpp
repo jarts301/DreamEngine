@@ -86,6 +86,16 @@ private:
         return std::format("{}://{}/api/{}", m_dsn.scheme, m_dsn.host, m_dsn.project);
     }
 
+    // Sentry's release, "<application>@<version>", which its symbols are uploaded for; nothing
+    // for a game without a version.
+    [[nodiscard]] static std::string release(const Report& report) {
+        if (report.application_version.empty()) {
+            return {};
+        }
+        return std::format(",\"release\":{}",
+                           json_string(report.application + "@" + report.application_version));
+    }
+
     [[nodiscard]] std::string tags(const Report& report) const {
         return std::format("{{\"application\":{},\"platform\":{},\"engine\":{}}}",
                            json_string(report.application), json_string(report.platform),
@@ -102,6 +112,7 @@ private:
         if (!m_environment.empty()) {
             sentry += std::format(",\"environment\":{}", json_string(m_environment));
         }
+        sentry += release(report);
         body.add_field("sentry", sentry + "}");
         return platform::HttpRequest{
             .url = std::format("{}/minidump/?sentry_key={}", base(), m_dsn.key),
@@ -120,6 +131,7 @@ private:
         if (!m_environment.empty()) {
             event += std::format(",\"environment\":{}", json_string(m_environment));
         }
+        event += release(report);
         event += "}";
         std::string envelope = std::format("{{\"event_id\":\"{}\",\"dsn\":{}}}\n", id,
                                            json_string(m_text));
