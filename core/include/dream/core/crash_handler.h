@@ -20,6 +20,8 @@ struct CrashReportSettings {
     std::filesystem::path directory = "crash_reports";
     // Named in each report, such as the game's title.
     std::string application = "Dream Engine";
+    // The game's version, such as "1.4.2", named in each report beside the engine's (ADR 0048).
+    std::string version;
     // Windows only: also write a minidump, which a debugger such as Visual Studio opens at the
     // crash.
     bool minidump = true;

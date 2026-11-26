@@ -97,6 +97,7 @@ void write_recent_log(ReportWriter& writer) noexcept;
 struct State {
     char directory[1024] = {};
     char application[128] = {};
+    char version[32] = {};
     bool minidump = true;
 };
 extern State g_state;

@@ -21,12 +21,16 @@ namespace {
 // when there is one, and fails when the service refuses.
 class FakeUploader final : public crash_upload::CrashUploader {
 public:
-    explicit FakeUploader(bool sends) : m_sends(sends) {}
+    explicit FakeUploader(bool sends, std::vector<std::string>* versions = nullptr)
+        : m_sends(sends), m_versions(versions) {}
     bool sends() const override {
         return m_sends;
     }
     core::Result<void> upload(const crash_upload::Report& report,
                               const crash_upload::Sender& send) override {
+        if (m_versions != nullptr) {
+            m_versions->push_back(report.application_version);
+        }
         const auto answer = send(platform::HttpRequest{
             .url = "https://reports/" + report.name + "/" + std::to_string(report.minidump.size()),
             .headers = {},
@@ -43,6 +47,7 @@ public:
 
 private:
     bool m_sends;
+    std::vector<std::string>* m_versions;
 };
 
 // A folder of saved reports, removed afterwards.
@@ -129,6 +134,21 @@ TEST_CASE("Crash uploads send at most max_reports, and nothing with a module tha
     none.wait();
     CHECK(state.http_urls.empty());
     CHECK(reports.kept("crash-20261120-120000-3.txt"));
+}
+
+TEST_CASE("Crash uploads send the version that crashed, as its report says") {
+    const Reports reports;
+    reports.write("crash-20261120-100000-1.txt",
+                  "=== Dream Engine crash report ===\nApplication: Test\nVersion: 1.4.2\n"
+                  "Engine: 0.1.0\n");
+    FakeState state;
+    FakePlatform platform(state);
+    std::vector<std::string> versions;
+    CrashUploads uploads(std::make_unique<FakeUploader>(true, &versions), platform,
+                         reports.settings());
+    uploads.wait();
+    // The first has its version; the others, written before games had one, have none.
+    CHECK(versions == std::vector<std::string>{"1.4.2", "", ""});
 }
 
 TEST_CASE("Crash upload settings are read and checked") {

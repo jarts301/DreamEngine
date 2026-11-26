@@ -354,6 +354,25 @@ On PC, `cmake --build <folder> --target <game>_package` puts the program and an 
 holding all its assets in `<game>_package/`, ready to hand out. See
 [ADR 0024](docs/adr/0024-texture-cooking.md).
 
+## Releases
+
+A game's version comes from its project, as `project(my_game VERSION 1.4.2)`, or from a release's
+tag. The game knows it as `runtime::game_version()`, its log's first line and its crash reports name
+it, and it is in the program's file properties on Windows and the APK's `versionName` and
+`versionCode` on Android (1.4.2 is 10402).
+
+`cmake --build --preset windows-release --target <game>_release` makes the game's release in
+`<build>/<game>_release`: the package as `<game>-<version>-windows.zip`, and the program's symbols
+apart, as `<game>-<version>-windows-symbols.zip`, to read its crash reports with. On Android it makes
+the APK, the App Bundle that Google Play takes (also `<game>_aab`), and the library's symbols; the
+bundle carries them for Play too. Release builds keep their symbols, apart from what ships.
+
+Each project from `dream new` has a release workflow: pushing a tag such as `v1.4.2` builds the
+Windows and Android releases on a self-hosted runner and publishes them on the game's GitHub
+release, symbols included, and uploads the symbols to Sentry when the repository sets that up. The
+engine publishes its SDK the same way, from a tag such as `engine-v0.2.0`. See
+[ADR 0048](docs/adr/0048-release-pipeline.md).
+
 ## Asset database and bundles
 
 Each build writes `asset_database.toml` among a game's assets: every file, its kind, its size, the

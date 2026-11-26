@@ -232,6 +232,10 @@ void write_header(ReportWriter& writer, std::string_view reason, std::uint64_t p
     const DateTime time = to_date_time(seconds);
     writer.text("=== Dream Engine crash report ===\nApplication: ");
     writer.text(g_state.application, sizeof(g_state.application));
+    if (g_state.version[0] != '\0') {
+        writer.text("\nVersion: ");
+        writer.text(g_state.version, sizeof(g_state.version));
+    }
     writer.text("\nEngine: ");
     writer.number(version.major_number);
     writer.text(".");
@@ -379,6 +383,7 @@ Result<std::unique_ptr<CrashHandler>> CrashHandler::install(const CrashReportSet
                      std::string_view(reinterpret_cast<const char*>(utf8.data()), utf8.size()));
     crash::copy_text(crash::g_state.application, sizeof(crash::g_state.application),
                      settings.application);
+    crash::copy_text(crash::g_state.version, sizeof(crash::g_state.version), settings.version);
     crash::g_state.minidump = settings.minidump;
 
     crash::reset_progress();

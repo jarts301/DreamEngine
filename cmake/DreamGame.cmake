@@ -1,7 +1,13 @@
 # Builds a game for the current platform. See docs/adr/0007-platform-and-game-loop.md.
 #
 # Usage: dream_add_game(<name> SOURCES <files...> CONFIG <toml-file> [ASSETS <directories...>]
-#                       [SHADERS <slang-files...>] [APPLICATION_ID <id> DISPLAY_NAME <text>])
+#                       [SHADERS <slang-files...>] [APPLICATION_ID <id> DISPLAY_NAME <text>]
+#                       [VERSION <major.minor.patch>])
+#
+# The game's version (ADR 0048) is VERSION, or else the calling project's, as in
+# project(my_game VERSION 1.4.2). A release build sets DREAM_GAME_VERSION from its tag, which wins
+# over both. The game knows it as runtime::game_version(), its crash reports carry it, and so do its
+# program's file properties on Windows and its APK's or bundle's versionName and versionCode.
 #
 # The shaders of the modules the game links, such as its renderer's, are compiled with its own.
 #
@@ -15,14 +21,19 @@
 
 include(${CMAKE_CURRENT_LIST_DIR}/DreamCookConfig.cmake)
 
+# The version of every game in this build, from a release's tag, such as 1.4.2 for v1.4.2. Empty
+# for each game's own.
+set(DREAM_GAME_VERSION "" CACHE STRING "Every game's version, as a release sets it from its tag")
+
 # Folders of texture cookers (ADR 0043), searched in order: the engine's own, then any a project
 # adds, for a cooker of its own named in its [cook] table.
 set(DREAM_TEXTURE_COOKER_DIRS "${CMAKE_CURRENT_LIST_DIR}/cookers/textures" CACHE STRING
     "Folders of texture cookers, searched in order")
 
 function(dream_add_game name)
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG;APPLICATION_ID;DISPLAY_NAME"
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG;APPLICATION_ID;DISPLAY_NAME;VERSION"
         "SOURCES;SHADERS;ASSETS")
+    _dream_game_version(${name} "${ARG_VERSION}" version version_code)
 
     if(ANDROID)
         set(native_dir "${CMAKE_CURRENT_BINARY_DIR}/${name}_native")
@@ -41,6 +52,13 @@ function(dream_add_game name)
     target_sources(${name} PRIVATE "${DreamEngine_SOURCE_DIR}/runtime/entry/game_entry.cpp")
     target_link_libraries(${name} PRIVATE dream::runtime)
     dream_configure_target(${name})
+    target_compile_definitions(${name} PRIVATE "DREAM_GAME_VERSION=\"${version}\"")
+    set_target_properties(${name} PROPERTIES
+        DREAM_GAME_VERSION "${version}"
+        DREAM_GAME_VERSION_CODE "${version_code}")
+    if(WIN32)
+        _dream_version_resource(${name} "${version}" "${ARG_DISPLAY_NAME}")
+    endif()
     dream_link_modules(${name} CONFIG "${ARG_CONFIG}")
 
     # A game that lists a profiler counts its heap allocations, which costs a little on every one,
@@ -147,6 +165,8 @@ function(dream_add_game name)
                 "${ARG_DISPLAY_NAME}")
             if(TARGET ${name}_apk)
                 add_dependencies(${name}_apk ${name}_assets)
+                add_dependencies(${name}_aab ${name}_assets)
+                add_dependencies(${name}_release ${name}_assets)
             endif()
         endif()
     else()
@@ -164,8 +184,87 @@ function(dream_add_game name)
                 COMMENT "Packaging ${name} in ${package_dir}"
                 VERBATIM)
             add_dependencies(${name}_package ${name} dream_pack)
+
+            # The release (ADR 0048): the package zipped, and the program's symbols apart.
+            get_target_property(version ${name} DREAM_GAME_VERSION)
+            set(symbols "")
+            if(MSVC)
+                set(symbols "$<TARGET_PDB_FILE:${name}>")
+            endif()
+            add_custom_target(${name}_release
+                COMMAND ${CMAKE_COMMAND} "-DNAME=${name}" "-DVERSION=${version}"
+                    "-DPLATFORM=${DREAM_PLATFORM}"
+                    "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${name}_release"
+                    "-DPACKAGE=${package_dir}" "-DSYMBOLS=${symbols}"
+                    -P "${DreamEngine_SOURCE_DIR}/cmake/DreamRelease.cmake"
+                VERBATIM)
+            add_dependencies(${name}_release ${name}_package)
         endif()
     endif()
+endfunction()
+
+# The game's version: DREAM_GAME_VERSION, a release's, or else `given`, or else the calling
+# project's. Three whole numbers, which Android also needs as one, its versionCode: major * 10000 +
+# minor * 100 + patch, so minor and patch stay below 100.
+function(_dream_game_version name given out_version out_code)
+    if(NOT DREAM_GAME_VERSION STREQUAL "")
+        set(version "${DREAM_GAME_VERSION}")
+    elseif(NOT given STREQUAL "")
+        set(version "${given}")
+    elseif(NOT PROJECT_VERSION STREQUAL "")
+        set(version "${PROJECT_VERSION}")
+    else()
+        set(version "0.0.0")
+    endif()
+    if(NOT version MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+        message(FATAL_ERROR "${name}'s version '${version}' isn't <major>.<minor>.<patch>, three "
+                            "whole numbers, such as 1.4.2")
+    endif()
+    set(major "${CMAKE_MATCH_1}")
+    set(minor "${CMAKE_MATCH_2}")
+    set(patch "${CMAKE_MATCH_3}")
+    if(minor GREATER 99 OR patch GREATER 99 OR major GREATER 20000)
+        message(FATAL_ERROR "${name}'s version '${version}' can't be an Android versionCode: "
+                            "minor and patch go up to 99, and major to 20000")
+    endif()
+    math(EXPR code "${major} * 10000 + ${minor} * 100 + ${patch}")
+    set(${out_version} "${version}" PARENT_SCOPE)
+    set(${out_code} "${code}" PARENT_SCOPE)
+endfunction()
+
+# The version shown in a Windows program's file properties.
+function(_dream_version_resource name version display_name)
+    if(display_name STREQUAL "")
+        set(display_name "${name}")
+    endif()
+    string(REPLACE "\"" "\"\"" display_name "${display_name}")
+    string(REPLACE "." "," numbers "${version}")
+    set(resource "${CMAKE_CURRENT_BINARY_DIR}/${name}_version.rc")
+    file(CONFIGURE OUTPUT "${resource}" CONTENT "1 VERSIONINFO
+FILEVERSION ${numbers},0
+PRODUCTVERSION ${numbers},0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+    BLOCK \"StringFileInfo\"
+    BEGIN
+        BLOCK \"040904B0\"
+        BEGIN
+            VALUE \"FileDescription\", \"${display_name}\"
+            VALUE \"ProductName\", \"${display_name}\"
+            VALUE \"FileVersion\", \"${version}\"
+            VALUE \"ProductVersion\", \"${version}\"
+            VALUE \"InternalName\", \"${name}\"
+            VALUE \"OriginalFilename\", \"${name}.exe\"
+        END
+    END
+    BLOCK \"VarFileInfo\"
+    BEGIN
+        VALUE \"Translation\", 0x409, 1200
+    END
+END
+" @ONLY)
+    target_sources(${name} PRIVATE "${resource}")
 endfunction()
 
 # Cooks every PNG in a folder named "textures" among the asset folders into a KTX2 file of the same
@@ -440,29 +539,80 @@ function(_dream_add_apk name native_dir asset_dirs application_id display_name)
     endif()
 
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(gradle_task assembleDebug)
+        set(variant Debug)
+        # Debug libraries keep their symbols in the APK, for debugging on the device.
+        set(keep_symbols true)
     else()
-        set(gradle_task assembleRelease)
+        set(variant Release)
+        # Release libraries go to Gradle with their symbols, which it strips from what ships and
+        # puts into the bundle for Google Play (ADR 0048).
+        set(keep_symbols false)
     endif()
 
     dream_module_android_permissions(${name} permissions)
     list(JOIN permissions "," permissions)
+    get_target_property(version ${name} DREAM_GAME_VERSION)
+    get_target_property(version_code ${name} DREAM_GAME_VERSION_CODE)
+
+    # Gradle strips with the NDK the game was built with, which it takes only by its exact version.
+    set(ndk_version "")
+    if(EXISTS "${CMAKE_ANDROID_NDK}/source.properties")
+        file(STRINGS "${CMAKE_ANDROID_NDK}/source.properties" revision REGEX "^Pkg\\.Revision")
+        string(REGEX REPLACE "^Pkg\\.Revision[ \t]*=[ \t]*" "" ndk_version "${revision}")
+    endif()
 
     set(output_dir "${CMAKE_CURRENT_BINARY_DIR}/${name}_apk")
+    set(gradle_properties
+        "-PdreamBuildDir=${output_dir}"
+        "-PdreamApplicationId=${application_id}"
+        "-PdreamDisplayName=${display_name}"
+        "-PdreamNativeDir=${native_dir}"
+        "-PdreamAssetDirs=${asset_dirs}"
+        "-PdreamJavaDirs=${java_dirs}"
+        "-PdreamPermissions=${permissions}"
+        "-PdreamVersionName=${version}"
+        "-PdreamVersionCode=${version_code}"
+        "-PdreamKeepSymbols=${keep_symbols}"
+        "-PdreamNdkDir=${CMAKE_ANDROID_NDK}"
+        "-PdreamNdkVersion=${ndk_version}")
     add_custom_target(${name}_apk
         COMMAND ${CMAKE_COMMAND} -E env "ANDROID_HOME=$ENV{ANDROID_HOME}"
             ${gradle} --no-daemon --project-cache-dir "${output_dir}/gradle-cache"
-            "-PdreamBuildDir=${output_dir}"
-            "-PdreamApplicationId=${application_id}"
-            "-PdreamDisplayName=${display_name}"
-            "-PdreamNativeDir=${native_dir}"
-            "-PdreamAssetDirs=${asset_dirs}"
-            "-PdreamJavaDirs=${java_dirs}"
-            "-PdreamPermissions=${permissions}"
-            ${gradle_task}
+            ${gradle_properties} assemble${variant}
         WORKING_DIRECTORY "${DreamEngine_SOURCE_DIR}/templates/android"
         COMMENT "Packaging ${name} as an APK in ${output_dir}/app/outputs/apk"
         USES_TERMINAL
         VERBATIM)
     add_dependencies(${name}_apk ${name})
+    # An Android App Bundle, as Google Play takes (ADR 0048).
+    add_custom_target(${name}_aab
+        COMMAND ${CMAKE_COMMAND} -E env "ANDROID_HOME=$ENV{ANDROID_HOME}"
+            ${gradle} --no-daemon --project-cache-dir "${output_dir}/gradle-cache"
+            ${gradle_properties} bundle${variant}
+        WORKING_DIRECTORY "${DreamEngine_SOURCE_DIR}/templates/android"
+        COMMENT "Packaging ${name} as an Android App Bundle in ${output_dir}/app/outputs/bundle"
+        USES_TERMINAL
+        VERBATIM)
+    add_dependencies(${name}_aab ${name})
+
+    # The release (ADR 0048): the APK and the bundle, from one Gradle run, so two don't share its
+    # folders at once, and the library's symbols, from before Gradle strips it.
+    string(TOLOWER "${variant}" lower_variant)
+    set(outputs "${output_dir}/app/outputs")
+    set(apk "${outputs}/apk/${lower_variant}/app-${lower_variant}.apk")
+    set(bundle "${outputs}/bundle/${lower_variant}/app-${lower_variant}.aab")
+    add_custom_target(${name}_release
+        COMMAND ${CMAKE_COMMAND} -E env "ANDROID_HOME=$ENV{ANDROID_HOME}"
+            ${gradle} --no-daemon --project-cache-dir "${output_dir}/gradle-cache"
+            ${gradle_properties} assemble${variant} bundle${variant}
+        COMMAND ${CMAKE_COMMAND} "-DNAME=${name}" "-DVERSION=${version}" -DPLATFORM=android
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/${name}_release"
+            "-DFILES=${apk}|${bundle}"
+            "-DSYMBOLS=$<TARGET_FILE:${name}>"
+            -P "${DreamEngine_SOURCE_DIR}/cmake/DreamRelease.cmake"
+        WORKING_DIRECTORY "${DreamEngine_SOURCE_DIR}/templates/android"
+        COMMENT "Releasing ${name} ${version} in ${CMAKE_CURRENT_BINARY_DIR}/${name}_release"
+        USES_TERMINAL
+        VERBATIM)
+    add_dependencies(${name}_release ${name})
 endfunction()

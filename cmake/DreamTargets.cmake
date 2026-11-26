@@ -12,6 +12,18 @@ function(dream_configure_target target)
         if(DREAM_WARNINGS_AS_ERRORS)
             target_compile_options(${target} PRIVATE /WX)
         endif()
+        # Release builds keep their debug information apart from what ships, in a .pdb beside the
+        # program, so a release's crashes can be read (ADR 0048). /Z7 puts it in each object file,
+        # which builds in parallel without a shared .pdb; the linker gathers it. /OPT keeps the
+        # program as small as without it.
+        set_property(TARGET ${target} PROPERTY MSVC_DEBUG_INFORMATION_FORMAT
+            "$<IF:$<CONFIG:Release>,Embedded,ProgramDatabase>")
+        get_target_property(type ${target} TYPE)
+        if(type STREQUAL "EXECUTABLE" OR type STREQUAL "SHARED_LIBRARY")
+            target_link_options(${target} PRIVATE
+                $<$<CONFIG:Release>:/DEBUG:FULL> $<$<CONFIG:Release>:/OPT:REF>
+                $<$<CONFIG:Release>:/OPT:ICF>)
+        endif()
     else()
         # Engine structs give every field a default, so designated initializers name only the
         # fields that differ, which Clang would otherwise warn about.
@@ -21,6 +33,9 @@ function(dream_configure_target target)
         if(DREAM_WARNINGS_AS_ERRORS)
             target_compile_options(${target} PRIVATE -Werror)
         endif()
+        # Release builds keep debug information too (ADR 0048): the release's symbols are kept from
+        # the library before packaging strips it.
+        target_compile_options(${target} PRIVATE $<$<CONFIG:Release>:-g>)
     endif()
 endfunction()
 

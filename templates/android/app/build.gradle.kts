@@ -16,8 +16,9 @@ android {
         applicationId = dreamProperty("dreamApplicationId")
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // The game's version, from dream_add_game (ADR 0048).
+        versionCode = dreamProperty("dreamVersionCode").toIntOrNull() ?: 1
+        versionName = dreamProperty("dreamVersionName").ifEmpty { "1.0" }
         manifestPlaceholders["dreamDisplayName"] = dreamProperty("dreamDisplayName")
         ndk {
             abiFilters += "arm64-v8a"
@@ -29,10 +30,18 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    // Gradle strips the release libraries' symbols from what ships with the NDK's tools.
+    dreamProperty("dreamNdkDir").takeIf { it.isNotEmpty() }?.let { ndkPath = it }
+    dreamProperty("dreamNdkVersion").takeIf { it.isNotEmpty() }?.let { ndkVersion = it }
+
     buildTypes {
         release {
             // Lets a release build be installed for testing. Publishing needs a real signing key.
             signingConfig = signingConfigs.getByName("debug")
+            // The symbols go into the bundle, for Google Play's crash reports (ADR 0048).
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
         }
     }
 
@@ -62,8 +71,10 @@ android {
             // SDL opens the game's library by its path on disk, which exists only if libraries are
             // unpacked at install time.
             useLegacyPackaging = true
-            // CMake has already decided whether the libraries keep their symbols.
-            keepDebugSymbols += "**/*.so"
+            // Debug builds keep the libraries' symbols; release builds ship them stripped.
+            if (dreamProperty("dreamKeepSymbols") == "true") {
+                keepDebugSymbols += "**/*.so"
+            }
         }
     }
 

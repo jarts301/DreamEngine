@@ -189,7 +189,7 @@ battery and almost no heap allocations per frame (ADR 0041); levels of detail ma
 | Project setup | An installable SDK of the engine's sources, `find_package(DreamEngine)`, `dream new` with a template, games in their own repositories (ADR 0045) | A binary SDK if first builds get too slow; `dream` commands to add modules and update a game's `vcpkg.json` |
 | Editor | Editor v1 (ADR 0046): a scene view, an entity tree, an inspector built from components' field descriptions, saving to TOML with undo, and Play through hot reload, with its panels as `editor_panel` modules | An asset browser, handles to move entities in the view, editing 2D scenes, multi-selection and copying, field descriptions for the remaining components |
 | Asset pipeline | glTF with levels of detail made at build time; PNG to KTX2 by a texture cooker chosen per platform; Slang; an asset database of what each asset needs, which fails the build for a missing one, and bundles shipped apart (ADR 0047) | Importers for FBX and audio, Play Asset Delivery packs on Android, an asset browser in the editor |
-| Release pipeline | CI builds and tests on push (paused for now) | Release builds with symbols kept and uploaded, versioning, signed artifacts, store uploads |
+| Release pipeline | Versions from tags; release builds with symbols kept apart and sent to Sentry and Google Play; `<game>_release` and `<game>_aab`; release workflows for the engine's SDK and, through `dream new`, for each game (ADR 0048). Test CI is paused | Signed artifacts, store uploads, a Linux SDK, and optional installers (below) |
 
 ### 3.3 Store requirements
 
@@ -294,10 +294,28 @@ on the five PC graphics backends and on a phone.
   bundles ship apart, on PC in archives of their own, read through the `asset_source` interface's
   `bundles` module while mounted. Still open: Play Asset Delivery packs on Android, loading bundles
   on a thread of their own, and an asset browser in the editor.
-- **Release pipeline:**
-  - CI release builds, with symbols archived;
-  - versioning from tags;
-  - a `<name>_aab` target and a `<name>_installer` target where a store needs one.
+- **Release pipeline:** done (ADR 0048):
+  - versions from tags: the engine's from `engine-v<version>`, checked against `CMakeLists.txt`;
+    each game's from `v<version>`, in the game, its log, its crash reports, its Windows file
+    properties and its Android `versionName` and `versionCode`;
+  - release builds that keep their symbols apart from what ships, archived with each release,
+    uploaded to Sentry when a game sets it up, and in the Android bundle for Google Play;
+  - `<game>_release`, the package or APK and bundle with a symbols archive, and `<game>_aab`;
+  - the engine's release workflow, which publishes the SDK, and a release workflow in each game
+    from `dream new`, on a self-hosted runner.
+
+  Optional, for the future, when a store or a direct download needs one: **installers.** None are
+  made now, since Steam installs from depots, GOG makes its own, and a zip suits itch.io. The
+  options, with their licenses:
+
+  | Tool | License | Fits |
+  |---|---|---|
+  | NSIS | zlib, permissive | A plain `.exe` installer for direct downloads; no conditions at all |
+  | Inno Setup | Permissive, zlib-style; since 6.5.0 its makers ask commercial users to buy a license, without requiring it | The same, with a friendlier scripting language |
+  | WiX Toolset | Source under MS-RL; using its releases to make money needs its Open Source Maintenance Fee above US$10,000 a year in revenue | MSI packages, which some stores and companies want |
+  | MSIX | Microsoft's format | The Microsoft Store; needs a code-signing certificate |
+
+  Each would be a `<game>_installer` target, from the release's package, like `<game>_release`.
 
 ### Phase 14: store readiness, Windows and Android
 
@@ -312,8 +330,9 @@ on the five PC graphics backends and on a phone.
   `null` (ADR 0043). Left for this phase: a player-facing consent setting, and uploads from Linux.
 - **Player-facing basics:** a settings menu template, display modes, localization, accessibility
   options, input remapping.
-- **Store build artifacts:** AAB, release signing from a keystore outside the repo, target SDK
-  updates, Play feature checks, Steam depots.
+- **Store build artifacts:** the AAB exists (ADR 0048); left: release signing from a keystore
+  outside the repo, Play App Signing, target SDK updates, Play feature checks, Steam depots, and
+  code signing for Windows, which SmartScreen warns about without.
 - **Linux:** made a tested platform, for Steam Deck.
 - **Pass condition:** Toppler, updated, passes Steam Deck Verified checks and the Google Play
   pre-launch report.

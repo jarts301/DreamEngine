@@ -1,0 +1,91 @@
+name: Release
+
+# An engine release (ADR 0048): pushing a tag such as engine-v0.2.0 builds and tests the engine,
+# makes the SDK that games build with, and publishes it on a GitHub release with the tools'
+# symbols. The tag's version must be the one in CMakeLists.txt, which is raised first.
+on:
+  push:
+    tags: ["engine-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Check the version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Compare the tag with CMakeLists.txt
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME#engine-v}"
+          declared=$(sed -n 's/^project(DreamEngine VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          if [ "$tag" != "$declared" ]; then
+            echo "::error::The tag says $tag, but CMakeLists.txt says $declared: raise the version there first"
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+  sdk:
+    name: SDK (Windows)
+    needs: version
+    runs-on: windows-2025
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      # vcpkg's built libraries, kept between runs, so a release doesn't build them all again.
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-cache
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Ninja
+        run: choco install ninja --no-progress -y
+
+      - name: Restore vcpkg's built libraries
+        uses: actions/cache@v4
+        with:
+          path: vcpkg-cache
+          key: vcpkg-windows-release-${{ hashFiles('vcpkg.json', 'cmake/ports/**', 'cmake/triplets/**') }}
+          restore-keys: vcpkg-windows-release-
+
+      - name: Set up vcpkg at the pinned baseline
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force vcpkg-cache | Out-Null
+          $baseline = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          $root = "$env:RUNNER_TEMP/vcpkg"
+          git clone https://github.com/microsoft/vcpkg $root
+          git -C $root checkout $baseline
+          & "$root/bootstrap-vcpkg.bat" -disableMetrics
+          "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
+
+      - name: Configure, build and test
+        run: cmake --workflow --preset windows-release
+
+      - name: Make the SDK and its symbols
+        shell: pwsh
+        run: |
+          $sdk = "$env:RUNNER_TEMP/DreamEngine-$env:VERSION"
+          cmake --install build/windows-release --prefix $sdk
+          Compress-Archive -Path "$sdk/*" -DestinationPath "DreamEngine-$env:VERSION-sdk-windows.zip"
+          $symbols = "$env:RUNNER_TEMP/symbols"
+          New-Item -ItemType Directory -Force $symbols | Out-Null
+          Get-ChildItem build/windows-release/tools -Recurse -Include dream.pdb, dream_editor.pdb |
+            Copy-Item -Destination $symbols
+          Compress-Archive -Path "$symbols/*" -DestinationPath "DreamEngine-$env:VERSION-sdk-windows-symbols.zip"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}"
+          "DreamEngine-${{ env.VERSION }}-sdk-windows.zip"
+          "DreamEngine-${{ env.VERSION }}-sdk-windows-symbols.zip"
+          --title "DreamEngine ${{ env.VERSION }}" --generate-notes

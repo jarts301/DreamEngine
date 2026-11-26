@@ -3,6 +3,11 @@
 
 #include "dream/runtime/program.h"
 
+// dream_add_game gives each game its version (ADR 0048).
+#ifndef DREAM_GAME_VERSION
+#define DREAM_GAME_VERSION ""
+#endif
+
 #if defined(__ANDROID__)
 
 #include <filesystem>
@@ -12,6 +17,7 @@
 // after the program name. It becomes the working directory, because Android starts apps in one they
 // can't write to, so that files written to relative paths, such as profiles, can be saved.
 extern "C" __attribute__((visibility("default"))) int dream_android_main(int argc, char* argv[]) {
+    dream::runtime::set_game_version(DREAM_GAME_VERSION);
     if (argc > 1 && argv[1] != nullptr) {
         std::error_code error;
         std::filesystem::current_path(argv[1], error);
@@ -23,6 +29,7 @@ extern "C" __attribute__((visibility("default"))) int dream_android_main(int arg
 
 int main(int argc, char** argv) {
     dream::runtime::set_program_arguments(argc, argv);
+    dream::runtime::set_game_version(DREAM_GAME_VERSION);
     return dream::runtime::run_program();
 }
 

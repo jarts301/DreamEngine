@@ -1,0 +1,79 @@
+name: Release
+
+# A release of __GAME_TITLE__: pushing a tag such as v1.4.2 builds the game at that version for
+# Windows and Android, and publishes on this repository's GitHub release what ships and, apart,
+# its symbols, which read its crash reports.
+#
+# It runs on a self-hosted runner: a machine of yours with the tools of the README and these
+# environment variables set for the runner: DREAM_ENGINE_SDK, VCPKG_ROOT, and for Android
+# ANDROID_NDK_HOME, ANDROID_HOME and JAVA_HOME. Its build folders stay between runs, so a release
+# rebuilds only what changed. To use GitHub's machines, change runs-on and set those up first.
+#
+# Optional: with a SENTRY_AUTH_TOKEN secret and SENTRY_ORG and SENTRY_PROJECT variables in the
+# repository's settings, the symbols are uploaded to Sentry too, which needs Node.js on the runner.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.preset }})
+    runs-on: [self-hosted, windows]
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        preset: [windows-release, android-arm64-release]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          clean: false
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build the release
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          cmake --preset ${{ matrix.preset }} "-DDREAM_GAME_VERSION=$version"
+          cmake --build --preset ${{ matrix.preset }} --target __GAME_NAME___release
+
+      - name: Upload the symbols to Sentry
+        if: ${{ vars.SENTRY_ORG != '' && vars.SENTRY_PROJECT != '' }}
+        shell: pwsh
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          $folder = "build/${{ matrix.preset }}/__GAME_NAME___release"
+          $symbols = "$env:RUNNER_TEMP/symbols-${{ matrix.preset }}"
+          Remove-Item -Recurse -Force $symbols -ErrorAction SilentlyContinue
+          Expand-Archive -Path (Get-ChildItem "$folder/*-symbols.zip").FullName -DestinationPath $symbols
+          npx --yes @sentry/cli debug-files upload --org "${{ vars.SENTRY_ORG }}" --project "${{ vars.SENTRY_PROJECT }}" $symbols
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.preset }}
+          path: build/${{ matrix.preset }}/__GAME_NAME___release/*
+
+  publish:
+    name: Publish
+    needs: build
+    runs-on: [self-hosted, windows]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = (Get-ChildItem release -File).FullName
+          gh release create "${{ github.ref_name }}" $files --repo "${{ github.repository }}" --title "__GAME_TITLE__ ${{ github.ref_name }}" --generate-notes

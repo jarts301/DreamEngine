@@ -21,6 +21,7 @@ if(NOT output MATCHES "Made 'Space Crates'")
 endif()
 
 foreach(file IN ITEMS CMakeLists.txt CMakePresets.json vcpkg.json dream.toml README.md .gitignore
+        .github/workflows/release.yml
         src/space_crates.cpp assets/scenes/main.toml assets/models/crate.glb
         assets/models/textures/crate.png)
     if(NOT EXISTS "${project_dir}/${file}")
@@ -29,7 +30,7 @@ foreach(file IN ITEMS CMakeLists.txt CMakePresets.json vcpkg.json dream.toml REA
 endforeach()
 
 file(GLOB_RECURSE texts "${project_dir}/*.txt" "${project_dir}/*.json" "${project_dir}/*.toml"
-    "${project_dir}/*.cpp" "${project_dir}/*.md")
+    "${project_dir}/*.cpp" "${project_dir}/*.md" "${project_dir}/*.yml")
 foreach(text IN LISTS texts)
     file(READ "${text}" content)
     if(content MATCHES "__[A-Z_]+__")
