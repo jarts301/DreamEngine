@@ -320,6 +320,15 @@ public:
     }
 
     // Modification times, in nanoseconds. Assets inside the APK or an archive have none.
+    std::optional<std::string> program_folder() const override {
+#if defined(SDL_PLATFORM_ANDROID)
+        return std::nullopt;
+#else
+        const char* const base = SDL_GetBasePath();
+        return base == nullptr ? std::nullopt : std::optional<std::string>(base);
+#endif
+    }
+
     std::optional<std::int64_t> file_version(FileRoot root, std::string_view path) override {
 #if defined(SDL_PLATFORM_ANDROID)
         if (root == FileRoot::Assets) {

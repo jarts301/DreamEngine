@@ -34,6 +34,8 @@ struct FakeState {
     // other assets that exist, and 0 for missing ones. Off, it reports nothing, as an APK does.
     bool reports_versions = false;
     std::map<std::string, std::int64_t, std::less<>> asset_versions;
+    // What program_folder reports, nothing unless a test sets it.
+    std::optional<std::string> program_folder;
     // What on_battery reports, and the refresh rates asked of the display, in order.
     std::optional<bool> on_battery;
     std::vector<float> frame_rate_hints;
@@ -118,6 +120,10 @@ public:
 
     void set_frame_rate_hint(float frames_per_second) override {
         m_state.frame_rate_hints.push_back(frames_per_second);
+    }
+
+    std::optional<std::string> program_folder() const override {
+        return m_state.program_folder;
     }
 
     std::optional<std::int64_t> file_version(platform::FileRoot root,

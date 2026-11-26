@@ -169,7 +169,7 @@ Not yet possible without writing engine code first:
 | Accessibility | Platform reviews and players ask for it: text size, colour-blind modes, subtitles, remapping | Settings over existing modules |
 | Settings menu and display modes | Resolution, fullscreen and borderless, frame cap, quality presets | A `settings` service in the runtime spine, with values from each module |
 | Save system | Versioned saves, migration, corruption safety, cloud sync hook | `save_storage`: `local_files`, `steam_cloud`, `play_saved_games`, `icloud` |
-| Asset streaming | Big games can't load everything at start | `asset_source`: `loose_files`, `pak`, `bundles` |
+| Asset streaming | Big games can't load everything at start | `asset_source`: `bundles` and `files` exist (ADR 0047); still missing: loading a bundle on a thread of its own, and bundles downloaded on demand |
 
 Already done in Phase 12, and no longer missing: PBR materials with normal, occlusion and emissive
 maps, tangents from `tangent_generator` (ADR 0033); transparent, cut-out and double-sided materials
@@ -188,7 +188,7 @@ battery and almost no heap allocations per frame (ADR 0041); levels of detail ma
 |---|---|---|
 | Project setup | An installable SDK of the engine's sources, `find_package(DreamEngine)`, `dream new` with a template, games in their own repositories (ADR 0045) | A binary SDK if first builds get too slow; `dream` commands to add modules and update a game's `vcpkg.json` |
 | Editor | Editor v1 (ADR 0046): a scene view, an entity tree, an inspector built from components' field descriptions, saving to TOML with undo, and Play through hot reload, with its panels as `editor_panel` modules | An asset browser, handles to move entities in the view, editing 2D scenes, multi-selection and copying, field descriptions for the remaining components |
-| Asset pipeline | glTF with levels of detail made at build time; PNG to KTX2 by a texture cooker chosen per platform; Slang | Importers for FBX and audio, an asset database with dependencies, per-platform bundles |
+| Asset pipeline | glTF with levels of detail made at build time; PNG to KTX2 by a texture cooker chosen per platform; Slang; an asset database of what each asset needs, which fails the build for a missing one, and bundles shipped apart (ADR 0047) | Importers for FBX and audio, Play Asset Delivery packs on Android, an asset browser in the editor |
 | Release pipeline | CI builds and tests on push (paused for now) | Release builds with symbols kept and uploaded, versioning, signed artifacts, store uploads |
 
 ### 3.3 Store requirements
@@ -289,7 +289,11 @@ on the five PC graphics backends and on a phone.
   Panels are `editor_panel` modules over `debug_ui`, so a project can add its own. Still open for
   later versions: an asset browser, handles to move entities in the view, editing 2D scenes from a
   2D camera, multi-selection and copying, and field descriptions for the remaining components.
-- **Asset database:** dependencies, cooking per platform, bundles (`asset_source: bundles`).
+- **Asset database:** done (ADR 0047): the build records every asset, what it needs, its bundle,
+  and the platform and cooker it was built for, and fails for a file that names a missing one;
+  bundles ship apart, on PC in archives of their own, read through the `asset_source` interface's
+  `bundles` module while mounted. Still open: Play Asset Delivery packs on Android, loading bundles
+  on a thread of their own, and an asset browser in the editor.
 - **Release pipeline:**
   - CI release builds, with symbols archived;
   - versioning from tags;

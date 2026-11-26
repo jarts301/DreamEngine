@@ -1,5 +1,7 @@
 #pragma once
 
+#include "dream/asset_source/asset_source.h"
+#include "dream/core/asset_database.h"
 #include "dream/core/clock.h"
 #include "dream/core/config.h"
 #include "dream/core/crash_handler.h"
@@ -86,6 +88,18 @@ public:
     // See input_device::InputDevice::rumble. False without an input_device module.
     bool rumble(std::uint32_t gamepad, float low, float high, std::uint32_t milliseconds) {
         return m_gamepads != nullptr && m_gamepads->rumble(gamepad, low, high, milliseconds);
+    }
+
+    // The build's asset database (ADR 0047): every asset, what it needs, and its bundle. Empty for
+    // a game whose build made none, or before run starts.
+    [[nodiscard]] const core::AssetDatabase& asset_database() const noexcept {
+        return m_asset_database;
+    }
+
+    // The project's asset_source module, through which assets are read, to mount and unmount
+    // bundles. Null when the project lists none, or before run starts.
+    [[nodiscard]] asset_source::AssetSource* asset_source() noexcept {
+        return m_asset_source.get();
     }
 
     [[nodiscard]] VirtualFileSystem& files() noexcept {
@@ -198,6 +212,8 @@ private:
     void pump_events(Game& game);
     void handle_event(Game& game, const platform::Event& event);
     [[nodiscard]] core::Result<void> attach_surface();
+    // Reads the asset database, and starts the project's asset source, if it lists one.
+    [[nodiscard]] core::Result<void> start_asset_source();
     // `started` is whether Game::on_start has run, and so whether the game can be told.
     void handle_memory_pressure(Game& game, const MemoryPressureChanged& change, bool started);
     // Adds the time spent waiting on the device to `wait_seconds`.
@@ -209,6 +225,8 @@ private:
     const core::Config& m_config;
     const core::ModuleProject* m_modules;
     VirtualFileSystem m_files;
+    core::AssetDatabase m_asset_database;
+    std::unique_ptr<asset_source::AssetSource> m_asset_source;
     AssetManager m_assets;
     SceneLoader m_scenes;
     EventBus m_events;

@@ -15,7 +15,7 @@ if(DREAM_BUILD_TESTS)
     if(NOT CMAKE_CROSSCOMPILING)
         add_test(NAME dream_scene_demo_null COMMAND dream_scene_demo_null)
         set_tests_properties(dream_scene_demo_null PROPERTIES
-            PASS_REGULAR_EXPRESSION "frames=30 scene=assets:/scenes/orbit.toml switches=2 pipeline_loads=1"
+            PASS_REGULAR_EXPRESSION "frames=30 scene=assets:/scenes/orbit.toml switches=2 pipeline_loads=1 mounted=orbit[^,]"
             ENVIRONMENT "SDL_VIDEO_DRIVER=dummy")
     endif()
 endif()

@@ -11,19 +11,30 @@ switch_scene = ["key:space"]
 quit = ["key:escape"]
 
 [modules.windows]
+asset_source = ["bundles"]
 platform = ["sdl3"]
 input_device = ["null"]
 rhi = ["null"]
 
 [modules.android]
+asset_source = ["bundles"]
 platform = ["sdl3"]
 input_device = ["null"]
 rhi = ["null"]
 
 [modules.linux]
+asset_source = ["bundles"]
 platform = ["sdl3"]
 input_device = ["null"]
 rhi = ["null"]
 
 [audio]
 muted = true
+
+# Each scene ships in a bundle of its own (ADR 0047), with what only it needs; the pipeline both use
+# stays in the base.
+[bundles.orbit]
+roots = ["assets:/scenes/orbit.toml"]
+
+[bundles.row]
+roots = ["assets:/scenes/row.toml"]

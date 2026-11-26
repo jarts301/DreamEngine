@@ -122,6 +122,36 @@ App::App(std::unique_ptr<platform::Platform> platform, const core::Config& confi
     : m_platform(std::move(platform)), m_device(std::move(device)), m_config(config),
       m_modules(modules), m_files(*m_platform), m_assets(m_files), m_scenes(m_files, m_assets) {}
 
+core::Result<void> App::start_asset_source() {
+    // The build's database, read through the platform, as every file is until a source is set.
+    if (m_files.version("assets:/asset_database.toml").value_or(1) != 0) {
+        if (const auto text = m_files.read("assets:/asset_database.toml"); text.has_value()) {
+            core::Result<core::AssetDatabase> database = core::AssetDatabase::parse(
+                std::string_view(reinterpret_cast<const char*>(text.value().data()),
+                                 text.value().size()));
+            if (!database.has_value()) {
+                return database.error();
+            }
+            m_asset_database = std::move(database).value();
+        }
+    }
+    if (!has_module<asset_source::AssetSource>()) {
+        return {};
+    }
+    core::Result<std::unique_ptr<asset_source::AssetSource>> source =
+        create_module<asset_source::AssetSource>();
+    if (!source.has_value()) {
+        return source.error();
+    }
+    if (core::Result<void> ready = source.value()->initialize(*m_platform, m_asset_database);
+        !ready.has_value()) {
+        return ready;
+    }
+    m_asset_source = std::move(source).value();
+    m_files.set_asset_source(m_asset_source.get());
+    return {};
+}
+
 core::Result<void> App::attach_surface() {
     if (m_device == nullptr || m_surface_attached) {
         return {};
@@ -276,6 +306,10 @@ core::Result<void> App::run(Game& game) {
 
         if (core::Result<void> attached = attach_surface(); !attached.has_value()) {
             return attached;
+        }
+
+        if (core::Result<void> sourced = start_asset_source(); !sourced.has_value()) {
+            return sourced;
         }
 
         // Gamepads are optional: a game without them still runs.

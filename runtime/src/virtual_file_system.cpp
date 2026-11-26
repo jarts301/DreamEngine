@@ -101,6 +101,9 @@ core::Result<std::vector<std::byte>> VirtualFileSystem::read(std::string_view pa
             return core::Error{core::ErrorCode::IoError, std::format("Could not read '{}'", path)};
         }
     }
+    if (parsed.value().root == FileRoot::Assets && m_asset_source != nullptr) {
+        return m_asset_source->read(parsed.value().relative);
+    }
     return m_platform.read_file(parsed.value().root, parsed.value().relative);
 }
 
@@ -118,6 +121,9 @@ std::optional<std::int64_t> VirtualFileSystem::version(std::string_view path) co
                 return static_cast<std::int64_t>(time.time_since_epoch().count());
             }
         }
+    }
+    if (parsed.value().root == FileRoot::Assets && m_asset_source != nullptr) {
+        return m_asset_source->version(parsed.value().relative);
     }
     return m_platform.file_version(parsed.value().root, parsed.value().relative);
 }

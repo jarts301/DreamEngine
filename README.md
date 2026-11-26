@@ -354,6 +354,29 @@ On PC, `cmake --build <folder> --target <game>_package` puts the program and an 
 holding all its assets in `<game>_package/`, ready to hand out. See
 [ADR 0024](docs/adr/0024-texture-cooking.md).
 
+## Asset database and bundles
+
+Each build writes `asset_database.toml` among a game's assets: every file, its kind, its size, the
+files it needs (a scene's models and sounds, a model's textures, a page's style sheets), and its
+bundle. A scene or page that names a file the assets don't have fails the build, naming both. A
+game reads the database as `app.asset_database()`, to ask, say, all a scene needs.
+
+A project can ship parts of its assets apart, in bundles, such as a level and what only it uses:
+
+```toml
+[bundles.forest]
+roots = ["assets:/scenes/forest.toml"]
+
+[modules.windows]
+asset_source = ["bundles"]    # Needed with bundles; the build says so.
+```
+
+A bundle holds its roots and what they need, except what another bundle also needs, which stays in
+the base. On PC, the package has `forest.pak` beside `assets.pak`. A game mounts a bundle before it
+loads from it, with `app.asset_source()->mount("forest")`, and unmounts it when done; reading a file
+of a bundle that isn't mounted fails, during development too. `samples/scene_demo` ships each of
+its scenes in a bundle. See [ADR 0047](docs/adr/0047-asset-database-and-bundles.md).
+
 ## Hot reload
 
 In debug builds on PC, a running game reloads its shaders, models and textures when their files
@@ -438,6 +461,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 | `editor_panel` | `hierarchy`, `inspector` | all | — | The editor's panels: every one listed is created. Only the editor lists them; see [Edit scenes](#edit-scenes). |
 | `platform` | `sdl3`, `null` | all | all | |
 | `profiler` | `timeline`, `null` | all | all | `timeline` saves a trace to open in Perfetto; see [Profiling](#profiling). |
+| `asset_source` | `bundles`, `files` | all | all | Where assets are read from: `bundles` ships a project's bundles apart and reads them while mounted. Optional; without it the platform reads them. See [Asset database and bundles](#asset-database-and-bundles). |
 | `crash_upload` | `sentry`, `backtrace`, `null` | all | all | Uploads saved crash reports in the background at the next start; Windows and Android. Optional; see [crash reports](docs/reports/crash-reports.md). |
 
 ```toml
