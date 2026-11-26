@@ -1,11 +1,16 @@
 name: Release
 
 # An engine release (ADR 0048): pushing a tag such as engine-v0.2.0 builds and tests the engine,
-# makes the SDK that games build with, and publishes it on a GitHub release with the tools'
-# symbols. The tag's version must be the one in CMakeLists.txt, which is raised first.
+# makes the SDK that games build with, and publishes it with the tools' symbols as a draft GitHub
+# release, which goes public when you publish it on GitHub. The tag's version must be the one in
+# CMakeLists.txt, which is raised first.
+#
+# "Run workflow" on the Actions tab makes a dry run: the same build, at CMakeLists.txt's version,
+# whose files are kept as the run's artifacts and published nowhere.
 on:
   push:
     tags: ["engine-v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -22,13 +27,15 @@ jobs:
       - name: Compare the tag with CMakeLists.txt
         id: version
         run: |
-          tag="${GITHUB_REF_NAME#engine-v}"
           declared=$(sed -n 's/^project(DreamEngine VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
-          if [ "$tag" != "$declared" ]; then
-            echo "::error::The tag says $tag, but CMakeLists.txt says $declared: raise the version there first"
-            exit 1
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            tag="${GITHUB_REF_NAME#engine-v}"
+            if [ "$tag" != "$declared" ]; then
+              echo "::error::The tag says $tag, but CMakeLists.txt says $declared: raise the version there first"
+              exit 1
+            fi
           fi
-          echo "version=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$declared" >> "$GITHUB_OUTPUT"
 
   sdk:
     name: SDK (Windows)
@@ -74,18 +81,26 @@ jobs:
         run: |
           $sdk = "$env:RUNNER_TEMP/DreamEngine-$env:VERSION"
           cmake --install build/windows-release --prefix $sdk
-          Compress-Archive -Path "$sdk/*" -DestinationPath "DreamEngine-$env:VERSION-sdk-windows.zip"
+          New-Item -ItemType Directory -Force release | Out-Null
+          Compress-Archive -Path "$sdk/*" -DestinationPath "release/DreamEngine-$env:VERSION-sdk-windows.zip"
           $symbols = "$env:RUNNER_TEMP/symbols"
           New-Item -ItemType Directory -Force $symbols | Out-Null
           Get-ChildItem build/windows-release/tools -Recurse -Include dream.pdb, dream_editor.pdb |
             Copy-Item -Destination $symbols
-          Compress-Archive -Path "$symbols/*" -DestinationPath "DreamEngine-$env:VERSION-sdk-windows-symbols.zip"
+          Compress-Archive -Path "$symbols/*" -DestinationPath "release/DreamEngine-$env:VERSION-sdk-windows-symbols.zip"
 
-      - name: Publish the release
+      - name: Keep the files with the run
+        uses: actions/upload-artifact@v4
+        with:
+          name: DreamEngine-${{ env.VERSION }}-sdk-windows
+          path: release/*
+
+      - name: Publish a draft release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "${{ github.ref_name }}"
-          "DreamEngine-${{ env.VERSION }}-sdk-windows.zip"
-          "DreamEngine-${{ env.VERSION }}-sdk-windows-symbols.zip"
-          --title "DreamEngine ${{ env.VERSION }}" --generate-notes
+          "release/DreamEngine-${{ env.VERSION }}-sdk-windows.zip"
+          "release/DreamEngine-${{ env.VERSION }}-sdk-windows-symbols.zip"
+          --draft --title "DreamEngine ${{ env.VERSION }}" --generate-notes

@@ -67,20 +67,25 @@ whose library is 6 MB stripped and 75 MB with symbols.
 `.github/workflows/release.yml` runs on a tag `engine-v<version>`, on GitHub's machines, which a
 public repository uses for free. It checks the tag's version, builds and tests the release build on
 Windows with vcpkg's built libraries cached between runs, installs the SDK, and publishes
-`DreamEngine-<version>-sdk-windows.zip` and its tools' symbols on a GitHub release. The test CI
-stays started by hand until it is turned back on.
+`DreamEngine-<version>-sdk-windows.zip` and its tools' symbols as a draft GitHub release, which goes
+public only when published by hand. Started from the Actions tab instead, it is a dry run: the same
+build, whose files stay with the run as its artifacts. The test CI stays started by hand until it is
+turned back on.
 
 ### Each game's release workflow
 
 `dream new` writes `.github/workflows/release.yml` into each project. On a tag `v<version>`, it
-builds `<game>_release` for Windows and Android at that version, uploads the symbols to Sentry when the
-repository has a `SENTRY_AUTH_TOKEN` secret and `SENTRY_ORG` and `SENTRY_PROJECT` variables, and
-publishes the files on the game's GitHub release, symbols included, as the record of every
-version's.
+builds `<game>_release` for Windows and Android at that version, uploads the symbols to Sentry
+when the repository has a `SENTRY_AUTH_TOKEN` secret and `SENTRY_ORG` and `SENTRY_PROJECT` variables, and
+publishes the files as a draft of the game's GitHub release, symbols included, as the record of
+every version's. Started from the Actions tab, with a version to build, it is a dry run that
+publishes nothing.
 
 It runs on a self-hosted runner, a machine of the game's makers, which costs no minutes and keeps
 its build folders and vcpkg's libraries between runs, so a release rebuilds only what changed. The
-runner's environment gives the SDK, vcpkg and Android's tools, as a developer's does. Moving to
+runner's environment gives the SDK, vcpkg and Android's tools, as a developer's does, and it needs
+nothing else installed: its steps use Windows PowerShell, and it publishes through an action rather
+than GitHub's command-line tool. Moving to
 GitHub's machines means changing `runs-on` and setting those up in the workflow.
 
 ### Installers

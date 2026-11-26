@@ -39,8 +39,10 @@ A PC release ready to hand out is the `__GAME_NAME___package` target of a `windo
 
 The game's version is in `CMakeLists.txt`, as `project(__GAME_NAME__ VERSION ...)`. A release is a
 tag: pushing `v1.4.2` runs `.github/workflows/release.yml`, which builds the Windows and Android
-releases at version 1.4.2 and publishes them on this repository's GitHub release, with their
-symbols apart, which read the game's crash reports.
+releases at version 1.4.2 and publishes them as a draft of this repository's GitHub release, with
+their symbols apart, which read the game's crash reports; publish the draft on GitHub once it looks
+right. "Run workflow" on the Actions tab makes a dry run, which keeps the files with the run and
+publishes nothing.
 
 It runs on a self-hosted runner: register one of your machines in the repository's settings, under
 Actions, with the labels `self-hosted` and `windows`, and set for it the environment variables of

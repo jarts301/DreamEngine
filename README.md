@@ -368,8 +368,8 @@ the APK, the App Bundle that Google Play takes (also `<game>_aab`), and the libr
 bundle carries them for Play too. Release builds keep their symbols, apart from what ships.
 
 Each project from `dream new` has a release workflow: pushing a tag such as `v1.4.2` builds the
-Windows and Android releases on a self-hosted runner and publishes them on the game's GitHub
-release, symbols included, and uploads the symbols to Sentry when the repository sets that up. The
+Windows and Android releases on a self-hosted runner and publishes them as a draft of the game's
+GitHub release, symbols included, to check and publish by hand, and uploads the symbols to Sentry when the repository sets that up. The
 engine publishes its SDK the same way, from a tag such as `engine-v0.2.0`. See
 [ADR 0048](docs/adr/0048-release-pipeline.md).
 
