@@ -55,8 +55,16 @@ jobs:
       - name: Install Ninja
         run: choco install ninja --no-progress -y
 
+      # The compiler names the build's tools, which matter to vcpkg's libraries as much as to ours.
+      - name: Name the compiler
+        shell: pwsh
+        run: Write-Output "MSVC $env:VCToolsVersion, on $((Get-CimInstance Win32_Processor).Name)"
+
+      # Restored here and saved below even when a later step fails, so a run after a failure
+      # doesn't build every library again.
       - name: Restore vcpkg's built libraries
-        uses: actions/cache@v4
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
         with:
           path: vcpkg-cache
           key: vcpkg-windows-release-${{ hashFiles('vcpkg.json', 'cmake/ports/**', 'cmake/triplets/**') }}
@@ -75,6 +83,13 @@ jobs:
 
       - name: Configure, build and test
         run: cmake --workflow --preset windows-release
+
+      - name: Save vcpkg's built libraries
+        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vcpkg-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
       - name: Make the SDK and its symbols
         shell: pwsh

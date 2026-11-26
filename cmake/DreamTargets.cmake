@@ -1,5 +1,9 @@
 # Build settings shared by every engine target. See docs/adr/0002-cpp-subset.md.
 
+# Release builds keep their debug information apart from what ships (ADR 0048). Off builds release
+# builds a little faster, without the symbols that read their crash reports.
+option(DREAM_RELEASE_SYMBOLS "Keep debug information in release builds, apart from what ships" ON)
+
 function(dream_configure_target target)
     target_compile_features(${target} PUBLIC cxx_std_20)
     set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
@@ -16,10 +20,13 @@ function(dream_configure_target target)
         # program, so a release's crashes can be read (ADR 0048). /Z7 puts it in each object file,
         # which builds in parallel without a shared .pdb; the linker gathers it. /OPT keeps the
         # program as small as without it.
-        set_property(TARGET ${target} PROPERTY MSVC_DEBUG_INFORMATION_FORMAT
-            "$<IF:$<CONFIG:Release>,Embedded,ProgramDatabase>")
+        if(DREAM_RELEASE_SYMBOLS)
+            set_property(TARGET ${target} PROPERTY MSVC_DEBUG_INFORMATION_FORMAT
+                "$<IF:$<CONFIG:Release>,Embedded,ProgramDatabase>")
+        endif()
         get_target_property(type ${target} TYPE)
-        if(type STREQUAL "EXECUTABLE" OR type STREQUAL "SHARED_LIBRARY")
+        if(DREAM_RELEASE_SYMBOLS AND
+           (type STREQUAL "EXECUTABLE" OR type STREQUAL "SHARED_LIBRARY"))
             target_link_options(${target} PRIVATE
                 $<$<CONFIG:Release>:/DEBUG:FULL> $<$<CONFIG:Release>:/OPT:REF>
                 $<$<CONFIG:Release>:/OPT:ICF>)
@@ -35,7 +42,9 @@ function(dream_configure_target target)
         endif()
         # Release builds keep debug information too (ADR 0048): the release's symbols are kept from
         # the library before packaging strips it.
-        target_compile_options(${target} PRIVATE $<$<CONFIG:Release>:-g>)
+        if(DREAM_RELEASE_SYMBOLS)
+            target_compile_options(${target} PRIVATE $<$<CONFIG:Release>:-g>)
+        endif()
     endif()
 endfunction()
 

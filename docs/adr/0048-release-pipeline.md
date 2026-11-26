@@ -104,5 +104,13 @@ direct downloads. The roadmap lists the options for later: NSIS, Inno Setup, WiX
 - The release workflows can't be run before the repositories and a runner exist, so they were
   checked by building the same targets with the same settings; their GitHub steps run first with
   the first real release.
+- The engine workflow's first run failed the Jolt joint tests on GitHub's machine, though they pass
+  on ours. The likely cause, which Jolt's release notes describe: MSVC Build Tools 14.52 with the
+  `/fp:fast` that Jolt builds itself with gets Jolt 5.6.0's quaternion products wrong. vcpkg's registry at the engine's baseline has only 5.6.0, so `cmake/ports/joltphysics`
+  is vcpkg's port moved to Jolt 5.7.0, which fixes it, until the baseline catches up. The same
+  compiler would have broken games built on developers' machines. The workflow now names its
+  compiler and CPU, and saves vcpkg's libraries even when a step fails.
+- `DREAM_RELEASE_SYMBOLS` (on by default) turns release builds' debug information off where it isn't
+  wanted; a Windows release then has no symbols archive.
 - Still to do in Phase 14: signing with real keys kept outside the repositories, Play App Signing,
   store uploads, and Steam depots; and a Linux SDK, once the editor and tools are checked there.

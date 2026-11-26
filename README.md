@@ -272,7 +272,8 @@ frame, an `animator` in a scene file plays a clip, and `Animation::play` fades b
 clip = "walk"
 ```
 
-ozz-animation (MIT) comes from an overlay port in `cmake/ports`, which the presets list. The render
+ozz-animation (MIT) comes from an overlay port in `cmake/ports`, which the presets list, as does
+Jolt 5.7.0, newer than vcpkg's baseline has (ADR 0048). The render
 demo's tentacle has two clips; N or a gamepad's north button fades between them.
 [Animation](docs/guides/animation.md) explains how to export animated models from Blender and play
 them, and [ADR 0036](docs/adr/0036-skeletal-animation.md) records the design.

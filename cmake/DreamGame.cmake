@@ -188,7 +188,7 @@ function(dream_add_game name)
             # The release (ADR 0048): the package zipped, and the program's symbols apart.
             get_target_property(version ${name} DREAM_GAME_VERSION)
             set(symbols "")
-            if(MSVC)
+            if(MSVC AND DREAM_RELEASE_SYMBOLS)
                 set(symbols "$<TARGET_PDB_FILE:${name}>")
             endif()
             add_custom_target(${name}_release
