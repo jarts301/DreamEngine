@@ -8,6 +8,7 @@
 #include "dream/runtime/environment.h"
 #include "dream/runtime/particles.h"
 #include "dream/runtime/sprites.h"
+#include "dream/runtime/tile_map_files.h"
 #include "dream/runtime/texture.h"
 
 #include <algorithm>
@@ -696,6 +697,16 @@ core::Result<void> Renderer::initialize(App& app,
 
     register_components(app.scenes());
     register_sprite_components(app.scenes());
+    m_tile_map_format.reset();
+    if (app.has_module<tile_map_format::TileMapFormat>()) {
+        core::Result<std::unique_ptr<tile_map_format::TileMapFormat>> format =
+            app.create_module<tile_map_format::TileMapFormat>();
+        if (!format.has_value()) {
+            return format.error();
+        }
+        m_tile_map_format = std::move(format).value();
+    }
+    register_tile_map_files(app.scenes(), app.assets(), m_tile_map_format.get());
     register_environment(app.scenes(), app.assets(), *device);
     return {};
 }

@@ -30,6 +30,7 @@ add_library(dream_runtime STATIC
     src/scene_loader.cpp
     src/screenshot.cpp
     src/sprites.cpp
+    src/tile_map_files.cpp
     src/texture.cpp
     src/ui.cpp
     src/virtual_file_system.cpp
@@ -47,6 +48,7 @@ target_link_libraries(dream_runtime PUBLIC
     dream::interface_mesh_simplifier dream::interface_tangent_generator
     dream::interface_input_device dream::interface_animation dream::interface_particles
     dream::interface_crash_upload dream::interface_texture_decoder dream::interface_asset_source
+    dream::interface_tile_map_format
     EnTT::EnTT)
 dream_configure_target(dream_runtime)
 
@@ -67,6 +69,7 @@ if(DREAM_BUILD_TESTS)
             tests/input_actions_test.cpp
             tests/particles_test.cpp
             tests/sprites_test.cpp
+            tests/tile_map_files_test.cpp
             tests/memory_budget_test.cpp
             tests/model_loader_test.cpp
             tests/physics_test.cpp

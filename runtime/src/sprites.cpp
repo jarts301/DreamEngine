@@ -5,6 +5,7 @@
 #include "dream/core/profile.h"
 #include "dream/runtime/physics_2d.h"
 #include "dream/runtime/scene_loader.h"
+#include "dream/runtime/tile_map_files.h"
 
 #include <algorithm>
 #include <charconv>
@@ -287,7 +288,8 @@ core::Result<void> read_parallax(ComponentContext& context) {
 
 core::Result<void> read_tile_map(ComponentContext& context) {
     const ComponentData& data = context.data;
-    if (auto known = data.check_keys({"tileset", "tile_pixels", "tile_size", "rows", "tiles",
+    if (auto known = data.check_keys({"tileset", "tile_pixels", "tile_margin", "tile_spacing",
+                                      "tile_size", "rows", "tiles",
                                       "columns", "solid", "color", "alpha", "layer", "order",
                                       "filter", "visible", "legend", "animations",
                                       "animation_speed"});
@@ -300,6 +302,8 @@ core::Result<void> read_tile_map(ComponentContext& context) {
     Vec2 tile_pixels{16.0f, 16.0f};
     reader.vec2("tile_pixels", tile_pixels);
     reader.vec2("tile_size", map.tile_size);
+    reader.whole("tile_margin", map.tile_margin);
+    reader.whole("tile_spacing", map.tile_spacing);
     reader.color(map.color);
     reader.integer("layer", map.layer);
     reader.integer("order", map.order);
@@ -524,6 +528,24 @@ void update_sprite_animators(World& world, double seconds) {
 }
 
 core::Result<std::vector<Entity>> make_tile_colliders(World& world, Entity map_entity) {
+    // A map file's tile layers, each with its own solid tiles.
+    if (const TileMapFile* const file = world.registry().try_get<TileMapFile>(map_entity);
+        file != nullptr && !world.registry().all_of<TileMap>(map_entity)) {
+        const std::vector<Entity> layers = file->layers;
+        std::vector<Entity> made;
+        for (const Entity layer : layers) {
+            const TileMap* const tiles = world.registry().try_get<TileMap>(layer);
+            if (tiles == nullptr || tiles->solid.empty()) {
+                continue;
+            }
+            core::Result<std::vector<Entity>> boxes = make_tile_colliders(world, layer);
+            if (!boxes.has_value()) {
+                return boxes.error();
+            }
+            made.insert(made.end(), boxes.value().begin(), boxes.value().end());
+        }
+        return made;
+    }
     const TileMap* const map = world.registry().try_get<TileMap>(map_entity);
     const WorldTransform* const transform = world.registry().try_get<WorldTransform>(map_entity);
     if (map == nullptr || transform == nullptr) {
@@ -714,11 +736,31 @@ bool has_cells(const TileMap& map) {
 // The tile a cell shows now, through the map's animations.
 std::int32_t shown_tile(const TileMap& map, std::int32_t tile) {
     for (const TileAnimation& animation : map.animations) {
-        if (animation.tile == tile && !animation.frames.empty() && animation.fps > 0.0f) {
+        if (animation.tile != tile || animation.frames.empty()) {
+            continue;
+        }
+        if (animation.durations.size() == animation.frames.size()) {
+            double length = 0.0;
+            for (const float seconds : animation.durations) {
+                length += static_cast<double>(std::max(seconds, 0.0f));
+            }
+            if (length > 0.0) {
+                double into = std::fmod(map.animation_time, length);
+                for (std::size_t frame = 0; frame < animation.frames.size(); ++frame) {
+                    into -= static_cast<double>(std::max(animation.durations[frame], 0.0f));
+                    if (into < 0.0) {
+                        return animation.frames[frame];
+                    }
+                }
+                return animation.frames.back();
+            }
+        }
+        if (animation.fps > 0.0f) {
             const auto step = static_cast<std::size_t>(map.animation_time *
                                                        static_cast<double>(animation.fps));
             return animation.frames[step % animation.frames.size()];
         }
+        return tile;
     }
     return tile;
 }
@@ -956,10 +998,20 @@ void gather_sprites(const World& world, const Mat4& view, std::vector<renderer::
             map.tileset ? static_cast<float>(std::max(map.tileset->width, 1u)) : 1.0f;
         const float texture_height =
             map.tileset ? static_cast<float>(std::max(map.tileset->height, 1u)) : 1.0f;
+        // Tiles across the tileset, between its margins and with spacing after all but the last.
+        const std::uint32_t step_x = std::max(map.tile_width + map.tile_spacing, 1u);
         const std::uint32_t tileset_columns =
-            map.tileset ? std::max(map.tileset->width / std::max(map.tile_width, 1u), 1u) : 1;
+            map.tileset && map.tileset->width > 2 * map.tile_margin
+                ? std::max((map.tileset->width - 2 * map.tile_margin + map.tile_spacing) / step_x,
+                           1u)
+                : 1;
         const float tile_u = static_cast<float>(map.tile_width) / texture_width;
         const float tile_v = static_cast<float>(map.tile_height) / texture_height;
+        const float step_u = static_cast<float>(step_x) / texture_width;
+        const float step_v = static_cast<float>(map.tile_height + map.tile_spacing) / texture_height;
+        const float margin_u = static_cast<float>(map.tile_margin) / texture_width;
+        const float margin_v = static_cast<float>(map.tile_margin) / texture_height;
+        const bool flipped = map.flips.size() >= map.tiles.size();
         // A hundredth of a texel in from each edge, so no neighboring tile shows at the seams.
         const float inset_u = 0.01f / texture_width;
         const float inset_v = 0.01f / texture_height;
@@ -985,7 +1037,8 @@ void gather_sprites(const World& world, const Mat4& view, std::vector<renderer::
                     const std::uint32_t row = map.rows - 1 - row_up;
                     for (std::uint32_t column = cells.first_column; column < cells.end_column;
                          ++column) {
-                        std::int32_t tile = map.tiles[std::size_t{row} * map.columns + column];
+                        const std::size_t cell = std::size_t{row} * map.columns + column;
+                        std::int32_t tile = map.tiles[cell];
                         if (tile >= 0 && !map.animations.empty()) {
                             tile = shown_tile(map, tile);
                         }
@@ -993,18 +1046,44 @@ void gather_sprites(const World& world, const Mat4& view, std::vector<renderer::
                             continue;
                         }
                         const auto index = static_cast<std::uint32_t>(tile);
-                        const float u = static_cast<float>(index % tileset_columns) * tile_u;
-                        const float v = static_cast<float>(index / tileset_columns) * tile_v;
-                        add(renderer::SpriteQuad{
-                                .position =
-                                    Vec2{origin.x + static_cast<float>(column) * map.tile_size.x,
-                                         origin.y + static_cast<float>(row_up) * map.tile_size.y},
-                                .size = map.tile_size,
-                                .pivot = Vec2{0.0f, 0.0f},
-                                .rotation = 0.0f,
-                                .uv = Vec4{u + inset_u, v + inset_v, u + tile_u - inset_u,
-                                           v + tile_v - inset_v},
-                                .color = map.color},
+                        const float u =
+                            margin_u + static_cast<float>(index % tileset_columns) * step_u;
+                        const float v =
+                            margin_v + static_cast<float>(index / tileset_columns) * step_v;
+                        Vec4 uv{u + inset_u, v + inset_v, u + tile_u - inset_u,
+                                v + tile_v - inset_v};
+                        const Vec2 corner{origin.x + static_cast<float>(column) * map.tile_size.x,
+                                          origin.y + static_cast<float>(row_up) * map.tile_size.y};
+                        const std::uint8_t flip = flipped ? map.flips[cell] : 0;
+                        if (flip == 0) {
+                            add(renderer::SpriteQuad{.position = corner,
+                                                     .size = map.tile_size,
+                                                     .pivot = Vec2{0.0f, 0.0f},
+                                                     .rotation = 0.0f,
+                                                     .uv = uv,
+                                                     .color = map.color},
+                                map.tileset, map.filter);
+                            continue;
+                        }
+                        // Mirrored across the diagonal, the tile is turned a quarter to the left and
+                        // mirrored across; the flips that follow then swap roles: mirroring up and
+                        // down undoes that mirroring across, and mirroring across mirrors the
+                        // texture up and down.
+                        const bool diagonal = (flip & k_tile_flip_diagonal) != 0;
+                        const bool flip_x = (flip & k_tile_flip_x) != 0;
+                        const bool flip_y = (flip & k_tile_flip_y) != 0;
+                        if (diagonal ? !flip_y : flip_x) {
+                            std::swap(uv.x, uv.z);
+                        }
+                        if (diagonal ? flip_x : flip_y) {
+                            std::swap(uv.y, uv.w);
+                        }
+                        add(renderer::SpriteQuad{.position = corner + map.tile_size * 0.5f,
+                                                 .size = map.tile_size,
+                                                 .pivot = Vec2{0.5f, 0.5f},
+                                                 .rotation = diagonal ? 1.5707963f : 0.0f,
+                                                 .uv = uv,
+                                                 .color = map.color},
                             map.tileset, map.filter);
                     }
                 }

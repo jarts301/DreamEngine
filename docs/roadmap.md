@@ -178,7 +178,8 @@ maps, tangents from `tangent_generator` (ADR 0033); transparent, cut-out and dou
 `ozz`, `null`, with GPU skinning (ADR 0036); point and spot lights in `forward` and
 `forward_plus` (ADR 0037); particles through `particles`: `cpu`, `null` (ADR 0038); 2D sprites,
 sprite-sheet animation and tile maps with collisions, drawn by `forward` (ADR 0039), with parallax,
-9-slice sprites, sorting by height and animated tiles (ADR 0049); environment
+9-slice sprites, sorting by height and animated tiles (ADR 0049), and maps from Tiled through
+`tile_map_format`: `tiled`, `null` (ADR 0050); environment
 lighting from HDR images and bloom (ADR 0040); blending between shadow cascades, a frame limit on
 battery and almost no heap allocations per frame (ADR 0041); levels of detail made at build time
 (ADR 0042).
@@ -256,7 +257,7 @@ on the five PC graphics backends and on a phone.
 | Lights | Point and spot lights: 16 with `forward`, 256 with `forward_plus` | ADR 0037 | [Lighting](guides/lighting.md) |
 | Environment | Lighting and reflections from HDR images, drawn as the sky; bloom | ADR 0040 | [Environment](guides/environment.md) |
 | Effects | Particles on the CPU: fire, smoke, sparks, one-off bursts | ADR 0038 | [Particles](guides/particles.md) |
-| 2D | Sprites, sprite-sheet animation, tile maps with collisions, pixel art kept crisp; parallax backgrounds that repeat, 9-slice sprites, sorting by height for top-down games, animated tiles | ADR 0039, 0049 | [2D games](guides/sprites.md) |
+| 2D | Sprites, sprite-sheet animation, tile maps with collisions, pixel art kept crisp; parallax backgrounds that repeat, 9-slice sprites, sorting by height for top-down games, animated tiles; levels from the Tiled map editor | ADR 0039, 0049, 0050 | [2D games](guides/sprites.md) |
 | Characters | Skeletal animation with fades between clips, skinned on the GPU | ADR 0036 | [Animation](guides/animation.md) |
 | Input | Gamepads, with analog sticks and triggers bound to actions | ADR 0035 | [Input](guides/input.md) |
 
@@ -264,7 +265,7 @@ on the five PC graphics backends and on a phone.
 
 | # | Area | What is missing | Builds on |
 |---|---|---|---|
-| 1 | 2D | Tile maps from Tiled files (needs a JSON reader), atlases packed at build time, a renderer module for 2D alone | ADR 0039, 0049 |
+| 1 | 2D | Atlases packed at build time, a renderer module for 2D alone | ADR 0039, 0049, 0050 |
 | 2 | Effects | Soft particles, sprite-sheet animation, curves for color and size, trails, effect files shared between scenes; later a `gpu` module, once the graphics interface has compute shaders | ADR 0038 |
 | 3 | Lights | Shadows from spot lights, then from point lights; compute shaders in the graphics interface, to sort lights on the GPU | ADR 0037 |
 | 4 | Characters | Root motion, animation events, joints sent once per frame for crowds, clips built at build time; then inverse kinematics, blend trees and morph targets | ADR 0036 |

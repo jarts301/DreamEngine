@@ -24,6 +24,9 @@ file(WRITE "${assets}/ui/menu.rml" "<rml><head><link type=\"text/rcss\" href=\"s
 file(WRITE "${assets}/ui/style.rcss" "body { decorator: image(url(\"frame.png\")); }\n")
 file(WRITE "${assets}/ui/frame.png" "png")
 file(WRITE "${assets}/notes.txt" "not an asset anything names")
+# A Tiled map whose image layer and tileset are beside it, and a tileset whose image was cooked.
+file(WRITE "${assets}/maps/level.tmj" "{\"type\": \"map\", \"layers\": [{\"type\": \"imagelayer\",\n \"image\": \"../ui/frame.png\"}],\n \"tilesets\": [{\"firstgid\": 1, \"source\": \"props.tsj\"}]}\n")
+file(WRITE "${assets}/maps/props.tsj" "{\"type\": \"tileset\", \"image\": \"../models/textures/crate.png\"}\n")
 
 execute_process(COMMAND "${CMAKE_COMMAND}" "-DASSETS=${assets}" -DPLATFORM=windows
         -DTEXTURE_COOKER=ktx2_uastc
@@ -52,8 +55,8 @@ read_list(needs needs)
 read_list(bundles bundles)
 list(LENGTH paths count)
 list(LENGTH needs needs_count)
-if(NOT count EQUAL 13 OR NOT needs_count EQUAL 13)
-    message(FATAL_ERROR "Expected 13 files and 13 needs, not ${count} and ${needs_count}:\n${text}")
+if(NOT count EQUAL 15 OR NOT needs_count EQUAL 15)
+    message(FATAL_ERROR "Expected 15 files and 15 needs, not ${count} and ${needs_count}:\n${text}")
 endif()
 
 function(expect path kind needed bundle)
@@ -82,6 +85,8 @@ expect(models/textures/crate.ktx2 texture "" base)
 expect(ui/menu.rml ui "ui/style.rcss|models/textures/crate.ktx2" base)
 expect(ui/style.rcss style "ui/frame.png" base)
 expect(notes.txt file "" base)
+expect(maps/level.tmj map "ui/frame.png|maps/props.tsj" base)
+expect(maps/props.tsj tileset "models/textures/crate.ktx2" base)
 if(NOT text MATCHES "bundles = \\[\n    \"forest\",\n    \"beach\",\n\\]")
     message(FATAL_ERROR "The bundles aren't listed:\n${text}")
 endif()

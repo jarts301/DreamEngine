@@ -2,10 +2,11 @@
 
 This guide explains how to make a 2D game with DreamEngine: the 2D camera, sprites and sprite sheets,
 animating them, building levels from tile maps with collisions and animated tiles, parallax
-backgrounds, 9-slice panels, sorting by height for top-down games, and making the art. The design
-is in [ADR 0039](../adr/0039-sprites-and-tile-maps.md) and
-[ADR 0049](../adr/0049-parallax-9-slice-y-sorting-and-animated-tiles.md), and
-[samples/platformer](../../samples/platformer) is a complete small game to start from.
+backgrounds, 9-slice panels, sorting by height for top-down games, levels made in the Tiled map
+editor, and making the art. The design is in [ADR 0039](../adr/0039-sprites-and-tile-maps.md),
+[ADR 0049](../adr/0049-parallax-9-slice-y-sorting-and-animated-tiles.md) and
+[ADR 0050](../adr/0050-tiled-maps.md). [samples/platformer](../../samples/platformer) and
+[samples/top_down](../../samples/top_down) are complete small games to start from.
 
 ## In short
 
@@ -19,6 +20,8 @@ is in [ADR 0039](../adr/0039-sprites-and-tile-maps.md) and
 - A **`parallax`** makes a sprite or tile map move slower than the world, and repeat: backgrounds.
 - A sprite's **`slice`** stretches it without stretching its corners: panels and frames.
 - A camera's **`y_sort_layers`** draw what stands lower over what stands higher, for top-down games.
+- A **`tile_map_file`** loads a level made in [Tiled](https://www.mapeditor.org/): its layers,
+  animated and solid tiles, and objects.
 - Sprites are drawn over any 3D scene and under the interface, by layer and then order.
 
 ## Setting up
@@ -39,7 +42,8 @@ renderer = ["forward", "null"]
 physics2d = ["box2d"]
 ```
 
-`forward` draws sprites; a 2D game needs no 3D modules. `physics2d` is only needed for collisions.
+`forward` draws sprites; a 2D game needs no 3D modules. `physics2d` is only needed for collisions,
+and `tile_map_format = ["tiled", "null"]` only for maps made in Tiled.
 
 ```cpp
 class MyGame final : public runtime::Game {
@@ -239,6 +243,8 @@ f = 5     # A flower.
   Tile maps aren't turned or scaled by their transform.
 - Instead of `rows` and a `legend`, `tiles = [...]` with `columns = 16` gives the tile numbers
   directly, row by row from the top, with -1 for empty: the form to generate from a level editor.
+- `tile_margin` and `tile_spacing` give the pixels around a tileset's edge and between its tiles,
+  for tilesets drawn with gaps.
 - `layer`, `order`, `color`, `alpha`, `filter` and `visible` work as for sprites. Put decorations
   that the player walks in front of in the same map as non-solid tiles, and backgrounds in maps of
   their own on lower layers.
@@ -327,6 +333,79 @@ Something tall made of several tiles, such as a tree two tiles high, sorts each 
 bottom, so a character standing just above the trunk is drawn over the crown. Make tall things
 sprites, with their pivot at their foot.
 
+## Maps from Tiled
+
+[Tiled](https://www.mapeditor.org/) is a free map editor: draw the level there, and load it with one
+component.
+
+```toml
+# dream.toml
+[modules.windows]
+tile_map_format = ["tiled", "null"]
+
+[modules.android]
+tile_map_format = ["tiled", "null"]
+```
+
+```toml
+# The scene
+[entities.garden.tile_map_file]
+file = "assets:/maps/garden.tmj"
+tile_size = [1.0, 1.0]   # Each tile's size in the world; the default.
+layer = 0                # The drawing layer of the map's first layer; the default.
+```
+
+| Setting | Default | What it does |
+|---|---|---|
+| `file` | none | The map, saved from Tiled as JSON (`.tmj`). |
+| `tile_size` | [1, 1] | Each tile's size in the world. Objects and image layers are scaled alike. |
+| `layer` | 0 | The drawing layer of the map's first layer. Each next layer is one higher, unless it has an integer property `layer`. |
+| `solid` | `"solid"` | The bool property that makes tiles solid. |
+| `filter` | `"pixel"` | As for sprites. |
+
+The map's bottom left corner is at its entity. Its layers and objects become the entity's children,
+in Tiled's drawing order:
+
+- **Tile layers** become tile maps, with their offset, opacity, tint, parallax, visibility, and the
+  flips and rotations of their tiles. Tiles animated in Tiled's tileset editor animate, with each
+  frame's own length.
+- **Image layers** become sprites, with their parallax and "Repeat X" and "Repeat Y".
+- **Objects** become entities named as the object, with a `runtime::MapObject` holding the object's
+  class, its size in world units, its shape and its custom properties. An entity sits at the
+  object's middle, or at its point. Find spawn points and doors by name:
+
+  ```cpp
+  const runtime::Entity start = world->find("start");
+  const auto& door = world->registry().get<runtime::MapObject>(world->find("door"));
+  const std::string_view to = door.property("to");   // A custom property, as text.
+  const float speed = door.number("speed", 1.0f);
+  const bool locked = door.flag("locked");
+  ```
+
+- **Tile objects**, tiles placed freely with "Insert Tile", become sprites standing at their foot,
+  so in a layer sorted by height they sort by where they stand: trees, rocks, furniture. Use them
+  for things taller than a tile.
+- **Groups** are flattened into their layers, whose names become `group/layer`.
+
+**Collisions:** give a tile a bool property `solid` in Tiled's tileset editor, or draw a collision
+shape on it, and every cell holding it is solid; or give a whole tile layer a bool property `solid`.
+Then call `runtime::make_tile_colliders(world, map_entity)` once the map is placed, which makes the
+colliders of every tile layer. Objects make no colliders by themselves: add bodies for them in code,
+from their `MapObject`, as the top-down sample does for tree trunks.
+
+**Saving from Tiled:**
+
+- Save maps as JSON (`.tmj`), and tilesets kept in files of their own as JSON too (`.tsj`): in
+  Tiled's preferences, or with "Save As". XML `.tmx` and `.tsx` files aren't read.
+- Keep the default tile layer format, CSV, or use uncompressed Base64. Compressed layers aren't read.
+- Untick "Infinite" in the map's properties, and keep the orientation orthogonal.
+- Make tilesets from one image cut into tiles, not collections of separate images.
+- Tile layers take tiles the size of the map's; place larger ones, such as trees, as tile objects.
+- Keep the map, its tilesets and images in the game's assets, named by relative paths, as Tiled does
+  when they are saved together. The build checks that every image and tileset a map names is there.
+
+The log says what to change when a map can't be read, such as an isometric map or a compressed layer.
+
 ## Making the art
 
 - **Pixel art:** draw at the size it is meant to be seen at, such as 16 x 16 tiles and characters,
@@ -345,7 +424,8 @@ sprites, with their pivot at their foot.
 - **Parallax backgrounds** that repeat must meet themselves at their left and right edges. Distant
   ones can be drawn at a lower resolution than the level, as the sample's hills are, at 8 pixels per
   unit against the level's 16.
-- `tools/make_sprite_art.py` draws the sample's art in Python, as a reference for sizes and layout.
+- `tools/make_sprite_art.py` draws the platformer's art in Python, as a reference for sizes and
+  layout, and `tools/make_top_down_art.py` the top-down sample's, with its first Tiled map.
 
 ## Performance
 
@@ -380,12 +460,15 @@ sprites, with their pivot at their foot.
 | A parallax background ends at the screen's side | No `repeat_x` | Set `repeat_x = true` |
 | A seam where a repeated background meets itself | The image's edges don't match | Draw it so its left edge continues its right |
 | A 9-slice sprite's corners stretch | `slice` is missing, or larger than the image's frame | Give `slice` in the frame's pixels |
+| "the game reads no map files" | No `tile_map_format` module listed for the platform | List `tile_map_format = ["tiled", "null"]` |
+| A Tiled map fails to load | A format the reader doesn't take; the message says which | Save as JSON, with CSV layers, not infinite |
+| Walking through hedges from a Tiled map | No solid tiles, or no `make_tile_colliders` | Give tiles or the layer a `solid` property, and call it on the map's entity |
+| Tiles from a Tiled tileset show the wrong part of the image | The tileset has a margin or spacing in Tiled that doesn't match the image | Set them in Tiled's tileset properties to match |
 
 ## Limits
 
 Each of these is a later step on the roadmap:
 
-- Tile maps from [Tiled](https://www.mapeditor.org/) files.
 - Texture atlases packed at build time.
 - Lights and shadows for sprites.
 - A renderer module made for 2D games alone.

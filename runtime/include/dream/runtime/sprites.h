@@ -114,6 +114,18 @@ struct TileAnimation {
     std::vector<std::int32_t> frames;
     // Frames per second.
     float fps = 4.0f;
+    // Each frame's own length in seconds, in place of `fps`, as map editors give them. Empty for
+    // equal frames.
+    std::vector<float> durations;
+};
+
+// How a tile map's cell is mirrored, in TileMap::flips.
+enum TileFlip : std::uint8_t {
+    k_tile_flip_x = 1,
+    k_tile_flip_y = 2,
+    // Mirrored across the diagonal from the top left to the bottom right, before the other two: with
+    // them, the quarter turns.
+    k_tile_flip_diagonal = 4,
 };
 
 // A grid of tiles from a tileset: a texture cut into equal tiles, numbered from the top left, row
@@ -123,6 +135,9 @@ struct TileMap {
     // Each tile's size in the tileset, in pixels.
     std::uint32_t tile_width = 16;
     std::uint32_t tile_height = 16;
+    // Pixels around the tileset's edge, and between its tiles.
+    std::uint32_t tile_margin = 0;
+    std::uint32_t tile_spacing = 0;
     // Each tile's size in the world.
     core::Vec2 tile_size{1.0f, 1.0f};
     // The map's size in tiles.
@@ -143,6 +158,8 @@ struct TileMap {
     // Seconds into the animations, which update_sprite_animators moves on by `animation_speed`.
     double animation_time = 0.0;
     float animation_speed = 1.0f;
+    // Each cell's TileFlip bits, in the order of `tiles`, or empty for none.
+    std::vector<std::uint8_t> flips;
 
     // The tile at a cell, counted from the top left, or -1 outside the map.
     [[nodiscard]] std::int32_t tile(std::uint32_t column, std::uint32_t row) const noexcept;
@@ -168,7 +185,8 @@ struct TileMap {
 void update_sprite_animators(World& world, double seconds);
 
 // Adds static 2D physics boxes over the tile map's solid tiles, with neighbors merged into larger
-// boxes, as entities of their own, not children of the map, which Physics2D picks up. Call it after
+// boxes, as entities of their own, not children of the map, which Physics2D picks up. Given an
+// entity with a map file (TileMapFile), it does so for each of the file's tile layers. Call it after
 // World::update_transforms, once the map is placed, and again after changing it, having removed
 // the entities it returned before.
 [[nodiscard]] core::Result<std::vector<Entity>> make_tile_colliders(World& world, Entity map);

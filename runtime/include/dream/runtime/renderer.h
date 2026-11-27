@@ -10,6 +10,7 @@
 #include "dream/runtime/debug_lines.h"
 #include "dream/runtime/model.h"
 #include "dream/runtime/world.h"
+#include "dream/tile_map_format/tile_map_format.h"
 #include "dream/ui/draw_list.h"
 
 #include <array>
@@ -161,7 +162,9 @@ struct RendererShaders {};
 //
 // Entities with a ParticleEmitter, which runtime::Particles moves on, are drawn too (ADR 0038), and
 // 2D sprites and tile maps through a Camera2D, over the 3D scene (ADR 0039, dream/runtime/sprites.h):
-// initialize also adds the components "camera_2d", "sprite", "sprite_animator" and "tile_map". An
+// initialize also adds the components "camera_2d", "sprite", "sprite_animator", "tile_map" and
+// "parallax" (ADR 0049), and "tile_map_file", for maps from map editors read by the game's
+// tile_map_format module (ADR 0050, dream/runtime/tile_map_files.h). An
 // "environment" (dream/runtime/environment.h) lights the scene from an HDR image of its
 // surroundings (ADR 0040).
 //
@@ -281,6 +284,8 @@ private:
     std::unique_ptr<tangent_generator::TangentGenerator> m_tangents;
     // Null when the project lists no texture decoder for the platform.
     std::unique_ptr<texture_decoder::TextureDecoder> m_texture_decoder;
+    // Reads map files from map editors, when the game lists a tile_map_format module (ADR 0050).
+    std::unique_ptr<tile_map_format::TileMapFormat> m_tile_map_format;
     // After the backend, so the asset that reloads its shaders goes first.
     AssetRef<RendererShaders> m_shaders;
     std::unique_ptr<UiTextures> m_ui_textures;

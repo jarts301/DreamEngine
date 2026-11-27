@@ -19,7 +19,8 @@ Each compares a picture with a reference on all five PC graphics backends, and o
 | [physics](physics) | Dominoes, a Newton's cradle on distance joints, a hinged gate, bouncy balls in a sensor, a laser of ray casts, and balls thrown where you click | [ADR 0011](../docs/adr/0011-physics.md) |
 | [input](input) | A ball moved by keys, sticks, triggers or a finger, and a panel showing each action's state and strength | [Input](../docs/guides/input.md) |
 | [ui](ui) | A title menu, settings with sliders and switches, and a HUD with health, score and timer, in RML and RCSS | [ADR 0012](../docs/adr/0012-audio-and-ui.md) |
-| [platformer](platformer) | A 2D platformer: a tile map level with collisions, an animated pixel-art hero moved by Box2D, coins and a following camera, on keyboard, gamepad and touch | [2D games](../docs/guides/sprites.md) |
+| [platformer](platformer) | A 2D platformer: a tile map level with collisions, parallax hills and clouds, animated tiles, a 9-slice sign, an animated pixel-art hero moved by Box2D, coins and a following camera, on keyboard, gamepad and touch | [2D games](../docs/guides/sprites.md) |
+| [top_down](top_down) | A top-down 2D garden made in the Tiled map editor: its layers, animated water, solid tiles and objects read by the `tiled` module, and a gardener who walks among trees sorted by height | [2D games](../docs/guides/sprites.md) |
 
 Games and checks that use many features together:
 
@@ -65,5 +66,6 @@ only the 3D samples share, the sky, the smoke and the feature samples' spheres a
 [tools/make_particle_textures.py](../tools/make_particle_textures.py) and
 [tools/make_feature_models.py](../tools/make_feature_models.py), which also makes the forest's trees
 and rocks; the platformer's pixel art by
-[tools/make_sprite_art.py](../tools/make_sprite_art.py). The fonts are Lato, under the
+[tools/make_sprite_art.py](../tools/make_sprite_art.py), and the top-down garden's art and first map by
+[tools/make_top_down_art.py](../tools/make_top_down_art.py). The fonts are Lato, under the
 [SIL Open Font License](assets/fonts/LICENSE-Lato.txt).

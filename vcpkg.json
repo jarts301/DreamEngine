@@ -51,7 +51,8 @@
     "tomlplusplus",
     "volk",
     "vulkan-headers",
-    "vulkan-memory-allocator"
+    "vulkan-memory-allocator",
+    "yyjson"
   ],
   "features": {
     "vulkan-validation": {

@@ -1,0 +1,51 @@
+[app]
+organization = "DreamEngine"
+name = "DreamTopDown"
+title = "Dream Top-Down"
+width = 1280
+height = 720
+
+[input.actions]
+move_left = ["key:a", "key:left", "gamepad:left_stick_left", "gamepad:dpad_left"]
+move_right = ["key:d", "key:right", "gamepad:left_stick_right", "gamepad:dpad_right"]
+move_up = ["key:w", "key:up", "gamepad:left_stick_up", "gamepad:dpad_up"]
+move_down = ["key:s", "key:down", "gamepad:left_stick_down", "gamepad:dpad_down"]
+touch = ["touch", "mouse:left"]
+quit = ["key:escape", "gamepad:back"]
+
+[physics2d]
+gravity = [0.0, 0.0]    # Seen from above: nothing falls.
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
+renderer = ["forward", "null"]
+physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
+tile_map_format = ["tiled", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "opengles", "null"]
+renderer = ["forward", "null"]
+physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
+tile_map_format = ["tiled", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "null"]
+renderer = ["forward", "null"]
+physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
+tile_map_format = ["tiled", "null"]
+
+# What the editor opens (ADR 0046): dream_editor samples/top_down
+[editor]
+scene = "assets:/scenes/garden.toml"
+game = "dream_top_down"
+assets = ["assets", "../assets"]
+build = "../../build/windows-debug"

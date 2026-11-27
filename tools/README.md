@@ -13,4 +13,6 @@ are not part of a shipped game.
 | `test_check_layers.py` | Tests for `check_layers.py`. |
 | `make_sample_models.py` | Generates the models in `samples/assets`, which the samples share. |
 | `make_sample_sounds.py` | Generates the sounds in `samples/assets`. |
+| `make_sprite_art.py` | Draws the platformer's pixel art. |
+| `make_top_down_art.py` | Draws the top-down sample's pixel art, and writes its first Tiled map and tileset. |
 | `make_feature_models.py` | Generates the feature samples' models: spheres and lamps in `samples/assets_3d`, and the forest's trees and rocks. |

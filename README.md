@@ -262,9 +262,20 @@ rows = ["....##....", "##########"]
 "#" = 0
 ```
 
+Backgrounds move slower than the level with `parallax` and repeat across the view; a sprite's
+`slice` stretches panels without stretching their corners; tiles animate; and a camera's
+`y_sort_layers` draw top-down games by height (ADR 0049). Levels can come from the
+[Tiled](https://www.mapeditor.org/) map editor, read by the `tiled` module (ADR 0050):
+
+```toml
+[entities.garden.tile_map_file]
+file = "assets:/maps/garden.tmj"
+```
+
 `samples/platformer` is a small 2D platformer with a tile map level, an animated hero, coins and
-touch controls. [2D games](docs/guides/sprites.md) explains sprites, animation, tile maps and making
-the art, and [ADR 0039](docs/adr/0039-sprites-and-tile-maps.md) records the design.
+touch controls, and `samples/top_down` a garden made in Tiled. [2D games](docs/guides/sprites.md)
+explains sprites, animation, tile maps, Tiled maps and making the art, and
+[ADR 0039](docs/adr/0039-sprites-and-tile-maps.md) records the design.
 
 ## Animation
 
@@ -489,6 +500,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 | `platform` | `sdl3`, `null` | all | all | |
 | `profiler` | `timeline`, `null` | all | all | `timeline` saves a trace to open in Perfetto; see [Profiling](#profiling). |
 | `asset_source` | `bundles`, `files` | all | all | Where assets are read from: `bundles` ships a project's bundles apart and reads them while mounted. Optional; without it the platform reads them. See [Asset database and bundles](#asset-database-and-bundles). |
+| `tile_map_format` | `tiled`, `null` | all | all | Reads maps made in a map editor: `tiled` reads Tiled's JSON maps and tilesets. Optional; see [2D games](docs/guides/sprites.md). |
 | `crash_upload` | `sentry`, `backtrace`, `null` | all | all | Uploads saved crash reports in the background at the next start; Windows and Android. Optional; see [crash reports](docs/reports/crash-reports.md). |
 
 ```toml

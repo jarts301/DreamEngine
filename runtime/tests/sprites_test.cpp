@@ -345,6 +345,80 @@ TEST_CASE("Animated tiles show their frames in turn, as the map's animation time
     CHECK(shown().first == Approx(4.0f).epsilon(0.01));
 }
 
+TEST_CASE("Tile maps mirror and turn their cells, and read tilesets with margins and spacing") {
+    World world;
+    add_camera(world, Vec2{}, 10.0f);
+    // A 12 x 12 tileset of 4 x 4 tiles, 1 pixel in from its edge and 2 apart: 2 tiles across.
+    FakeDeviceState device_state;
+    FakeDevice device(device_state);
+    const AssetRef<TextureAsset> tileset(std::make_shared<const TextureAsset>(TextureAsset{
+        .texture = GpuTexture(device, rhi::TextureHandle{}), .width = 12, .height = 12}));
+    const Entity level = world.create_entity();
+    TileMap map{.tileset = tileset,
+                .tile_width = 4,
+                .tile_height = 4,
+                .tile_margin = 1,
+                .tile_spacing = 2,
+                .columns = 4,
+                .rows = 1};
+    map.tiles = {3, 3, 3, 3};
+    map.flips = {0, k_tile_flip_x, k_tile_flip_diagonal,
+                 static_cast<std::uint8_t>(k_tile_flip_diagonal | k_tile_flip_x)};
+    world.registry().emplace<TileMap>(level, map);
+    world.update_transforms();
+
+    std::vector<renderer::SpriteQuad> quads;
+    std::vector<renderer::SpriteBatch> batches;
+    SpriteScratch scratch;
+    gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
+    REQUIRE(quads.size() == 4);
+    // Tile 3: the second across, second down, from (7, 7) to (11, 11) in pixels.
+    CHECK(quads[0].uv.x == Approx(7.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[0].uv.y == Approx(7.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[0].uv.z == Approx(11.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[0].rotation == Approx(0.0f));
+    // Mirrored across: left and right swap.
+    CHECK(quads[1].uv.x == Approx(11.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[1].uv.z == Approx(7.0f / 12.0f).epsilon(0.002));
+    // Across the diagonal: turned a quarter around its middle, and mirrored across.
+    CHECK(quads[2].rotation == Approx(1.5707963f));
+    CHECK(quads[2].pivot.x == Approx(0.5f));
+    CHECK(quads[2].position.x == Approx(2.5f));
+    CHECK(quads[2].position.y == Approx(0.5f));
+    CHECK(quads[2].uv.x == Approx(11.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[2].uv.y == Approx(7.0f / 12.0f).epsilon(0.002));
+    // And mirrored across as well: a quarter turn to the right, which mirrors it up and down.
+    CHECK(quads[3].uv.x == Approx(11.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[3].uv.y == Approx(11.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[3].uv.w == Approx(7.0f / 12.0f).epsilon(0.002));
+}
+
+TEST_CASE("Animated tiles can give each frame a length of its own") {
+    World world;
+    add_camera(world, Vec2{}, 10.0f);
+    const Entity torch = world.create_entity();
+    TileMap map{.columns = 1, .rows = 1};
+    map.tiles = {2};
+    map.animations.push_back(
+        TileAnimation{.tile = 2, .frames = {2, 3}, .fps = 1.0f, .durations = {0.1f, 0.5f}});
+    world.registry().emplace<TileMap>(torch, map);
+    world.update_transforms();
+    const auto shown = [&] {
+        std::vector<renderer::SpriteQuad> quads;
+        std::vector<renderer::SpriteBatch> batches;
+        SpriteScratch scratch;
+        gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
+        REQUIRE(quads.size() == 1);
+        return quads[0].uv.y / 16.0f;
+    };
+    CHECK(shown() == Approx(2.0f).epsilon(0.01));
+    update_sprite_animators(world, 0.2);
+    CHECK(shown() == Approx(3.0f).epsilon(0.01));
+    update_sprite_animators(world, 0.45);
+    // 0.65 s wraps to 0.05 s.
+    CHECK(shown() == Approx(2.0f).epsilon(0.01));
+}
+
 TEST_CASE("Sprite animators step through their clip's frames") {
     World world;
     const Entity hero = world.create_entity();
