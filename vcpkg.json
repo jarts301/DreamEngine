@@ -30,6 +30,11 @@
       "platform": "android"
     },
     {
+      "name": "dream-atlas-cook",
+      "host": true,
+      "platform": "android"
+    },
+    {
       "name": "opengl-registry",
       "platform": "windows"
     },

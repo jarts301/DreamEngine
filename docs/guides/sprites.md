@@ -3,9 +3,10 @@
 This guide explains how to make a 2D game with DreamEngine: the 2D camera, sprites and sprite sheets,
 animating them, building levels from tile maps with collisions and animated tiles, parallax
 backgrounds, 9-slice panels, sorting by height for top-down games, levels made in the Tiled map
-editor, and making the art. The design is in [ADR 0039](../adr/0039-sprites-and-tile-maps.md),
-[ADR 0049](../adr/0049-parallax-9-slice-y-sorting-and-animated-tiles.md) and
-[ADR 0050](../adr/0050-tiled-maps.md). [samples/platformer](../../samples/platformer) and
+editor, atlases packed at build time, and making the art. The design is in
+[ADR 0039](../adr/0039-sprites-and-tile-maps.md),
+[ADR 0049](../adr/0049-parallax-9-slice-y-sorting-and-animated-tiles.md),
+[ADR 0050](../adr/0050-tiled-maps.md) and [ADR 0052](../adr/0052-sprite-atlases.md). [samples/platformer](../../samples/platformer) and
 [samples/top_down](../../samples/top_down) are complete small games to start from.
 
 ## In short
@@ -22,6 +23,8 @@ editor, and making the art. The design is in [ADR 0039](../adr/0039-sprites-and-
 - A camera's **`y_sort_layers`** draw what stands lower over what stands higher, for top-down games.
 - A **`tile_map_file`** loads a level made in [Tiled](https://www.mapeditor.org/): its layers,
   animated and solid tiles, and objects.
+- An **atlas** packs a folder of images into one at build time, and sprites name its regions, so
+  they are drawn together.
 - Sprites are drawn over any 3D scene and under the interface, by layer and then order.
 
 ## Setting up
@@ -406,6 +409,51 @@ from their `MapObject`, as the top-down sample does for tree trunks.
 
 The log says what to change when a map can't be read, such as an isometric map or a compressed layer.
 
+## Atlases
+
+Each texture a frame draws from breaks the sprites into another draw. An atlas packs a folder of
+images into one image when the game builds, so the sprites cut from it are drawn together. Name the
+folder in `dream.toml`:
+
+```toml
+[atlases.things]
+folder = "assets:/sprites/things"   # Every PNG in it, and in folders inside it.
+padding = 1                          # Optional: pixels repeating each image's edge, 0 to 16.
+max_size = 2048                      # Optional: the largest side, in pixels.
+```
+
+The build makes `assets:/atlases/things.atlas` and its image, and leaves the folder's own images
+out of the game. A sprite names the atlas and a region, the image's path in the folder without
+".png":
+
+```toml
+[entities.hero.sprite]
+atlas = "assets:/atlases/things.atlas"
+region = "hero"            # assets:/sprites/things/hero.png; "trees/oak" for one in a folder.
+columns = 4                # A region can be a sprite sheet: its frames are cut from it.
+rows = 2
+```
+
+Everything else about the sprite works as with a `texture`: frames and clips, size, pivot, slices,
+flips. In code, load the atlas and call `use_atlas_region`:
+
+```cpp
+auto atlas = app.assets().load<runtime::SpriteAtlasAsset>("assets:/atlases/things.atlas");
+runtime::SpriteRenderer coin;
+if (auto used = runtime::use_atlas_region(coin, atlas.value(), "coin"); !used.has_value()) {
+    // The message lists some of the atlas's regions.
+}
+```
+
+`SpriteRenderer::region` is the part of the texture drawn, in pixels, and works without an atlas
+too, for any texture. The atlas is the smallest power-of-two size that holds every image, each with
+`padding` pixels repeating its edge around it, so `"smooth"` sprites don't take color from their
+neighbors. A name keeps to letters, digits, `_`, `-` and `/`. Tile maps keep their own tileset.
+
+The editor reads assets from the project's folders, not from the build, so add the game's generated
+assets folder to `[editor] assets`, as `samples/platformer/dream.toml` does, and build the game once
+before opening it.
+
 ## Making the art
 
 - **Pixel art:** draw at the size it is meant to be seen at, such as 16 x 16 tiles and characters,
@@ -414,6 +462,9 @@ The log says what to change when a map can't be read, such as an isometric map o
   it, is right.
 - **Sprite sheets:** every frame the same size, in a grid, with the character in the same place in
   each frame so it doesn't jitter. Leave the grid without gaps between frames.
+- **Atlases:** keep each image, or sheet, as a file of its own in the packed folder, and let the
+  build pack them. Group what is drawn together, such as a level's characters and props, in one
+  atlas.
 - **Tilesets:** tiles side by side without gaps. With `"pixel"`, neighboring tiles never bleed into
   each other. With `"smooth"` they can at the seams: leave a pixel or two of repeated border around
   each tile, or use `"pixel"`.
@@ -431,7 +482,7 @@ The log says what to change when a map can't be read, such as an isometric map o
 
 - Sprites with the same texture next to each other in drawing order are drawn together, in one draw
   for up to 8,192. Many textures interleaved by layer and order mean many draws: put a character's
-  frames in one sheet and a level's tiles in one tileset.
+  frames in one sheet, a level's tiles in one tileset, and its characters and props in one atlas.
 - Tile maps only give the tiles in view, so a large level costs what is on screen.
 - On phones, large overlapping transparent sprites, such as full-screen backgrounds stacked three
   deep, cost the most: every covered pixel is drawn once per sprite. Parallax layers are such
@@ -463,13 +514,17 @@ The log says what to change when a map can't be read, such as an isometric map o
 | "the game reads no map files" | No `tile_map_format` module listed for the platform | List `tile_map_format = ["tiled", "null"]` |
 | A Tiled map fails to load | A format the reader doesn't take; the message says which | Save as JSON, with CSV layers, not infinite |
 | Walking through hedges from a Tiled map | No solid tiles, or no `make_tile_colliders` | Give tiles or the layer a `solid` property, and call it on the map's entity |
+| "atlas ... packs assets:/..., which none of ... asset folders has" | The atlas's `folder` is misspelled, or not under the game's assets | Fix `folder`, from the assets' root |
+| A sprite from an atlas fails to load: "no region" | The region isn't the image's name in the folder; the message lists some | Use the file's name without ".png", with its folders |
+| "assets:/sprites/things/hero.png" is missing | A sprite names an image the build packed into an atlas | Use `atlas` and `region` |
+| The editor can't find an atlas | The atlas exists only in the build | Build the game, and add its generated assets folder to `[editor] assets` |
 | Tiles from a Tiled tileset show the wrong part of the image | The tileset has a margin or spacing in Tiled that doesn't match the image | Set them in Tiled's tileset properties to match |
 
 ## Limits
 
 Each of these is a later step on the roadmap:
 
-- Texture atlases packed at build time.
+- Tile maps and Tiled tilesets from atlases; trimming images' empty edges when packing.
 - Lights and shadows for sprites.
 - A renderer module made for 2D games alone.
 

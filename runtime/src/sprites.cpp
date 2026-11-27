@@ -1,5 +1,6 @@
 #include "dream/runtime/sprites.h"
 
+#include "dream/core/config.h"
 #include "dream/core/log.h"
 #include "dream/core/math/quaternion.h"
 #include "dream/core/profile.h"
@@ -110,16 +111,97 @@ core::Result<void> read_camera_2d(ComponentContext& context) {
     return {};
 }
 
+// A .atlas file, as the atlas cook tool writes it, with its image loaded from beside it.
+core::Result<SpriteAtlasAsset> load_atlas(AssetLoadContext& context) {
+    const auto fail = [&](std::string_view message) {
+        return core::Error{core::ErrorCode::InvalidArgument,
+                           std::format("Atlas '{}': {}", context.path, message)};
+    };
+    const core::Result<std::vector<std::byte>> bytes = context.files.read(context.path);
+    if (!bytes.has_value()) {
+        return bytes.error();
+    }
+    const core::Result<core::Config> config = core::Config::parse(std::string_view(
+        reinterpret_cast<const char*>(bytes.value().data()), bytes.value().size()));
+    if (!config.has_value()) {
+        return fail(config.error().message);
+    }
+    const std::optional<std::string_view> image = config.value().get_string("image");
+    if (!image.has_value()) {
+        return fail("it names no image");
+    }
+    const core::Result<std::string> image_path = path_beside(context.path, *image);
+    if (!image_path.has_value()) {
+        return fail(image_path.error().message);
+    }
+    core::Result<AssetRef<TextureAsset>> texture =
+        context.assets.load<TextureAsset>(image_path.value());
+    if (!texture.has_value()) {
+        return fail(texture.error().message);
+    }
+    SpriteAtlasAsset atlas;
+    atlas.texture = std::move(texture).value();
+    const auto width = static_cast<float>(atlas.texture->width);
+    const auto height = static_cast<float>(atlas.texture->height);
+    for (const std::string_view name : config.value().keys_in("regions")) {
+        const std::optional<std::span<const double>> numbers =
+            config.value().get_float_list(std::format("regions.{}", name));
+        if (!numbers.has_value() || numbers->size() != 4) {
+            return fail(std::format("region '{}' must be [x, y, width, height]", name));
+        }
+        const Vec4 region{static_cast<float>((*numbers)[0]), static_cast<float>((*numbers)[1]),
+                          static_cast<float>((*numbers)[2]), static_cast<float>((*numbers)[3])};
+        if (!(region.x >= 0.0f && region.y >= 0.0f && region.z > 0.0f && region.w > 0.0f &&
+              region.x + region.z <= width && region.y + region.w <= height)) {
+            return fail(std::format("region '{}' isn't inside its {} x {} image", name,
+                                    atlas.texture->width, atlas.texture->height));
+        }
+        atlas.names.emplace_back(name);
+        atlas.regions.push_back(region);
+    }
+    if (atlas.names.empty()) {
+        return fail("it has no regions");
+    }
+    return atlas;
+}
+
 core::Result<void> read_sprite(ComponentContext& context) {
     if (auto known = context.data.check_keys(
-            {"texture", "columns", "rows", "frame", "size", "pixels_per_unit", "pivot", "slice",
-             "color", "alpha", "flip_x", "flip_y", "layer", "order", "filter", "visible"});
+            {"texture", "atlas", "region", "columns", "rows", "frame", "size", "pixels_per_unit",
+             "pivot", "slice", "color", "alpha", "flip_x", "flip_y", "layer", "order", "filter",
+             "visible"});
         !known.has_value()) {
         return known;
     }
     SpriteRenderer sprite;
     Reader reader(context.data);
     reader.texture("texture", context.assets, sprite.texture);
+    // Or a region of an atlas the build packed, which brings its texture.
+    if (context.data.has("atlas") || context.data.has("region")) {
+        std::string atlas_path;
+        std::string region;
+        reader.text("atlas", atlas_path);
+        reader.text("region", region);
+        if (!reader.failed()) {
+            if (atlas_path.empty() || region.empty()) {
+                reader.fail("A sprite from an atlas needs both `atlas` and `region`");
+            } else if (context.data.has("texture")) {
+                reader.fail("A sprite has a `texture` or an `atlas`, not both");
+            } else {
+                AssetRef<SpriteAtlasAsset> atlas;
+                reader.take([&]() -> core::Result<AssetRef<SpriteAtlasAsset>> {
+                    return context.assets.load<SpriteAtlasAsset>(atlas_path);
+                }, atlas);
+                bool used = false;
+                reader.take([&]() -> core::Result<bool> {
+                    if (auto use = use_atlas_region(sprite, atlas, region); !use.has_value()) {
+                        return use.error();
+                    }
+                    return true;
+                }, used);
+            }
+        }
+    }
     reader.whole("columns", sprite.columns);
     reader.whole("rows", sprite.rows);
     reader.whole("frame", sprite.frame);
@@ -618,6 +700,43 @@ core::Result<std::vector<Entity>> make_tile_colliders(World& world, Entity map_e
     return made;
 }
 
+std::optional<Vec4> SpriteAtlasAsset::region(std::string_view name) const {
+    for (std::size_t index = 0; index < names.size() && index < regions.size(); ++index) {
+        if (names[index] == name) {
+            return regions[index];
+        }
+    }
+    return std::nullopt;
+}
+
+core::Result<void> use_atlas_region(SpriteRenderer& sprite,
+                                    const AssetRef<SpriteAtlasAsset>& atlas,
+                                    std::string_view name) {
+    if (!atlas) {
+        return core::Error{core::ErrorCode::InvalidArgument, "No atlas to take a region from"};
+    }
+    const std::optional<Vec4> region = atlas->region(name);
+    if (!region.has_value()) {
+        // A few of its names, to spot a misspelling.
+        std::string some;
+        for (std::size_t index = 0; index < atlas->names.size() && index < 8; ++index) {
+            some += std::format("{}\"{}\"", index == 0 ? "" : ", ", atlas->names[index]);
+        }
+        if (atlas->names.size() > 8) {
+            some += ", ...";
+        }
+        return core::Error{core::ErrorCode::NotFound,
+                           std::format("The atlas has no region \"{}\"; it has {}", name, some)};
+    }
+    sprite.texture = atlas->texture;
+    sprite.region = *region;
+    return {};
+}
+
+void register_sprite_atlases(AssetManager& assets) {
+    assets.register_loader<SpriteAtlasAsset>(&load_atlas);
+}
+
 void register_sprite_components(SceneLoader& scenes) {
     using core::FieldInfo;
     using core::FieldKind;
@@ -641,6 +760,14 @@ void register_sprite_components(SceneLoader& scenes) {
     scenes.register_component(
         "sprite", &read_sprite,
         {FieldInfo{.name = "texture", .kind = FieldKind::Asset, .fallback = std::string()},
+         FieldInfo{.name = "atlas",
+                   .kind = FieldKind::Asset,
+                   .fallback = std::string(),
+                   .help = "An atlas the build packed, such as assets:/atlases/things.atlas"},
+         FieldInfo{.name = "region",
+                   .kind = FieldKind::Text,
+                   .fallback = std::string(),
+                   .help = "The atlas's region: its image's name in the packed folder"},
          FieldInfo{.name = "columns", .kind = FieldKind::Integer, .fallback = std::int64_t{1}},
          FieldInfo{.name = "rows", .kind = FieldKind::Integer, .fallback = std::int64_t{1}},
          FieldInfo{.name = "frame", .kind = FieldKind::Integer, .fallback = std::int64_t{0}},
@@ -944,19 +1071,31 @@ void gather_sprites(const World& world, const Mat4& view, std::vector<renderer::
                 sprite.texture ? Vec2{static_cast<float>(std::max(sprite.texture->width, 1u)),
                                       static_cast<float>(std::max(sprite.texture->height, 1u))}
                                : Vec2{1.0f, 1.0f};
+            // The part of the texture drawn, in its pixels: a region, such as an atlas's, or all.
+            const bool in_region = sprite.region.z > 0.0f && sprite.region.w > 0.0f;
+            const Vec4 area = in_region ? sprite.region : Vec4{0.0f, 0.0f, texture_size.x,
+                                                               texture_size.y};
+            const Vec2 frame_pixels{area.z / static_cast<float>(columns),
+                                    area.w / static_cast<float>(rows)};
             Vec2 size = sprite.size;
             if (size.x <= 0.0f || size.y <= 0.0f) {
-                size = Vec2{texture_size.x / static_cast<float>(columns),
-                            texture_size.y / static_cast<float>(rows)} /
-                       sprite.pixels_per_unit;
+                size = frame_pixels / sprite.pixels_per_unit;
             }
             const Vec2 drawn{size.x * where.scale.x, size.y * where.scale.y};
             const std::uint32_t column = sprite.frame % columns;
             const std::uint32_t row = (sprite.frame / columns) % rows;
-            const Vec4 frame_uv{static_cast<float>(column) / static_cast<float>(columns),
-                                static_cast<float>(row) / static_cast<float>(rows),
-                                static_cast<float>(column + 1) / static_cast<float>(columns),
-                                static_cast<float>(row + 1) / static_cast<float>(rows)};
+            const Vec4 frame_uv =
+                in_region
+                    ? Vec4{(area.x + static_cast<float>(column) * frame_pixels.x) / texture_size.x,
+                           (area.y + static_cast<float>(row) * frame_pixels.y) / texture_size.y,
+                           (area.x + static_cast<float>(column + 1) * frame_pixels.x) /
+                               texture_size.x,
+                           (area.y + static_cast<float>(row + 1) * frame_pixels.y) /
+                               texture_size.y}
+                    : Vec4{static_cast<float>(column) / static_cast<float>(columns),
+                           static_cast<float>(row) / static_cast<float>(rows),
+                           static_cast<float>(column + 1) / static_cast<float>(columns),
+                           static_cast<float>(row + 1) / static_cast<float>(rows)};
             Vec4 uv = frame_uv;
             if (sprite.flip_x) {
                 std::swap(uv.x, uv.z);

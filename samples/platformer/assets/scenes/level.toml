@@ -98,7 +98,8 @@ position = [11.0, 2.0, 0.0]
 
 # A 16-pixel board whose 4-pixel edges keep their size as it stretches to 2.5 by 1.25.
 [entities.sign.sprite]
-texture = "assets:/sprites/sign.png"
+atlas = "assets:/atlases/things.atlas"
+region = "sign"
 size = [2.5, 1.25]
 pivot = [0.5, 0.0]
 slice = 4
@@ -107,7 +108,8 @@ slice = 4
 position = [3.5, 2.45, 0.0]
 
 [entities.hero.sprite]
-texture = "assets:/sprites/hero.png"
+atlas = "assets:/atlases/things.atlas"
+region = "hero"
 columns = 4
 rows = 2
 pivot = [0.5, 0.45]
@@ -141,7 +143,8 @@ friction = 0.0
 position = [8.5, 2.6, 0.0]
 
 [entities.coin_0.sprite]
-texture = "assets:/sprites/coin.png"
+atlas = "assets:/atlases/things.atlas"
+region = "coin"
 columns = 4
 
 [entities.coin_0.sprite_animator]
@@ -158,7 +161,8 @@ fps = 8.0
 position = [13.5, 6.6, 0.0]
 
 [entities.coin_1.sprite]
-texture = "assets:/sprites/coin.png"
+atlas = "assets:/atlases/things.atlas"
+region = "coin"
 columns = 4
 
 [entities.coin_1.sprite_animator]
@@ -175,7 +179,8 @@ fps = 8.0
 position = [21.5, 8.6, 0.0]
 
 [entities.coin_2.sprite]
-texture = "assets:/sprites/coin.png"
+atlas = "assets:/atlases/things.atlas"
+region = "coin"
 columns = 4
 
 [entities.coin_2.sprite_animator]
@@ -192,7 +197,8 @@ fps = 8.0
 position = [27.5, 7.6, 0.0]
 
 [entities.coin_3.sprite]
-texture = "assets:/sprites/coin.png"
+atlas = "assets:/atlases/things.atlas"
+region = "coin"
 columns = 4
 
 [entities.coin_3.sprite_animator]
@@ -209,7 +215,8 @@ fps = 8.0
 position = [37.5, 3.6, 0.0]
 
 [entities.coin_4.sprite]
-texture = "assets:/sprites/coin.png"
+atlas = "assets:/atlases/things.atlas"
+region = "coin"
 columns = 4
 
 [entities.coin_4.sprite_animator]
@@ -226,7 +233,8 @@ fps = 8.0
 position = [43.5, 9.6, 0.0]
 
 [entities.coin_5.sprite]
-texture = "assets:/sprites/coin.png"
+atlas = "assets:/atlases/things.atlas"
+region = "coin"
 columns = 4
 
 [entities.coin_5.sprite_animator]

@@ -56,6 +56,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0049](0049-parallax-9-slice-y-sorting-and-animated-tiles.md) | Parallax backgrounds that repeat, 9-slice sprites, layers sorted by height for top-down games, and animated tiles, as settings of the 2D components |
 | [0050](0050-tiled-maps.md) | Maps from the Tiled map editor through a `tile_map_format` interface: `tiled`, reading JSON with yyjson, and `null`; layers, tilesets, animations, solid tiles and objects added to the 2D world |
 | [0051](0051-feature-samples.md) | A sample for each feature that can be seen, each a scene and a short game with its picture checked on every backend from one template; `module_demo` and the `greeter` interface removed |
+| [0052](0052-sprite-atlases.md) | Sprite atlases packed at build time by `dream_atlas_cook` from folders named in `[atlases]`, and sprites drawing a region of their texture, named with `atlas` and `region` |
 
 ## Template
 

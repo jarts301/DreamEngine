@@ -132,7 +132,7 @@ saved progress, music and settings, built this way and played on PC and phones.
 | Area | Available now |
 |---|---|
 | Platforms | Windows, and Android phones (arm64, Android 10 and up). Linux builds but is untested. |
-| Graphics | Five graphics APIs; the same picture on each. glTF models, static or skinned and animated, with metallic-roughness PBR materials, normal, occlusion and emissive maps, and opaque, cut-out, blended and double-sided surfaces; one directional light with soft cascaded shadows, and point and spot lights, up to 256 with `forward_plus`; lighting from an HDR environment, which shiny surfaces reflect; HDR with PBR Neutral tone mapping and bloom; frustum culling, instancing and levels of detail, made at build time; particles; 2D sprites, sprite-sheet animation and tile maps, with crisp pixel art, parallax backgrounds, 9-slice sprites, sorting by height for top-down games, animated tiles, and levels from the Tiled map editor; debug lines. |
+| Graphics | Five graphics APIs; the same picture on each. glTF models, static or skinned and animated, with metallic-roughness PBR materials, normal, occlusion and emissive maps, and opaque, cut-out, blended and double-sided surfaces; one directional light with soft cascaded shadows, and point and spot lights, up to 256 with `forward_plus`; lighting from an HDR environment, which shiny surfaces reflect; HDR with PBR Neutral tone mapping and bloom; frustum culling, instancing and levels of detail, made at build time; particles; 2D sprites, sprite-sheet animation and tile maps, with crisp pixel art, parallax backgrounds, 9-slice sprites, sorting by height for top-down games, animated tiles, levels from the Tiled map editor, and atlases packed at build time; debug lines. |
 | Textures | PNG cooked at build time by a cooker chosen per platform: KTX2 with UASTC, or the smaller ETC1S, sent to the GPU as BC7 on PC and ASTC on phones; or PNG kept as it is, as for pixel art. |
 | Physics | 3D (Jolt or the engine's own impulse solver): bodies, joints, triggers, ray casts. 2D (Box2D or Chipmunk). |
 | Audio | WAV, MP3 and FLAC; streamed music; buses with volumes; sounds placed in 3D. |
@@ -153,8 +153,8 @@ Not yet possible without writing engine code first:
 - **Rendering:** reflection probes for interiors (one environment lights the whole scene),
   shadows from point and spot lights, visual effects beyond particles, very
   large worlds (culling, instancing and LODs exist, but no streaming or spatial structures).
-- **2D:** lit sprites, and atlases packed at build time (sprites, sprite sheets, tile maps with
-  collisions, parallax, 9-slice sprites, animated tiles and Tiled maps exist).
+- **2D:** lit sprites (sprites, sprite sheets, atlases, tile maps with collisions, parallax,
+  9-slice sprites, animated tiles and Tiled maps exist).
 - **Input:** menus driven by a gamepad (no focus navigation in `ui`), and rebinding while the game runs.
 - **Online:** any online play.
 
@@ -258,7 +258,7 @@ own, whose picture is compared on every backend ([samples/README.md](../samples/
 | Lights | Point and spot lights: 16 with `forward`, 256 with `forward_plus` | ADR 0037 | [Lighting](guides/lighting.md) | `lights` |
 | Environment | Lighting and reflections from HDR images, drawn as the sky; bloom | ADR 0040 | [Environment](guides/environment.md) | `environment` |
 | Effects | Particles on the CPU: fire, smoke, sparks, one-off bursts | ADR 0038 | [Particles](guides/particles.md) | `particles` |
-| 2D | Sprites, sprite-sheet animation, tile maps with collisions, pixel art kept crisp; parallax backgrounds that repeat, 9-slice sprites, sorting by height for top-down games, animated tiles; levels from the Tiled map editor | ADR 0039, 0049, 0050 | [2D games](guides/sprites.md) | `platformer`, `top_down` |
+| 2D | Sprites, sprite-sheet animation, tile maps with collisions, pixel art kept crisp; parallax backgrounds that repeat, 9-slice sprites, sorting by height for top-down games, animated tiles; levels from the Tiled map editor; atlases packed at build time | ADR 0039, 0049, 0050, 0052 | [2D games](guides/sprites.md) | `platformer`, `top_down` |
 | Characters | Skeletal animation with fades between clips, skinned on the GPU | ADR 0036 | [Animation](guides/animation.md) | `animation` |
 | Input | Gamepads, with analog sticks and triggers bound to actions | ADR 0035 | [Input](guides/input.md) | `input` |
 
@@ -266,14 +266,14 @@ own, whose picture is compared on every backend ([samples/README.md](../samples/
 
 | # | Area | What is missing | Builds on |
 |---|---|---|---|
-| 1 | 2D | Atlases packed at build time, a renderer module for 2D alone | ADR 0039, 0049, 0050 |
+| 1 | 2D | A renderer module for 2D alone | ADR 0039, 0049, 0050, 0052 |
 | 2 | Effects | Soft particles, sprite-sheet animation, curves for color and size, trails, effect files shared between scenes; later a `gpu` module, once the graphics interface has compute shaders | ADR 0038 |
 | 3 | Lights | Shadows from spot lights, then from point lights; compute shaders in the graphics interface, to sort lights on the GPU | ADR 0037 |
 | 4 | Characters | Root motion, animation events, joints sent once per frame for crowds, clips built at build time; then inverse kinematics, blend trees and morph targets | ADR 0036 |
 | 5 | Input | Focus navigation in `ui` menus for gamepads, an on-screen aiming cursor for pointer-aimed games such as Toppler, rebinding in a settings menu, a check with a real gamepad on a phone | ADR 0035 |
 | 6 | Materials and environment | Reflection probes for interiors, environments prepared at build time, order-independent transparency, antialiased cut-outs, reading `.gltf` files so Blender's images are cooked, half-precision lighting math for phones (PBR costs 1.4 ms of GPU time per frame on the A52s at full screen) | ADR 0033, 0034, 0040 |
 | 7 | Levels of detail | Hand-made versions, such as glTF's `MSFT_lod`, taking priority over made ones | ADR 0032, 0042 |
-| 8 | Checking | Each rendering feature's pictures on an Adreno, a Mali and an Xclipse phone before it is called done. So far the A52s's Adreno is checked for everything, with Vulkan and OpenGL ES; the A57's Xclipse 550 with Vulkan for the render demo and every feature sample (ADR 0051), but not yet the 2D samples; and no Mali phone yet | All |
+| 8 | Checking | Each rendering feature's pictures on an Adreno, a Mali and an Xclipse phone before it is called done. So far the A52s's Adreno is checked for everything, with Vulkan and OpenGL ES; the A57's Xclipse 550 with Vulkan for the render demo, every feature sample (ADR 0051) and the 2D samples, the platformer drawing from an atlas (ADR 0052); and no Mali phone yet | All |
 
 ### Phase 13: tools for making games
 

@@ -14,6 +14,7 @@
 #   .glb          Each image its model refers to by file, beside it, and its cooked .lods.
 #   .rml, .rcss   The files their href, src and url() name, beside them.
 #   .tmj, .tsj    Tiled maps and tilesets: the images and tilesets they name, beside them.
+#   .atlas        A sprite atlas the build packed: its image, beside it.
 #
 # A PNG the build cooked is needed as its .ktx2, the file the game reads. Paths are relative to the
 # assets folder, with forward slashes.
@@ -146,6 +147,16 @@ foreach(file IN LISTS files)
                     "${reference}")
                 list(APPEND references "${relative_to}${reference}")
             endforeach()
+        endforeach()
+    elseif(lower MATCHES "\\.atlas$")
+        # A sprite atlas the build packed (ADR 0052): its `image = "..."`, beside it.
+        set(kind atlas)
+        _dream_folder("${file}" relative_to)
+        file(STRINGS "${ASSETS}/${file}" lines REGEX "^image[ \t]*=")
+        foreach(line IN LISTS lines)
+            if(line MATCHES "^image[ \t]*=[ \t]*\"([^\"]+)\"")
+                list(APPEND references "${relative_to}${CMAKE_MATCH_1}")
+            endif()
         endforeach()
     elseif(lower MATCHES "\\.(png|ktx2|jpg|jpeg)$")
         set(kind texture)

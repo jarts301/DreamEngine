@@ -3,11 +3,13 @@
 - tiles.png: a 4 x 3 tileset of 16 x 16 tiles: grass, dirt, stone bricks, a wooden platform, a
   bush, a flower, two halves of a cloud, the flower leaning left and right, and two frames of
   water, for animated tiles.
-- hero.png: a 4 x 2 sprite sheet of 16 x 16 frames: two idle frames, four running frames, jumping
+- things/hero.png: a 4 x 2 sprite sheet of 16 x 16 frames: two idle frames, four running frames, jumping
   and falling.
-- coin.png: a 4 x 1 sprite sheet of 16 x 16 frames of a turning coin.
+- things/coin.png: a 4 x 1 sprite sheet of 16 x 16 frames of a turning coin.
 - hills.png: 64 x 32 distant hills that repeat side by side, for a parallax background.
-- sign.png: a 16 x 16 wooden board with 4-pixel edges, stretched as a 9-slice sprite.
+- things/sign.png: a 16 x 16 wooden board with 4-pixel edges, stretched as a 9-slice sprite.
+
+What is in "things" the build packs into one atlas (ADR 0052), as the sample's dream.toml asks.
 
 Run from the repository's root:
 
@@ -286,8 +288,11 @@ def sign() -> Image:
 
 def main() -> None:
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    for name, image in (("tiles.png", tiles()), ("hero.png", hero()), ("coin.png", coin()),
-                        ("hills.png", hills()), ("sign.png", sign())):
+    # The hero, coins and sign go in a folder the build packs into one atlas (ADR 0052).
+    (OUTPUT / "things").mkdir(exist_ok=True)
+    for name, image in (("tiles.png", tiles()), ("things/hero.png", hero()),
+                        ("things/coin.png", coin()), ("hills.png", hills()),
+                        ("things/sign.png", sign())):
         (OUTPUT / name).write_bytes(image.png())
         print(f"Wrote {OUTPUT / name}")
 
