@@ -1,5 +1,6 @@
-# The platformer's level (see docs/guides/sprites.md): a tile map with its colliders, clouds in
-# a tile map behind it, the hero and coins. The map's bottom left corner is at the world's origin,
+# The platformer's level (see docs/guides/sprites.md): a tile map with its colliders and swaying
+# flowers, clouds and distant hills behind it that move slower than the level (parallax), water in
+# its pits, a sign stretched from a 9-slice sprite, the hero and coins. The map's bottom left corner is at the world's origin,
 # one world unit per 16-pixel tile.
 
 [entities.camera.transform]
@@ -11,6 +12,23 @@ min_width = 12.0      # On a phone held upright, still 12 units across.
 
 [entities.sky.transform]
 position = [0.0, 5.0, 0.0]
+
+[entities.hills.transform]
+position = [0.0, 1.5, 0.0]
+
+[entities.hills.sprite]
+texture = "assets:/sprites/hills.png"
+pixels_per_unit = 8.0
+pivot = [0.0, 0.0]
+layer = -2
+
+[entities.hills.parallax]
+factor = [0.3, 1.0]   # A third as far across as the level: far away.
+repeat_x = true
+
+[entities.sky.parallax]
+factor = [0.6, 1.0]
+repeat_x = true
 
 [entities.sky.tile_map]
 tileset = "assets:/sprites/tiles.png"
@@ -52,6 +70,38 @@ B = 2
 P = 3
 b = 4
 f = 5
+
+# Flowers sway: tile 5 shows 5, 8, 5 and 9 in turn.
+[entities.level.tile_map.animations.f]
+frames = [5, 8, 5, 9]
+fps = 3.0
+
+# Water in the pits, in front of the hero.
+[entities.water.tile_map]
+tileset = "assets:/sprites/tiles.png"
+layer = 2
+alpha = 0.85
+rows = [
+    ".................................ww....www......",
+    ".................................ww....www......",
+]
+
+[entities.water.tile_map.legend]
+w = 10
+
+[entities.water.tile_map.animations.w]
+frames = [10, 11]
+fps = 2.0
+
+[entities.sign.transform]
+position = [11.0, 2.0, 0.0]
+
+# A 16-pixel board whose 4-pixel edges keep their size as it stretches to 2.5 by 1.25.
+[entities.sign.sprite]
+texture = "assets:/sprites/sign.png"
+size = [2.5, 1.25]
+pivot = [0.5, 0.0]
+slice = 4
 
 [entities.hero.transform]
 position = [3.5, 2.45, 0.0]

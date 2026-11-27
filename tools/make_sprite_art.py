@@ -1,10 +1,13 @@
 """Writes the platformer sample's pixel art (see docs/guides/sprites.md).
 
-- tiles.png: a 4 x 2 tileset of 16 x 16 tiles: grass, dirt, stone bricks, a wooden platform, a
-  bush, a flower, and two halves of a cloud.
+- tiles.png: a 4 x 3 tileset of 16 x 16 tiles: grass, dirt, stone bricks, a wooden platform, a
+  bush, a flower, two halves of a cloud, the flower leaning left and right, and two frames of
+  water, for animated tiles.
 - hero.png: a 4 x 2 sprite sheet of 16 x 16 frames: two idle frames, four running frames, jumping
   and falling.
 - coin.png: a 4 x 1 sprite sheet of 16 x 16 frames of a turning coin.
+- hills.png: 64 x 32 distant hills that repeat side by side, for a parallax background.
+- sign.png: a 16 x 16 wooden board with 4-pixel edges, stretched as a 9-slice sprite.
 
 Run from the repository's root:
 
@@ -70,8 +73,36 @@ def dirt(img: Image, ox: int, oy: int, top: int = 0):
             img.rect(ox + px, oy + py, 2, 1, DIRT[2])
 
 
+def flower(img: Image, ox: int, oy: int, lean: int = 0):
+    """A flower whose head and the top of its stem lean `lean` pixels to the side."""
+    img.rect(ox + 7, oy + 12, 1, 4, GRASS[2])
+    img.rect(ox + 7 + lean, oy + 9, 1, 3, GRASS[2])
+    img.rect(ox + 5, oy + 12, 2, 1, GRASS[0])
+    for dx, dy in ((0, -1), (-1, 0), (1, 0), (0, 1)):
+        img.rect(ox + 6 + lean + dx * 2, oy + 5 + dy * 2, 3, 3, (232, 88, 120))
+    img.rect(ox + 6 + lean, oy + 5, 3, 3, (250, 220, 80))
+
+
+WATER = [(56, 120, 208), (88, 156, 232), (170, 214, 248)]
+
+
+def water(img: Image, ox: int, oy: int, phase: int):
+    """Water whose surface ripples, shifted by `phase` pixels from frame to frame."""
+    for y in range(16):
+        for x in range(16):
+            wave = (x + phase) % 8
+            if y < 3:
+                top = 1 if wave < 4 else 2
+                if y < top:
+                    continue
+                color = WATER[2] if y == top else WATER[1]
+            else:
+                color = WATER[1] if (x + phase + y * 3) % 11 == 0 else WATER[0]
+            img.put(ox + x, oy + y, color)
+
+
 def tiles() -> Image:
-    img = Image(64, 32)
+    img = Image(64, 48)
     # 0: grass on dirt.
     dirt(img, 0, 0, 4)
     for x in range(16):
@@ -106,12 +137,13 @@ def tiles() -> Image:
             if dx * dx / 64 + dy * dy / 30 <= 1.0:
                 n = noise(x, y, 6)
                 img.put(x, 16 + y, GRASS[2] if n < 90 else GRASS[0] if n < 220 else GRASS[1])
-    # 5: a flower.
-    img.rect(16 + 7, 16 + 9, 1, 7, GRASS[2])
-    img.rect(16 + 5, 16 + 12, 2, 1, GRASS[0])
-    for dx, dy in ((0, -1), (-1, 0), (1, 0), (0, 1)):
-        img.rect(16 + 6 + dx * 2, 16 + 5 + dy * 2, 3, 3, (232, 88, 120))
-    img.rect(16 + 6, 16 + 5, 3, 3, (250, 220, 80))
+    # 5: a flower, and 8 and 9 the same leaning left and right in the wind.
+    flower(img, 16, 16)
+    flower(img, 0, 32, -1)
+    flower(img, 16, 32, 1)
+    # 10 and 11: two frames of water.
+    water(img, 32, 32, 0)
+    water(img, 48, 32, 4)
     # 6 and 7: a cloud, in two halves.
     for y in range(16):
         for x in range(32):
@@ -219,9 +251,43 @@ def coin() -> Image:
     return img
 
 
+def hills() -> Image:
+    import math
+    img = Image(64, 32)
+    far, near = (150, 196, 190), (126, 180, 160)
+    for x in range(64):
+        # Whole waves over the width, so the image repeats without a seam.
+        back = 14 + 6 * math.sin(2 * math.pi * x / 64) + 3 * math.sin(2 * math.pi * x * 3 / 64)
+        front = 22 + 4 * math.sin(2 * math.pi * (x + 20) / 32)
+        for y in range(32):
+            if y >= front:
+                img.put(x, y, near)
+            elif y >= back:
+                img.put(x, y, far)
+    return img
+
+
+def sign() -> Image:
+    img = Image(16, 16)
+    frame, light, dark = (110, 70, 36), WOOD[0], WOOD[2]
+    for y in range(16):
+        for x in range(16):
+            edge = x < 4 or x >= 12 or y < 4 or y >= 12
+            if edge:
+                rim = x in (0, 15) or y in (0, 15)
+                img.put(x, y, (70, 44, 22) if rim else frame)
+            else:
+                img.put(x, y, dark if y == 7 else light)
+    # Nails at the corners.
+    for x, y in ((2, 2), (13, 2), (2, 13), (13, 13)):
+        img.put(x, y, (200, 200, 210))
+    return img
+
+
 def main() -> None:
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    for name, image in (("tiles.png", tiles()), ("hero.png", hero()), ("coin.png", coin())):
+    for name, image in (("tiles.png", tiles()), ("hero.png", hero()), ("coin.png", coin()),
+                        ("hills.png", hills()), ("sign.png", sign())):
         (OUTPUT / name).write_bytes(image.png())
         print(f"Wrote {OUTPUT / name}")
 

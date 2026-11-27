@@ -53,6 +53,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0046](0046-editor-v1.md) | Editor v1: the scene file edited as a document and the world built from it, components describing their fields, `editor_panel` modules over `debug_ui`, and Play through hot reload |
 | [0047](0047-asset-database-and-bundles.md) | The asset database made at build time, with what each asset needs and a failed build for a missing one, and bundles read through the `asset_source` interface: `bundles`, `files` |
 | [0048](0048-release-pipeline.md) | The release pipeline: versions from tags, release builds with symbols kept apart, `<game>_release` and `<game>_aab`, and release workflows for the engine and each game |
+| [0049](0049-parallax-9-slice-y-sorting-and-animated-tiles.md) | Parallax backgrounds that repeat, 9-slice sprites, layers sorted by height for top-down games, and animated tiles, as settings of the 2D components |
 
 ## Template
 

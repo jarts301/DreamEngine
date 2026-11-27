@@ -7,6 +7,7 @@
 #include "dream/runtime/scene_loader.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <format>
 #include <limits>
@@ -64,14 +65,37 @@ public:
     }
 };
 
+// Whole numbers from a list, or an error naming the setting.
+core::Result<std::vector<std::int32_t>> whole_numbers(const ComponentData& data,
+                                                      std::string_view key) {
+    core::Result<std::vector<float>> numbers = data.numbers(key);
+    if (!numbers.has_value()) {
+        return numbers.error();
+    }
+    std::vector<std::int32_t> wholes;
+    wholes.reserve(numbers.value().size());
+    for (const float number : numbers.value()) {
+        if (number != std::floor(number) || std::abs(number) > 1.0e9f) {
+            return scene_error(std::format("'{}' holds whole numbers, not {}", key, number));
+        }
+        wholes.push_back(static_cast<std::int32_t>(number));
+    }
+    return wholes;
+}
+
 core::Result<void> read_camera_2d(ComponentContext& context) {
-    if (auto known = context.data.check_keys({"height", "min_width"}); !known.has_value()) {
+    if (auto known = context.data.check_keys({"height", "min_width", "y_sort_layers"});
+        !known.has_value()) {
         return known;
     }
     Camera2D camera;
     Reader reader(context.data);
     reader.number("height", camera.height);
     reader.number("min_width", camera.min_width);
+    if (context.data.has("y_sort_layers")) {
+        reader.take([&] { return whole_numbers(context.data, "y_sort_layers"); },
+                    camera.y_sort_layers);
+    }
     if (auto read = reader.result(); !read.has_value()) {
         return read;
     }
@@ -87,8 +111,8 @@ core::Result<void> read_camera_2d(ComponentContext& context) {
 
 core::Result<void> read_sprite(ComponentContext& context) {
     if (auto known = context.data.check_keys(
-            {"texture", "columns", "rows", "frame", "size", "pixels_per_unit", "pivot", "color",
-             "alpha", "flip_x", "flip_y", "layer", "order", "filter", "visible"});
+            {"texture", "columns", "rows", "frame", "size", "pixels_per_unit", "pivot", "slice",
+             "color", "alpha", "flip_x", "flip_y", "layer", "order", "filter", "visible"});
         !known.has_value()) {
         return known;
     }
@@ -101,6 +125,30 @@ core::Result<void> read_sprite(ComponentContext& context) {
     reader.vec2("size", sprite.size);
     reader.number("pixels_per_unit", sprite.pixels_per_unit);
     reader.vec2("pivot", sprite.pivot);
+    if (context.data.has("slice")) {
+        // One number for every side, or four: left, right, top, bottom.
+        std::vector<float> slice;
+        reader.take([&]() -> core::Result<std::vector<float>> {
+            if (const core::Result<float> all = context.data.number("slice", 0.0f);
+                all.has_value()) {
+                return std::vector<float>{all.value()};
+            }
+            return context.data.numbers("slice");
+        }, slice);
+        if (!reader.failed()) {
+            if (slice.size() == 1) {
+                sprite.slice = Vec4{slice[0], slice[0], slice[0], slice[0]};
+            } else if (slice.size() == 4) {
+                sprite.slice = Vec4{slice[0], slice[1], slice[2], slice[3]};
+            } else {
+                reader.fail("A sprite's slice is one number, or four: left, right, top, bottom");
+            }
+            if (!(sprite.slice.x >= 0.0f && sprite.slice.y >= 0.0f && sprite.slice.z >= 0.0f &&
+                  sprite.slice.w >= 0.0f)) {
+                reader.fail("A sprite's slice borders must be 0 or more");
+            }
+        }
+    }
     reader.color(sprite.color);
     reader.flag("flip_x", sprite.flip_x);
     reader.flag("flip_y", sprite.flip_y);
@@ -172,11 +220,77 @@ core::Result<void> read_sprite_animator(ComponentContext& context) {
     return {};
 }
 
+// A tile map's [animations] tables, each named by a tile's number, or by its character in the
+// legend, with `frames` and `fps`.
+core::Result<void> read_tile_animations(const ComponentData& data, TileMap& map) {
+    const ComponentData animations = data.child("animations");
+    const ComponentData legend = data.child("legend");
+    for (const std::string& name : animations.tables()) {
+        const auto failed = [&](std::string_view message) {
+            return scene_error(std::format("A tile map's animation '{}': {}", name, message));
+        };
+        TileAnimation animation;
+        if (name.size() == 1 && legend.has(name)) {
+            const core::Result<float> tile = legend.number(name, -1.0f);
+            if (!tile.has_value()) {
+                return tile.error();
+            }
+            animation.tile = static_cast<std::int32_t>(tile.value());
+        } else {
+            const char* const end = name.data() + name.size();
+            const auto [last, error] = std::from_chars(name.data(), end, animation.tile);
+            if (error != std::errc{} || last != end) {
+                return failed("name it by a tile's number, or by its character in the legend");
+            }
+        }
+        const ComponentData entry = animations.child(name);
+        if (auto known = entry.check_keys({"frames", "fps"}); !known.has_value()) {
+            return failed(known.error().message);
+        }
+        core::Result<std::vector<std::int32_t>> frames = whole_numbers(entry, "frames");
+        if (!frames.has_value()) {
+            return failed(frames.error().message);
+        }
+        animation.frames = std::move(frames).value();
+        const core::Result<float> fps = entry.number("fps", animation.fps);
+        if (!fps.has_value()) {
+            return failed(fps.error().message);
+        }
+        animation.fps = fps.value();
+        if (animation.frames.empty()) {
+            return failed("it needs frames");
+        }
+        if (!(animation.fps > 0.0f)) {
+            return failed("fps must be above 0");
+        }
+        map.animations.push_back(std::move(animation));
+    }
+    return {};
+}
+
+core::Result<void> read_parallax(ComponentContext& context) {
+    if (auto known = context.data.check_keys({"factor", "repeat_x", "repeat_y"});
+        !known.has_value()) {
+        return known;
+    }
+    Parallax parallax;
+    Reader reader(context.data);
+    reader.vec2("factor", parallax.factor);
+    reader.flag("repeat_x", parallax.repeat_x);
+    reader.flag("repeat_y", parallax.repeat_y);
+    if (auto read = reader.result(); !read.has_value()) {
+        return read;
+    }
+    context.world.registry().emplace_or_replace<Parallax>(context.entity, parallax);
+    return {};
+}
+
 core::Result<void> read_tile_map(ComponentContext& context) {
     const ComponentData& data = context.data;
     if (auto known = data.check_keys({"tileset", "tile_pixels", "tile_size", "rows", "tiles",
                                       "columns", "solid", "color", "alpha", "layer", "order",
-                                      "filter", "visible", "legend"});
+                                      "filter", "visible", "legend", "animations",
+                                      "animation_speed"});
         !known.has_value()) {
         return known;
     }
@@ -191,6 +305,7 @@ core::Result<void> read_tile_map(ComponentContext& context) {
     reader.integer("order", map.order);
     reader.filter(map.filter);
     reader.flag("visible", map.visible);
+    reader.number("animation_speed", map.animation_speed);
     std::vector<float> solid;
     if (data.has("solid")) {
         reader.take([&] { return data.numbers("solid"); }, solid);
@@ -271,6 +386,9 @@ core::Result<void> read_tile_map(ComponentContext& context) {
         }
     } else {
         return scene_error("A tile map needs `rows` with a `legend`, or `tiles` with `columns`");
+    }
+    if (auto read = read_tile_animations(data, map); !read.has_value()) {
+        return read;
     }
     context.world.registry().emplace_or_replace<TileMap>(context.entity, std::move(map));
     return {};
@@ -396,6 +514,12 @@ void update_sprite_animators(World& world, double seconds) {
         const auto index = std::min(static_cast<std::size_t>(animator.time * clip->fps),
                                     clip->frames.size() - 1);
         sprite.frame = clip->frames[index];
+    }
+    for (const auto [entity, map] : world.registry().view<TileMap>().each()) {
+        if (!map.animations.empty()) {
+            map.animation_time =
+                std::max(0.0, map.animation_time + seconds * static_cast<double>(map.animation_speed));
+        }
     }
 }
 
@@ -523,7 +647,83 @@ void register_sprite_components(SceneLoader& scenes) {
          FieldInfo{.name = "visible", .kind = FieldKind::Flag, .fallback = true}});
     scenes.register_component("sprite_animator", &read_sprite_animator);
     scenes.register_component("tile_map", &read_tile_map);
+    scenes.register_component(
+        "parallax", &read_parallax,
+        {FieldInfo{.name = "factor",
+                   .kind = FieldKind::Vec2,
+                   .fallback = vec2(1, 1),
+                   .help = "How far it moves as the camera moves: 1 as the world, 0 not at all"},
+         FieldInfo{.name = "repeat_x", .kind = FieldKind::Flag, .fallback = false},
+         FieldInfo{.name = "repeat_y", .kind = FieldKind::Flag, .fallback = false}});
 }
+
+namespace {
+
+// The copies of something reaching from `low` to `high` along an axis, repeated every `high - low`,
+// that reach into the view from `seen_low` to `seen_high`: the first and the last, counted from the
+// thing itself. Without repeating, only the thing itself.
+struct Copies {
+    int first = 0;
+    int last = 0;
+};
+
+// The most copies drawn along an axis, however small the thing is.
+constexpr int k_max_copies = 256;
+
+Copies copies_in_view(bool repeat, float low, float high, float seen_low, float seen_high) {
+    const float period = high - low;
+    if (!repeat || !(period > 0.0f)) {
+        return {};
+    }
+    const float first = std::ceil((seen_low - high) / period);
+    const float last = std::floor((seen_high - low) / period);
+    if (!(last >= first) || !(std::abs(first) < 1.0e6f)) {
+        return Copies{1, 0};
+    }
+    const int start = static_cast<int>(first);
+    return Copies{start, std::min(static_cast<int>(std::min(last, 1.0e6f)),
+                                  start + k_max_copies - 1)};
+}
+
+// A tile map's cells in view: columns, then rows counted up from the bottom, each from the first
+// to one past the last.
+struct Cells {
+    std::uint32_t first_column = 0;
+    std::uint32_t end_column = 0;
+    std::uint32_t first_up = 0;
+    std::uint32_t end_up = 0;
+};
+
+Cells cells_in_view(const TileMap& map, Vec2 origin, Vec2 seen_min, Vec2 seen_max) {
+    const auto clamp_cell = [](float value, std::uint32_t count) {
+        return static_cast<std::uint32_t>(std::clamp(value, 0.0f, static_cast<float>(count)));
+    };
+    return Cells{
+        .first_column =
+            clamp_cell(std::floor((seen_min.x - origin.x) / map.tile_size.x), map.columns),
+        .end_column = clamp_cell(std::ceil((seen_max.x - origin.x) / map.tile_size.x), map.columns),
+        .first_up = clamp_cell(std::floor((seen_min.y - origin.y) / map.tile_size.y), map.rows),
+        .end_up = clamp_cell(std::ceil((seen_max.y - origin.y) / map.tile_size.y), map.rows)};
+}
+
+bool has_cells(const TileMap& map) {
+    return map.columns > 0 && map.rows > 0 &&
+           map.tiles.size() >= std::size_t{map.columns} * map.rows;
+}
+
+// The tile a cell shows now, through the map's animations.
+std::int32_t shown_tile(const TileMap& map, std::int32_t tile) {
+    for (const TileAnimation& animation : map.animations) {
+        if (animation.tile == tile && !animation.frames.empty() && animation.fps > 0.0f) {
+            const auto step = static_cast<std::size_t>(map.animation_time *
+                                                       static_cast<double>(animation.fps));
+            return animation.frames[step % animation.frames.size()];
+        }
+    }
+    return tile;
+}
+
+} // namespace
 
 void gather_sprites(const World& world, const Mat4& view, std::vector<renderer::SpriteQuad>& quads,
                     std::vector<renderer::SpriteBatch>& batches, SpriteScratch& scratch) {
@@ -532,28 +732,11 @@ void gather_sprites(const World& world, const Mat4& view, std::vector<renderer::
     batches.clear();
     const Registry& registry = world.registry();
 
-    using Item = SpriteScratch::Item;
-    std::vector<Item>& items = scratch.items;
-    items.clear();
-    for (const auto [entity, sprite] : registry.view<const SpriteRenderer>().each()) {
-        if (sprite.visible && registry.all_of<WorldTransform>(entity)) {
-            items.push_back(Item{sprite.layer, sprite.order, false,
-                                 static_cast<std::uint32_t>(entt::to_integral(entity)), entity});
-        }
-    }
-    for (const auto [entity, map] : registry.view<const TileMap>().each()) {
-        if (map.visible && registry.all_of<WorldTransform>(entity)) {
-            items.push_back(Item{map.layer, map.order, true,
-                                 static_cast<std::uint32_t>(entt::to_integral(entity)), entity});
-        }
-    }
-    std::ranges::sort(items, {}, [](const Item& item) {
-        return std::tuple(item.layer, item.order, item.map, item.id);
-    });
-
-    // The part of the world in view, for leaving out tiles that aren't.
+    // The part of the world in view, for leaving out what isn't, and the middle of the view, which
+    // parallax moves things by.
     Vec2 seen_min{-1.0e30f, -1.0e30f};
     Vec2 seen_max{1.0e30f, 1.0e30f};
+    Vec2 middle{};
     if (const std::optional<Mat4> inverse = core::inverse(view)) {
         seen_min = Vec2{1.0e30f, 1.0e30f};
         seen_max = Vec2{-1.0e30f, -1.0e30f};
@@ -564,7 +747,74 @@ void gather_sprites(const World& world, const Mat4& view, std::vector<renderer::
                 seen_max = Vec2{std::max(seen_max.x, corner.x), std::max(seen_max.y, corner.y)};
             }
         }
+        const Vec3 centre = core::transform_point(*inverse, Vec3{0.0f, 0.0f, 0.5f});
+        middle = Vec2{centre.x, centre.y};
     }
+
+    // The layers the camera sorts by height.
+    const std::vector<std::int32_t>* y_sorted = nullptr;
+    const auto cameras = registry.view<const Camera2D, const WorldTransform>();
+    if (const Entity camera = cameras.front(); camera != k_no_entity) {
+        y_sorted = &cameras.get<const Camera2D>(camera).y_sort_layers;
+    }
+    const auto sorts_by_y = [&](std::int32_t layer) {
+        return y_sorted != nullptr && std::ranges::find(*y_sorted, layer) != y_sorted->end();
+    };
+    // How far parallax moves an entity from where it is.
+    const auto shift_of = [&](const Parallax* parallax) {
+        return parallax != nullptr ? Vec2{middle.x * (1.0f - parallax->factor.x),
+                                          middle.y * (1.0f - parallax->factor.y)}
+                                   : Vec2{};
+    };
+    const auto position_of = [&](Entity entity) {
+        const Vec3 origin =
+            core::transform_point(registry.get<const WorldTransform>(entity).matrix, Vec3{});
+        return Vec2{origin.x, origin.y} + shift_of(registry.try_get<const Parallax>(entity));
+    };
+
+    using Item = SpriteScratch::Item;
+    std::vector<Item>& items = scratch.items;
+    items.clear();
+    for (const auto [entity, sprite] : registry.view<const SpriteRenderer>().each()) {
+        if (!sprite.visible || !registry.all_of<WorldTransform>(entity)) {
+            continue;
+        }
+        items.push_back(Item{.layer = sprite.layer,
+                             .depth = sorts_by_y(sprite.layer) ? -position_of(entity).y : 0.0f,
+                             .order = sprite.order,
+                             .map = false,
+                             .id = static_cast<std::uint32_t>(entt::to_integral(entity)),
+                             .entity = entity,
+                             .row = SpriteScratch::k_whole_map});
+    }
+    for (const auto [entity, map] : registry.view<const TileMap>().each()) {
+        if (!map.visible || !registry.all_of<WorldTransform>(entity) || !has_cells(map)) {
+            continue;
+        }
+        Item item{.layer = map.layer,
+                  .depth = 0.0f,
+                  .order = map.order,
+                  .map = true,
+                  .id = static_cast<std::uint32_t>(entt::to_integral(entity)),
+                  .entity = entity,
+                  .row = SpriteScratch::k_whole_map};
+        const Parallax* const parallax = registry.try_get<const Parallax>(entity);
+        if (!sorts_by_y(map.layer) || (parallax != nullptr && parallax->repeat_y)) {
+            items.push_back(item);
+            continue;
+        }
+        // Sorted by height, each row in view stands at its bottom among the layer's sprites.
+        const Vec2 origin = position_of(entity);
+        const Cells cells = cells_in_view(map, origin, seen_min, seen_max);
+        for (std::uint32_t up = cells.first_up; up < cells.end_up; ++up) {
+            item.depth = -(origin.y + static_cast<float>(up) * map.tile_size.y);
+            item.row = up;
+            items.push_back(item);
+        }
+    }
+    std::ranges::sort(items, {}, [](const Item& item) {
+        return std::tuple(item.layer, item.depth, item.order, item.map, item.id, item.row);
+    });
 
     using Run = SpriteScratch::Run;
     std::vector<Run>& runs = scratch.runs;
@@ -581,50 +831,127 @@ void gather_sprites(const World& world, const Mat4& view, std::vector<renderer::
         ++runs.back().count;
     };
 
+    // A 9-slice sprite as up to nine rectangles: corners of a fixed size, edges stretched along
+    // their length, and the middle filling the rest, all turned together around its pivot.
+    const auto add_sliced = [&](const SpriteRenderer& sprite, Vec2 at, float angle, Vec2 drawn,
+                                Vec4 frame_uv, Vec2 texture_size) {
+        const Vec4 slice = sprite.slice;
+        Vec4 border = slice / sprite.pixels_per_unit;
+        if (border.x + border.y > drawn.x) {
+            const float fit = drawn.x / (border.x + border.y);
+            border.x *= fit;
+            border.y *= fit;
+        }
+        if (border.z + border.w > drawn.y) {
+            const float fit = drawn.y / (border.z + border.w);
+            border.z *= fit;
+            border.w *= fit;
+        }
+        const std::array<float, 4> xs{0.0f, border.x, drawn.x - border.y, drawn.x};
+        const std::array<float, 4> ys{0.0f, border.w, drawn.y - border.z, drawn.y};
+        const std::array<float, 4> us{frame_uv.x, frame_uv.x + slice.x / texture_size.x,
+                                      frame_uv.z - slice.y / texture_size.x, frame_uv.z};
+        // Bottom up, as ys are: from the frame's bottom edge to its top.
+        const std::array<float, 4> vs{frame_uv.w, frame_uv.w - slice.w / texture_size.y,
+                                      frame_uv.y + slice.z / texture_size.y, frame_uv.y};
+        const float cosine = std::cos(angle);
+        const float sine = std::sin(angle);
+        for (std::size_t j = 0; j < 3; ++j) {
+            for (std::size_t i = 0; i < 3; ++i) {
+                float left = xs[i];
+                float right = xs[i + 1];
+                float bottom = ys[j];
+                float top = ys[j + 1];
+                if (!(right > left) || !(top > bottom)) {
+                    continue;
+                }
+                Vec4 uv{us[i], vs[j + 1], us[i + 1], vs[j]};
+                if (sprite.flip_x) {
+                    std::tie(left, right) = std::pair(drawn.x - right, drawn.x - left);
+                    std::swap(uv.x, uv.z);
+                }
+                if (sprite.flip_y) {
+                    std::tie(bottom, top) = std::pair(drawn.y - top, drawn.y - bottom);
+                    std::swap(uv.y, uv.w);
+                }
+                const Vec2 local{left - sprite.pivot.x * drawn.x, bottom - sprite.pivot.y * drawn.y};
+                add(renderer::SpriteQuad{
+                        .position = at + Vec2{local.x * cosine - local.y * sine,
+                                              local.x * sine + local.y * cosine},
+                        .size = Vec2{right - left, top - bottom},
+                        .pivot = Vec2{0.0f, 0.0f},
+                        .rotation = angle,
+                        .uv = uv,
+                        .color = sprite.color},
+                    sprite.texture, sprite.filter);
+            }
+        }
+    };
+
     for (const Item& item : items) {
-        const Mat4& matrix = registry.get<const WorldTransform>(item.entity).matrix;
-        const Placement where = placement(matrix);
+        const Placement where = placement(registry.get<const WorldTransform>(item.entity).matrix);
+        const Parallax* const parallax = registry.try_get<const Parallax>(item.entity);
+        const Vec2 position = where.position + shift_of(parallax);
+        const bool repeat_x = parallax != nullptr && parallax->repeat_x;
+        const bool repeat_y = parallax != nullptr && parallax->repeat_y;
         if (!item.map) {
             const SpriteRenderer& sprite = registry.get<const SpriteRenderer>(item.entity);
             const std::uint32_t columns = std::max(sprite.columns, 1u);
             const std::uint32_t rows = std::max(sprite.rows, 1u);
-            const float texture_width =
-                sprite.texture ? static_cast<float>(sprite.texture->width) : 1.0f;
-            const float texture_height =
-                sprite.texture ? static_cast<float>(sprite.texture->height) : 1.0f;
+            const Vec2 texture_size =
+                sprite.texture ? Vec2{static_cast<float>(std::max(sprite.texture->width, 1u)),
+                                      static_cast<float>(std::max(sprite.texture->height, 1u))}
+                               : Vec2{1.0f, 1.0f};
             Vec2 size = sprite.size;
             if (size.x <= 0.0f || size.y <= 0.0f) {
-                size = Vec2{texture_width / static_cast<float>(columns),
-                            texture_height / static_cast<float>(rows)} /
+                size = Vec2{texture_size.x / static_cast<float>(columns),
+                            texture_size.y / static_cast<float>(rows)} /
                        sprite.pixels_per_unit;
             }
+            const Vec2 drawn{size.x * where.scale.x, size.y * where.scale.y};
             const std::uint32_t column = sprite.frame % columns;
             const std::uint32_t row = (sprite.frame / columns) % rows;
-            Vec4 uv{static_cast<float>(column) / static_cast<float>(columns),
-                    static_cast<float>(row) / static_cast<float>(rows),
-                    static_cast<float>(column + 1) / static_cast<float>(columns),
-                    static_cast<float>(row + 1) / static_cast<float>(rows)};
+            const Vec4 frame_uv{static_cast<float>(column) / static_cast<float>(columns),
+                                static_cast<float>(row) / static_cast<float>(rows),
+                                static_cast<float>(column + 1) / static_cast<float>(columns),
+                                static_cast<float>(row + 1) / static_cast<float>(rows)};
+            Vec4 uv = frame_uv;
             if (sprite.flip_x) {
                 std::swap(uv.x, uv.z);
             }
             if (sprite.flip_y) {
                 std::swap(uv.y, uv.w);
             }
-            add(renderer::SpriteQuad{.position = where.position,
-                                     .size = Vec2{size.x * where.scale.x, size.y * where.scale.y},
-                                     .pivot = sprite.pivot,
-                                     .rotation = where.angle,
-                                     .uv = uv,
-                                     .color = sprite.color},
-                sprite.texture, sprite.filter);
+            const bool sliced = sprite.slice.x > 0.0f || sprite.slice.y > 0.0f ||
+                                sprite.slice.z > 0.0f || sprite.slice.w > 0.0f;
+            // Where its rectangle reaches, unturned, for repeating it.
+            const Vec2 low{position.x - sprite.pivot.x * drawn.x,
+                           position.y - sprite.pivot.y * drawn.y};
+            const Copies across =
+                copies_in_view(repeat_x, low.x, low.x + drawn.x, seen_min.x, seen_max.x);
+            const Copies up =
+                copies_in_view(repeat_y, low.y, low.y + drawn.y, seen_min.y, seen_max.y);
+            for (int copy_y = up.first; copy_y <= up.last; ++copy_y) {
+                for (int copy_x = across.first; copy_x <= across.last; ++copy_x) {
+                    const Vec2 at = position + Vec2{static_cast<float>(copy_x) * drawn.x,
+                                                    static_cast<float>(copy_y) * drawn.y};
+                    if (sliced) {
+                        add_sliced(sprite, at, where.angle, drawn, frame_uv, texture_size);
+                    } else {
+                        add(renderer::SpriteQuad{.position = at,
+                                                 .size = drawn,
+                                                 .pivot = sprite.pivot,
+                                                 .rotation = where.angle,
+                                                 .uv = uv,
+                                                 .color = sprite.color},
+                            sprite.texture, sprite.filter);
+                    }
+                }
+            }
             continue;
         }
 
         const TileMap& map = registry.get<const TileMap>(item.entity);
-        if (map.columns == 0 || map.rows == 0 ||
-            map.tiles.size() < std::size_t{map.columns} * map.rows) {
-            continue;
-        }
         const float texture_width =
             map.tileset ? static_cast<float>(std::max(map.tileset->width, 1u)) : 1.0f;
         const float texture_height =
@@ -636,39 +963,51 @@ void gather_sprites(const World& world, const Mat4& view, std::vector<renderer::
         // A hundredth of a texel in from each edge, so no neighboring tile shows at the seams.
         const float inset_u = 0.01f / texture_width;
         const float inset_v = 0.01f / texture_height;
-        const Vec2 origin = where.position;
-        const auto clamp_cell = [](float value, std::uint32_t count) {
-            return static_cast<std::uint32_t>(
-                std::clamp(value, 0.0f, static_cast<float>(count)));
-        };
-        const std::uint32_t first_column =
-            clamp_cell(std::floor((seen_min.x - origin.x) / map.tile_size.x), map.columns);
-        const std::uint32_t end_column =
-            clamp_cell(std::ceil((seen_max.x - origin.x) / map.tile_size.x), map.columns);
-        const std::uint32_t first_up =
-            clamp_cell(std::floor((seen_min.y - origin.y) / map.tile_size.y), map.rows);
-        const std::uint32_t end_up =
-            clamp_cell(std::ceil((seen_max.y - origin.y) / map.tile_size.y), map.rows);
-        for (std::uint32_t up = first_up; up < end_up; ++up) {
-            const std::uint32_t row = map.rows - 1 - up;
-            for (std::uint32_t column = first_column; column < end_column; ++column) {
-                const std::int32_t tile = map.tiles[std::size_t{row} * map.columns + column];
-                if (tile < 0) {
-                    continue;
+        const Vec2 extent{static_cast<float>(map.columns) * map.tile_size.x,
+                          static_cast<float>(map.rows) * map.tile_size.y};
+        const Copies across =
+            copies_in_view(repeat_x, position.x, position.x + extent.x, seen_min.x, seen_max.x);
+        const Copies up =
+            copies_in_view(repeat_y, position.y, position.y + extent.y, seen_min.y, seen_max.y);
+        for (int copy_y = up.first; copy_y <= up.last; ++copy_y) {
+            for (int copy_x = across.first; copy_x <= across.last; ++copy_x) {
+                const Vec2 origin = position + Vec2{static_cast<float>(copy_x) * extent.x,
+                                                    static_cast<float>(copy_y) * extent.y};
+                Cells cells = cells_in_view(map, origin, seen_min, seen_max);
+                if (item.row != SpriteScratch::k_whole_map) {
+                    if (item.row < cells.first_up || item.row >= cells.end_up) {
+                        continue;
+                    }
+                    cells.first_up = item.row;
+                    cells.end_up = item.row + 1;
                 }
-                const auto index = static_cast<std::uint32_t>(tile);
-                const float u = static_cast<float>(index % tileset_columns) * tile_u;
-                const float v = static_cast<float>(index / tileset_columns) * tile_v;
-                add(renderer::SpriteQuad{
-                        .position = Vec2{origin.x + static_cast<float>(column) * map.tile_size.x,
-                                         origin.y + static_cast<float>(up) * map.tile_size.y},
-                        .size = map.tile_size,
-                        .pivot = Vec2{0.0f, 0.0f},
-                        .rotation = 0.0f,
-                        .uv = Vec4{u + inset_u, v + inset_v, u + tile_u - inset_u,
-                                   v + tile_v - inset_v},
-                        .color = map.color},
-                    map.tileset, map.filter);
+                for (std::uint32_t row_up = cells.first_up; row_up < cells.end_up; ++row_up) {
+                    const std::uint32_t row = map.rows - 1 - row_up;
+                    for (std::uint32_t column = cells.first_column; column < cells.end_column;
+                         ++column) {
+                        std::int32_t tile = map.tiles[std::size_t{row} * map.columns + column];
+                        if (tile >= 0 && !map.animations.empty()) {
+                            tile = shown_tile(map, tile);
+                        }
+                        if (tile < 0) {
+                            continue;
+                        }
+                        const auto index = static_cast<std::uint32_t>(tile);
+                        const float u = static_cast<float>(index % tileset_columns) * tile_u;
+                        const float v = static_cast<float>(index / tileset_columns) * tile_v;
+                        add(renderer::SpriteQuad{
+                                .position =
+                                    Vec2{origin.x + static_cast<float>(column) * map.tile_size.x,
+                                         origin.y + static_cast<float>(row_up) * map.tile_size.y},
+                                .size = map.tile_size,
+                                .pivot = Vec2{0.0f, 0.0f},
+                                .rotation = 0.0f,
+                                .uv = Vec4{u + inset_u, v + inset_v, u + tile_u - inset_u,
+                                           v + tile_v - inset_v},
+                                .color = map.color},
+                            map.tileset, map.filter);
+                    }
+                }
             }
         }
     }
