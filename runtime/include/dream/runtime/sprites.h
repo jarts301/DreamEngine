@@ -43,8 +43,11 @@ struct Camera2D {
 struct SpriteRenderer {
     // sRGB colors with straight alpha. Without one, a white rectangle tinted by `color`.
     AssetRef<TextureAsset> texture;
-    // The texture as a grid of equal frames, numbered from the top left, row by row: a sprite
-    // sheet. `frame` picks one; SpriteAnimator changes it.
+    // The part of the texture drawn, in its pixels from the top left: x, y, width and height, such
+    // as an atlas's region (use_atlas_region). A width or height of 0 draws the whole texture.
+    core::Vec4 region{};
+    // The texture, or its region, as a grid of equal frames, numbered from the top left, row by
+    // row: a sprite sheet. `frame` picks one; SpriteAnimator changes it.
     std::uint32_t columns = 1;
     std::uint32_t rows = 1;
     std::uint32_t frame = 0;
@@ -191,11 +194,35 @@ void update_sprite_animators(World& world, double seconds);
 // the entities it returned before.
 [[nodiscard]] core::Result<std::vector<Entity>> make_tile_colliders(World& world, Entity map);
 
+// Images the build packed into one texture (ADR 0052), as a game's [atlases] tables in dream.toml
+// ask, so the sprites cut from it are drawn together. Load the .atlas file the build made, such as
+// "assets:/atlases/things.atlas", after Renderer::initialize, which registers its loader. Regions
+// are named by the image's path in the packed folder, without ".png", such as "hero" or
+// "trees/oak", and given in the texture's pixels: x, y, width and height from the top left.
+struct SpriteAtlasAsset {
+    AssetRef<TextureAsset> texture;
+    std::vector<std::string> names;
+    std::vector<core::Vec4> regions;
+
+    // The named region, or nothing.
+    [[nodiscard]] std::optional<core::Vec4> region(std::string_view name) const;
+};
+
+// Points `sprite` at the atlas's region named `name`, the way a scene's `atlas` and `region` do:
+// its texture becomes the atlas's, and its region the named one. Fails, listing a few names, when
+// the atlas has no such region.
+[[nodiscard]] core::Result<void> use_atlas_region(SpriteRenderer& sprite,
+                                                  const AssetRef<SpriteAtlasAsset>& atlas,
+                                                  std::string_view name);
+
 class SceneLoader;
 
 // For Renderer: lets scene files use "camera_2d", "sprite", "sprite_animator", "tile_map" and
 // "parallax".
 void register_sprite_components(SceneLoader& scenes);
+
+// For Renderer, after TextureAsset's loader: loads .atlas files as SpriteAtlasAssets.
+void register_sprite_atlases(AssetManager& assets);
 
 // The lists gather_sprites works with, which its caller keeps between calls, so gathering allocates
 // nothing once they have grown.

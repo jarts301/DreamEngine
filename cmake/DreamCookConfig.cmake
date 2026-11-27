@@ -96,3 +96,63 @@ function(dream_read_bundle_config file out_bundles)
     endforeach()
     set(${out_bundles} "${bundles}" PARENT_SCOPE)
 endfunction()
+
+# Reads a project's atlases from its TOML file (ADR 0052): folders of images packed into one image
+# each at build time, which sprites name with `atlas` and `region`:
+#
+#     [atlases.things]
+#     folder = "assets:/sprites/things"   # Every PNG under it, named by its path there.
+#     padding = 1                          # Optional: pixels repeating each image's edge, 0 to 16.
+#     max_size = 2048                      # Optional: the largest atlas side, 16 to 8192.
+#
+# One value per line, as with the tables above.
+#
+# Usage: dream_read_atlas_config(<file> <out_atlases>)
+#
+# Sets <out_atlases> to a list of "<name>|<folder>|<padding>|<max_size>", with the folder relative
+# to the assets' root, empty when the file has none.
+function(dream_read_atlas_config file out_atlases)
+    file(STRINGS "${file}" lines)
+    set(table "")
+    set(names "")
+    set(line_number 0)
+    foreach(line IN LISTS lines)
+        math(EXPR line_number "${line_number} + 1")
+        string(STRIP "${line}" line)
+        if(line STREQUAL "" OR line MATCHES "^#")
+            continue()
+        endif()
+        if(line MATCHES "^\\[atlases\\.([a-z0-9_]+)\\][ \t]*(#.*)?$")
+            set(table "${CMAKE_MATCH_1}")
+            if(table IN_LIST names)
+                message(FATAL_ERROR "${file}:${line_number}: atlas '${table}' is named twice")
+            endif()
+            list(APPEND names "${table}")
+            set(folder_${table} "")
+            set(padding_${table} 1)
+            set(max_size_${table} 2048)
+        elseif(line MATCHES "^\\[")
+            set(table "")
+        elseif(NOT table STREQUAL "")
+            if(line MATCHES "^folder[ \t]*=[ \t]*\"assets:/([^\"]+)\"[ \t]*(#.*)?$")
+                string(REGEX REPLACE "/+$" "" folder "${CMAKE_MATCH_1}")
+                set(folder_${table} "${folder}")
+            elseif(line MATCHES "^(padding|max_size)[ \t]*=[ \t]*([0-9]+)[ \t]*(#.*)?$")
+                set(${CMAKE_MATCH_1}_${table} "${CMAKE_MATCH_2}")
+            else()
+                message(FATAL_ERROR "${file}:${line_number}: expected folder = \"assets:/...\", "
+                                    "padding = <pixels> or max_size = <pixels> in "
+                                    "[atlases.${table}], one per line.")
+            endif()
+        endif()
+    endforeach()
+    set(atlases "")
+    foreach(name IN LISTS names)
+        if(folder_${name} STREQUAL "")
+            message(FATAL_ERROR "${file}: atlas '${name}' needs folder = \"assets:/...\", the "
+                                "folder of images it packs")
+        endif()
+        list(APPEND atlases "${name}|${folder_${name}}|${padding_${name}}|${max_size_${name}}")
+    endforeach()
+    set(${out_atlases} "${atlases}" PARENT_SCOPE)
+endfunction()

@@ -697,6 +697,7 @@ core::Result<void> Renderer::initialize(App& app,
 
     register_components(app.scenes());
     register_sprite_components(app.scenes());
+    register_sprite_atlases(app.assets());
     m_tile_map_format.reset();
     if (app.has_module<tile_map_format::TileMapFormat>()) {
         core::Result<std::unique_ptr<tile_map_format::TileMapFormat>> format =

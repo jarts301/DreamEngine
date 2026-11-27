@@ -104,6 +104,7 @@ function(dream_add_game name)
     if(DREAM_COOK_MODELS)
         _dream_cook_models(${name} "${generated_assets}" "${ARG_CONFIG}" ${asset_dirs})
     endif()
+    _dream_cook_atlases(${name} "${generated_assets}" "${ARG_CONFIG}" packed_folders ${asset_dirs})
     list(APPEND asset_dirs "${generated_assets}")
 
     # A target of its own that runs on every build, so a changed asset is copied even when the
@@ -121,6 +122,7 @@ function(dream_add_game name)
         string(APPEND staged_dir "/assets")
     endif()
     list(JOIN asset_dirs "|" joined_dirs)
+    list(JOIN packed_folders "|" packed_folders)
     # After staging, the asset database: what each file is and needs, and its bundle (ADR 0047).
     # A file that names one the assets don't have fails the build here.
     dream_read_cook_config("${ARG_CONFIG}" "${DREAM_PLATFORM}" texture_cooker)
@@ -147,13 +149,13 @@ function(dream_add_game name)
     list(JOIN bundles "|" bundles)
     add_custom_target(${name}_assets
         COMMAND ${CMAKE_COMMAND} "-DSOURCES=${joined_dirs}" "-DDESTINATION=${staged_dir}"
-            "-DCOOKED=${textures_cooked}"
+            "-DCOOKED=${textures_cooked}" "-DLEAVE_OUT=${packed_folders}"
             -P "${DreamEngine_SOURCE_DIR}/cmake/DreamStageAssets.cmake"
         COMMAND ${CMAKE_COMMAND} "-DASSETS=${staged_dir}" "-DPLATFORM=${DREAM_PLATFORM}"
             "-DTEXTURE_COOKER=${texture_cooker}" "-DBUNDLES=${bundles}"
             -P "${DreamEngine_SOURCE_DIR}/cmake/DreamAssetDatabase.cmake"
         VERBATIM)
-    foreach(made IN ITEMS shaders textures models)
+    foreach(made IN ITEMS shaders textures models atlases)
         if(TARGET ${name}_${made})
             add_dependencies(${name}_assets ${name}_${made})
         endif()
@@ -420,6 +422,68 @@ function(_dream_cook_models target output_dir config)
     if(outputs)
         add_custom_target(${target}_models DEPENDS ${outputs})
     endif()
+endfunction()
+
+# Packs the folders of images that the game's [atlases] tables name into an image and a .atlas file
+# each, in the generated assets' "atlases" folder, with the atlas cook tool. PC builds build the
+# tool themselves; cross-compiled builds, such as Android's, take it from the dream-atlas-cook port.
+# Sets <out_packed> to the folders packed, relative to the assets' root, so staging leaves their
+# images out: the game reads them from the atlas. See docs/adr/0052-sprite-atlases.md.
+function(_dream_cook_atlases target output_dir config out_packed)
+    set(${out_packed} "" PARENT_SCOPE)
+    dream_read_atlas_config("${config}" atlases)
+    if(NOT atlases)
+        return()
+    endif()
+    if(TARGET dream_atlas_cook)
+        set(cook "$<TARGET_FILE:dream_atlas_cook>")
+        set(cook_depends dream_atlas_cook)
+    else()
+        file(GLOB cook_dirs "${VCPKG_INSTALLED_DIR}/*/tools/dream-atlas-cook")
+        find_program(DREAM_ATLAS_COOK dream_atlas_cook HINTS ${cook_dirs} NO_DEFAULT_PATH
+            NO_CMAKE_FIND_ROOT_PATH)
+        if(NOT DREAM_ATLAS_COOK)
+            message(FATAL_ERROR "${target} packs atlases, but there is no atlas cook tool: build "
+                "with the engine's vcpkg.json, whose dream-atlas-cook port makes it")
+        endif()
+        set(cook "${DREAM_ATLAS_COOK}")
+        set(cook_depends "${DREAM_ATLAS_COOK}")
+    endif()
+
+    set(outputs "")
+    set(packed "")
+    foreach(atlas IN LISTS atlases)
+        string(REPLACE "|" ";" atlas "${atlas}")
+        list(GET atlas 0 atlas_name)
+        list(GET atlas 1 folder)
+        list(GET atlas 2 padding)
+        list(GET atlas 3 max_size)
+        # The folder, in whichever of the asset folders holds it; a later one wins, as in staging.
+        set(source_dir "")
+        foreach(asset_dir IN LISTS ARGN)
+            if(IS_DIRECTORY "${asset_dir}/${folder}")
+                set(source_dir "${asset_dir}/${folder}")
+            endif()
+        endforeach()
+        if(source_dir STREQUAL "")
+            message(FATAL_ERROR "${config}: atlas '${atlas_name}' packs assets:/${folder}, which "
+                                "none of ${target}'s asset folders has")
+        endif()
+        file(GLOB_RECURSE images CONFIGURE_DEPENDS "${source_dir}/*.png")
+        set(image "${output_dir}/atlases/${atlas_name}.png")
+        set(description "${output_dir}/atlases/${atlas_name}.atlas")
+        add_custom_command(
+            OUTPUT "${image}" "${description}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${output_dir}/atlases"
+            COMMAND "${cook}" "${source_dir}" "${image}" "${description}" ${padding} ${max_size}
+            DEPENDS ${images} "${config}" ${cook_depends}
+            COMMENT "Packing atlas ${atlas_name} from assets:/${folder}"
+            VERBATIM)
+        list(APPEND outputs "${image}" "${description}")
+        list(APPEND packed "${folder}")
+    endforeach()
+    add_custom_target(${target}_atlases DEPENDS ${outputs})
+    set(${out_packed} "${packed}" PARENT_SCOPE)
 endfunction()
 
 # SPIRV-Cross, which vcpkg installs for the build machine like slangc.

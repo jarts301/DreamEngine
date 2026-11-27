@@ -1,0 +1,13 @@
+{
+  "name": "dream-atlas-cook",
+  "version": "1",
+  "description": "DreamEngine's atlas cook tool, built for the build machine, which packs a game's sprite images into atlases at build time when the engine's build can't build it itself, as for Android (ADR 0052). Raise the version whenever tools/atlas_cook changes, so vcpkg rebuilds it",
+  "license": "MIT",
+  "dependencies": [
+    "stb",
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    }
+  ]
+}

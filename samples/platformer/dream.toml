@@ -40,5 +40,11 @@ texture_decoder = ["ktx", "null"]
 [editor]
 scene = "assets:/scenes/level.toml"
 game = "dream_platformer"
-assets = ["assets", "../assets"]
+# The atlas the build packs is read from the game's generated assets, so build it once first.
+assets = ["assets", "../assets", "../../build/windows-debug/samples/platformer/dream_platformer_generated_assets"]
 build = "../../build/windows-debug"
+
+# The hero, coins and sign, packed into one image at build time (ADR 0052), so they are drawn
+# together. Sprites name them as atlas = "assets:/atlases/things.atlas" and region = "hero".
+[atlases.things]
+folder = "assets:/sprites/things"

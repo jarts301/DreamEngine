@@ -61,6 +61,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     if(DREAM_COOK_MODELS)
         add_subdirectory(tools/model_cook)
     endif()
+    add_subdirectory(tools/atlas_cook)
 endif()
 
 if(DREAM_BUILD_SAMPLES)

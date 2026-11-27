@@ -53,3 +53,8 @@ texture_decoder = ["ktx", "null"]
 
 [audio]
 muted = true
+
+# The hero, coins and sign, packed into one image at build time (ADR 0052), so they are drawn
+# together. Sprites name them as atlas = "assets:/atlases/things.atlas" and region = "hero".
+[atlases.things]
+folder = "assets:/sprites/things"

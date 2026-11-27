@@ -272,9 +272,12 @@ Backgrounds move slower than the level with `parallax` and repeat across the vie
 file = "assets:/maps/garden.tmj"
 ```
 
+An `[atlases.<name>]` table in `dream.toml` packs a folder of images into one at build time, and
+sprites name its regions with `atlas` and `region`, so they are drawn together (ADR 0052).
+
 `samples/platformer` is a small 2D platformer with a tile map level, an animated hero, coins and
 touch controls, and `samples/top_down` a garden made in Tiled. [2D games](docs/guides/sprites.md)
-explains sprites, animation, tile maps, Tiled maps and making the art, and
+explains sprites, animation, tile maps, Tiled maps, atlases and making the art, and
 [ADR 0039](docs/adr/0039-sprites-and-tile-maps.md) records the design.
 
 ## Animation

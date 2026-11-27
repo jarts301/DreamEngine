@@ -70,6 +70,7 @@ if(DREAM_BUILD_TESTS)
             tests/particles_test.cpp
             tests/sprites_test.cpp
             tests/tile_map_files_test.cpp
+            tests/sprite_atlas_test.cpp
             tests/memory_budget_test.cpp
             tests/model_loader_test.cpp
             tests/physics_test.cpp
