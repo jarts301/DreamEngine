@@ -84,6 +84,11 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: [self-hosted, windows]
     steps:
+      # The runner keeps its folder between runs, so an earlier release's files would be published too.
+      - name: Empty the release folder
+        shell: powershell
+        run: if (Test-Path release) { Remove-Item -Recurse -Force release }
+
       - uses: actions/download-artifact@v4
         with:
           path: release
