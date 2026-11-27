@@ -274,6 +274,8 @@ file = "assets:/maps/garden.tmj"
 
 An `[atlases.<name>]` table in `dream.toml` packs a folder of images into one at build time, and
 sprites name its regions with `atlas` and `region`, so they are drawn together (ADR 0052).
+A game with no 3D scene lists `renderer = ["sprites", "null"]`, which draws only 2D and ships
+only the shaders it needs (ADR 0053).
 
 `samples/platformer` is a small 2D platformer with a tile map level, an animated hero, coins and
 touch controls, and `samples/top_down` a garden made in Tiled. [2D games](docs/guides/sprites.md)
@@ -488,7 +490,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 | Interface | Backends | Windows | Android | Notes |
 |---|---|---|---|---|
 | `rhi` | `vulkan`, `directx12`, `directx`, `opengl`, `opengles`, `null` | all | `vulkan`, `opengles`, `null` | `directx` is Direct3D 11. A game's shaders are compiled for whichever its list names. |
-| `renderer` | `forward_plus`, `forward`, `null` | all | all | `forward_plus` takes up to 256 point and spot lights in clusters, `forward` the 16 nearest; both bring the same shaders. `null` only clears the window. |
+| `renderer` | `forward_plus`, `forward`, `sprites`, `null` | all | all | `forward_plus` takes up to 256 point and spot lights in clusters, `forward` the 16 nearest; both bring the same shaders. `sprites` draws only 2D, with three of them (ADR 0053). `null` only clears the window. |
 | `mesh_simplifier` | `meshoptimizer`, `null` | all | all | Makes the simpler versions of models that the renderer draws far away. Optional. |
 | `tangent_generator` | `mikktspace`, `null` | all | all | Makes tangents for normal maps on models exported without them. Optional. |
 | `texture_decoder` | `ktx`, `null` | all | all | Reads the textures the build cooked. Needed, first in the list, by every game whose textures are cooked; the build says so. |

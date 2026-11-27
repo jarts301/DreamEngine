@@ -10,6 +10,10 @@
 // depths, which every pixel reads only its own of. Built with DREAM_FORWARD_PLUS, this is the
 // 'forward_plus' module, which splits the view into 16x9x24 clusters and takes 256 lights; without
 // it, 'forward' keeps one cluster of the 16 nearest lights.
+//
+// Built with DREAM_SPRITES_RENDERER, this is the 'sprites' module, for games without a 3D scene
+// (ADR 0053): it draws only the 2D world's sprites, debug lines and the interface, straight into the
+// window, and needs only their shaders. It makes no HDR targets, shadow map or lights' texture.
 
 #include "dream/core/config.h"
 #include "dream/core/log.h"
@@ -325,7 +329,12 @@ constexpr std::uint32_t k_texels_per_light = 4;
 // the scene's pass doesn't use.
 constexpr std::uint32_t k_light_slot = 1;
 
-#if defined(DREAM_FORWARD_PLUS)
+#if defined(DREAM_SPRITES_RENDERER)
+constexpr std::string_view k_module_name = "sprites";
+constexpr std::uint32_t k_max_lights = 16;
+constexpr std::array<std::uint32_t, 3> k_clusters{1, 1, 1};
+constexpr bool k_sprites_only = true;
+#elif defined(DREAM_FORWARD_PLUS)
 constexpr std::string_view k_module_name = "forward_plus";
 constexpr std::uint32_t k_max_lights = 256;
 constexpr std::array<std::uint32_t, 3> k_clusters{16, 9, 24};
@@ -333,6 +342,9 @@ constexpr std::array<std::uint32_t, 3> k_clusters{16, 9, 24};
 constexpr std::string_view k_module_name = "forward";
 constexpr std::uint32_t k_max_lights = 16;
 constexpr std::array<std::uint32_t, 3> k_clusters{1, 1, 1};
+#endif
+#if !defined(DREAM_SPRITES_RENDERER)
+constexpr bool k_sprites_only = false;
 #endif
 static_assert(k_light_header_texels + k_max_lights * k_texels_per_light +
                   (k_clusters[0] * k_clusters[1] * k_clusters[2] + 1) / 2 <
@@ -735,16 +747,43 @@ public:
         }
         m_settings = settings.value();
 
-        constexpr std::array<std::uint8_t, 4> k_flat{128, 128, 255, 255};
-        const core::Result<rhi::TextureHandle> flat = device.create_texture(
-            rhi::TextureDesc{.width = 1, .height = 1, .format = rhi::TextureFormat::Rgba8Unorm},
-            std::as_bytes(std::span(k_flat)));
-        if (!flat.has_value()) {
-            return flat.error();
+        if constexpr (k_sprites_only) {
+            // No 3D scene: the window is drawn into directly, without HDR, shadows or lights.
+            m_settings.hdr_format.reset();
+            m_settings.shadow_resolution = 0;
+            m_settings.shadow_cascades = 0;
+            m_settings.bloom = false;
+            core::Result<void> made = make_quad(device);
+            if (!made.has_value()) {
+                return made;
+            }
+            m_description = "Only 2D: sprites, debug lines and the interface, straight into the "
+                            "window";
+            return {};
+        } else {
+            return start_scene(device);
         }
-        m_flat_normal = OwnedTexture(device, flat.value());
+    }
 
-        // Every particle is this one square, placed and sized per instance.
+    core::Result<void> load_shaders(const FileReader& read_file) override {
+        core::Result<Pipelines> made = make_pipelines(read_file);
+        if (!made.has_value()) {
+            return made.error();
+        }
+        // Between frames, as hot reloading calls this, so nothing still draws with the old ones.
+        m_pipelines = std::make_unique<Pipelines>(std::move(made).value());
+        return {};
+    }
+
+    std::string_view describe() const override {
+        return m_description;
+    }
+
+    FrameStats render(rhi::CommandList& commands, const Frame& frame) override;
+
+private:
+    // Every particle and sprite is this one square, placed and sized per instance.
+    core::Result<void> make_quad(rhi::Device& device) {
         const core::Result<rhi::BufferHandle> corners = device.create_buffer(
             rhi::BufferUsage::Vertex, std::as_bytes(std::span(k_quad_corners)));
         if (!corners.has_value()) {
@@ -757,6 +796,29 @@ public:
             return corner_indices.error();
         }
         m_quad_indices = OwnedBuffer(device, corner_indices.value());
+        return {};
+    }
+
+    // The 'sprites' renderer's whole frame: the 2D world, its lines and the interface, into the
+    // window. A 3D scene in the frame is left out, and said so once.
+    FrameStats render_flat(rhi::CommandList& commands, const Frame& frame);
+    // The 3D renderers' frame: the scene, then the 2D world, lines and interface over it.
+    FrameStats render_scene(rhi::CommandList& commands, const Frame& frame);
+
+    // The 3D renderers' start: what the scene needs beyond the square every renderer draws with.
+    core::Result<void> start_scene(rhi::Device& device) {
+        constexpr std::array<std::uint8_t, 4> k_flat{128, 128, 255, 255};
+        const core::Result<rhi::TextureHandle> flat = device.create_texture(
+            rhi::TextureDesc{.width = 1, .height = 1, .format = rhi::TextureFormat::Rgba8Unorm},
+            std::as_bytes(std::span(k_flat)));
+        if (!flat.has_value()) {
+            return flat.error();
+        }
+        m_flat_normal = OwnedTexture(device, flat.value());
+
+        if (core::Result<void> made = make_quad(device); !made.has_value()) {
+            return made;
+        }
 
         // The lights' texture, rewritten each frame. Without it, only the sun lights the scene.
         const rhi::TextureDesc light_desc{.width = k_light_texture_width,
@@ -836,23 +898,8 @@ public:
         return {};
     }
 
-    core::Result<void> load_shaders(const FileReader& read_file) override {
-        core::Result<Pipelines> made = make_pipelines(read_file);
-        if (!made.has_value()) {
-            return made.error();
-        }
-        // Between frames, as hot reloading calls this, so nothing still draws with the old ones.
-        m_pipelines = std::make_unique<Pipelines>(std::move(made).value());
-        return {};
-    }
+    bool m_warned_3d = false;
 
-    std::string_view describe() const override {
-        return m_description;
-    }
-
-    FrameStats render(rhi::CommandList& commands, const Frame& frame) override;
-
-private:
     core::Result<OwnedShader> load_shader(const FileReader& read_file, std::string_view name,
                                           rhi::ShaderStage stage) {
         const auto code =
@@ -871,6 +918,9 @@ private:
     }
 
     core::Result<Pipelines> make_pipelines(const FileReader& read_file);
+    // The 3D scene's pipelines, added to those make_pipelines made, which every renderer of this
+    // file draws with.
+    core::Result<Pipelines> make_scene_pipelines(const FileReader& read_file, Pipelines made);
     void fit_hdr_targets(platform::SurfaceSize size);
     // Works out what every part draws this frame: its box in the world, the version of it for its
     // size on screen, and its instance data.
@@ -954,7 +1004,6 @@ private:
 
 core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_file) {
     rhi::Device& device = *m_device;
-    const std::optional<rhi::TextureFormat> hdr = m_settings.hdr_format;
     Pipelines made;
     const auto shader = [&](std::string_view name,
                             rhi::ShaderStage stage) -> core::Result<rhi::ShaderHandle> {
@@ -971,6 +1020,143 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
             return created.error();
         }
         return OwnedPipeline(device, created.value());
+    };
+
+    // What every renderer of this file draws: the 2D world's sprites, debug lines and the
+    // interface. The 'sprites' renderer draws nothing else, so it makes only these.
+    constexpr std::array k_corner_attributes{
+        rhi::VertexAttribute{0, rhi::VertexFormat::Float2, 0},
+    };
+    const auto make_overlays = [&]() -> core::Result<void> {
+        const core::Result<rhi::ShaderHandle> line_vertex =
+            shader("debug_lines.vert", rhi::ShaderStage::Vertex);
+        if (!line_vertex.has_value()) {
+            return line_vertex.error();
+        }
+        const core::Result<rhi::ShaderHandle> line_fragment =
+            shader("debug_lines.frag", rhi::ShaderStage::Fragment);
+        if (!line_fragment.has_value()) {
+            return line_fragment.error();
+        }
+        constexpr std::array k_line_attributes{
+            rhi::VertexAttribute{0, rhi::VertexFormat::Float3, offsetof(LineVertex, position)},
+            rhi::VertexAttribute{1, rhi::VertexFormat::Float4, offsetof(LineVertex, color)},
+        };
+        core::Result<OwnedPipeline> lines = pipeline(rhi::PipelineDesc{
+            .vertex_shader = line_vertex.value(),
+            .fragment_shader = line_fragment.value(),
+            .vertex_stride = sizeof(LineVertex),
+            .attributes = k_line_attributes,
+            .topology = rhi::PrimitiveTopology::Lines,
+            .depth_test = false,
+            .cull = rhi::CullMode::None,
+        });
+        if (!lines.has_value()) {
+            return lines.error();
+        }
+        made.lines = std::move(lines).value();
+
+        const core::Result<rhi::ShaderHandle> sprite_vertex =
+            shader("sprites.vert", rhi::ShaderStage::Vertex);
+        if (!sprite_vertex.has_value()) {
+            return sprite_vertex.error();
+        }
+        const core::Result<rhi::ShaderHandle> sprite_fragment =
+            shader("sprites.frag", rhi::ShaderStage::Fragment);
+        if (!sprite_fragment.has_value()) {
+            return sprite_fragment.error();
+        }
+        constexpr std::array k_sprite_attributes{
+            rhi::VertexAttribute{1, rhi::VertexFormat::Float4, offsetof(SpriteInstance, position_size)},
+            rhi::VertexAttribute{2, rhi::VertexFormat::Float4, offsetof(SpriteInstance, uv_rect)},
+            rhi::VertexAttribute{3, rhi::VertexFormat::Float4, offsetof(SpriteInstance, color)},
+            rhi::VertexAttribute{4, rhi::VertexFormat::Float4, offsetof(SpriteInstance, pivot_turn)},
+        };
+        core::Result<OwnedPipeline> sprites = pipeline(rhi::PipelineDesc{
+            .vertex_shader = sprite_vertex.value(),
+            .fragment_shader = sprite_fragment.value(),
+            .vertex_stride = sizeof(core::Vec2),
+            .attributes = k_corner_attributes,
+            .instance_stride = sizeof(SpriteInstance),
+            .instance_attributes = k_sprite_attributes,
+            .blend = rhi::BlendMode::Alpha,
+            .depth_test = false,
+            .cull = rhi::CullMode::None,
+        });
+        if (!sprites.has_value()) {
+            return sprites.error();
+        }
+        made.sprites = std::move(sprites).value();
+
+        const core::Result<rhi::ShaderHandle> ui_vertex =
+            shader("ui.vert", rhi::ShaderStage::Vertex);
+        if (!ui_vertex.has_value()) {
+            return ui_vertex.error();
+        }
+        const core::Result<rhi::ShaderHandle> ui_fragment =
+            shader("ui.frag", rhi::ShaderStage::Fragment);
+        if (!ui_fragment.has_value()) {
+            return ui_fragment.error();
+        }
+        constexpr std::array k_ui_attributes{
+            rhi::VertexAttribute{0, rhi::VertexFormat::Float2, offsetof(ui::Vertex, position)},
+            rhi::VertexAttribute{1, rhi::VertexFormat::Float2, offsetof(ui::Vertex, uv)},
+            rhi::VertexAttribute{2, rhi::VertexFormat::UByte4Norm, offsetof(ui::Vertex, color)},
+        };
+        rhi::PipelineDesc ui_desc{
+            .vertex_shader = ui_vertex.value(),
+            .fragment_shader = ui_fragment.value(),
+            .vertex_stride = sizeof(ui::Vertex),
+            .attributes = k_ui_attributes,
+            .blend = rhi::BlendMode::Alpha,
+            .depth_test = false,
+            .cull = rhi::CullMode::None,
+        };
+        core::Result<OwnedPipeline> ui = pipeline(ui_desc);
+        if (!ui.has_value()) {
+            return ui.error();
+        }
+        made.ui = std::move(ui).value();
+        ui_desc.blend = rhi::BlendMode::PremultipliedAlpha;
+        core::Result<OwnedPipeline> ui_premultiplied = pipeline(ui_desc);
+        if (!ui_premultiplied.has_value()) {
+            return ui_premultiplied.error();
+        }
+        made.ui_premultiplied = std::move(ui_premultiplied).value();
+        return {};
+    };
+    if (core::Result<void> overlays = make_overlays(); !overlays.has_value()) {
+        return overlays.error();
+    }
+    if constexpr (k_sprites_only) {
+        return made;
+    } else {
+        return make_scene_pipelines(read_file, std::move(made));
+    }
+}
+
+core::Result<Pipelines> ForwardRenderer::make_scene_pipelines(const FileReader& read_file,
+                                                              Pipelines made) {
+    rhi::Device& device = *m_device;
+    const std::optional<rhi::TextureFormat> hdr = m_settings.hdr_format;
+    const auto shader = [&](std::string_view name,
+                            rhi::ShaderStage stage) -> core::Result<rhi::ShaderHandle> {
+        core::Result<OwnedShader> loaded = load_shader(read_file, name, stage);
+        if (!loaded.has_value()) {
+            return loaded.error();
+        }
+        made.shaders.push_back(std::move(loaded).value());
+        return made.shaders.back().get();
+    };
+    const auto pipeline = [&](const rhi::PipelineDesc& desc) -> core::Result<OwnedPipeline> {
+        const core::Result<rhi::PipelineHandle> created = device.create_pipeline(desc);
+        if (!created.has_value()) {
+            return created.error();
+        }
+        return OwnedPipeline(device, created.value());
+    };
+    constexpr std::array k_corner_attributes{
+        rhi::VertexAttribute{0, rhi::VertexFormat::Float2, 0},
     };
 
     const core::Result<rhi::ShaderHandle> vertex = shader("forward.vert", rhi::ShaderStage::Vertex);
@@ -1080,34 +1266,6 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
         }
     }
 
-    const core::Result<rhi::ShaderHandle> line_vertex =
-        shader("debug_lines.vert", rhi::ShaderStage::Vertex);
-    if (!line_vertex.has_value()) {
-        return line_vertex.error();
-    }
-    const core::Result<rhi::ShaderHandle> line_fragment =
-        shader("debug_lines.frag", rhi::ShaderStage::Fragment);
-    if (!line_fragment.has_value()) {
-        return line_fragment.error();
-    }
-    constexpr std::array k_line_attributes{
-        rhi::VertexAttribute{0, rhi::VertexFormat::Float3, offsetof(LineVertex, position)},
-        rhi::VertexAttribute{1, rhi::VertexFormat::Float4, offsetof(LineVertex, color)},
-    };
-    core::Result<OwnedPipeline> lines = pipeline(rhi::PipelineDesc{
-        .vertex_shader = line_vertex.value(),
-        .fragment_shader = line_fragment.value(),
-        .vertex_stride = sizeof(LineVertex),
-        .attributes = k_line_attributes,
-        .topology = rhi::PrimitiveTopology::Lines,
-        .depth_test = false,
-        .cull = rhi::CullMode::None,
-    });
-    if (!lines.has_value()) {
-        return lines.error();
-    }
-    made.lines = std::move(lines).value();
-
     const core::Result<rhi::ShaderHandle> particle_vertex =
         shader("particles.vert", rhi::ShaderStage::Vertex);
     if (!particle_vertex.has_value()) {
@@ -1118,9 +1276,6 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
     if (!particle_fragment.has_value()) {
         return particle_fragment.error();
     }
-    constexpr std::array k_corner_attributes{
-        rhi::VertexAttribute{0, rhi::VertexFormat::Float2, 0},
-    };
     constexpr std::array k_particle_attributes{
         rhi::VertexAttribute{1, rhi::VertexFormat::Float4, offsetof(ParticleInstance, position_size)},
         rhi::VertexAttribute{2, rhi::VertexFormat::Float4, offsetof(ParticleInstance, color)},
@@ -1143,73 +1298,6 @@ core::Result<Pipelines> ForwardRenderer::make_pipelines(const FileReader& read_f
         return particles.error();
     }
     made.particles = std::move(particles).value();
-
-    const core::Result<rhi::ShaderHandle> sprite_vertex =
-        shader("sprites.vert", rhi::ShaderStage::Vertex);
-    if (!sprite_vertex.has_value()) {
-        return sprite_vertex.error();
-    }
-    const core::Result<rhi::ShaderHandle> sprite_fragment =
-        shader("sprites.frag", rhi::ShaderStage::Fragment);
-    if (!sprite_fragment.has_value()) {
-        return sprite_fragment.error();
-    }
-    constexpr std::array k_sprite_attributes{
-        rhi::VertexAttribute{1, rhi::VertexFormat::Float4, offsetof(SpriteInstance, position_size)},
-        rhi::VertexAttribute{2, rhi::VertexFormat::Float4, offsetof(SpriteInstance, uv_rect)},
-        rhi::VertexAttribute{3, rhi::VertexFormat::Float4, offsetof(SpriteInstance, color)},
-        rhi::VertexAttribute{4, rhi::VertexFormat::Float4, offsetof(SpriteInstance, pivot_turn)},
-    };
-    core::Result<OwnedPipeline> sprites = pipeline(rhi::PipelineDesc{
-        .vertex_shader = sprite_vertex.value(),
-        .fragment_shader = sprite_fragment.value(),
-        .vertex_stride = sizeof(core::Vec2),
-        .attributes = k_corner_attributes,
-        .instance_stride = sizeof(SpriteInstance),
-        .instance_attributes = k_sprite_attributes,
-        .blend = rhi::BlendMode::Alpha,
-        .depth_test = false,
-        .cull = rhi::CullMode::None,
-    });
-    if (!sprites.has_value()) {
-        return sprites.error();
-    }
-    made.sprites = std::move(sprites).value();
-
-    const core::Result<rhi::ShaderHandle> ui_vertex = shader("ui.vert", rhi::ShaderStage::Vertex);
-    if (!ui_vertex.has_value()) {
-        return ui_vertex.error();
-    }
-    const core::Result<rhi::ShaderHandle> ui_fragment =
-        shader("ui.frag", rhi::ShaderStage::Fragment);
-    if (!ui_fragment.has_value()) {
-        return ui_fragment.error();
-    }
-    constexpr std::array k_ui_attributes{
-        rhi::VertexAttribute{0, rhi::VertexFormat::Float2, offsetof(ui::Vertex, position)},
-        rhi::VertexAttribute{1, rhi::VertexFormat::Float2, offsetof(ui::Vertex, uv)},
-        rhi::VertexAttribute{2, rhi::VertexFormat::UByte4Norm, offsetof(ui::Vertex, color)},
-    };
-    rhi::PipelineDesc ui_desc{
-        .vertex_shader = ui_vertex.value(),
-        .fragment_shader = ui_fragment.value(),
-        .vertex_stride = sizeof(ui::Vertex),
-        .attributes = k_ui_attributes,
-        .blend = rhi::BlendMode::Alpha,
-        .depth_test = false,
-        .cull = rhi::CullMode::None,
-    };
-    core::Result<OwnedPipeline> ui = pipeline(ui_desc);
-    if (!ui.has_value()) {
-        return ui.error();
-    }
-    made.ui = std::move(ui).value();
-    ui_desc.blend = rhi::BlendMode::PremultipliedAlpha;
-    core::Result<OwnedPipeline> ui_premultiplied = pipeline(ui_desc);
-    if (!ui_premultiplied.has_value()) {
-        return ui_premultiplied.error();
-    }
-    made.ui_premultiplied = std::move(ui_premultiplied).value();
 
     if (m_settings.shadow_resolution > 0) {
         const core::Result<rhi::ShaderHandle> shadow_vertex =
@@ -2191,6 +2279,32 @@ void ForwardRenderer::draw_ui(rhi::CommandList& commands, const Frame& frame, Fr
     }
 }
 
+FrameStats ForwardRenderer::render_flat(rhi::CommandList& commands, const Frame& frame) {
+    FrameStats stats;
+    if ((!frame.meshes.empty() || !frame.particles.empty() || !frame.lights.empty()) &&
+        !m_warned_3d) {
+        m_warned_3d = true;
+        DREAM_LOG_WARNING("The 'sprites' renderer draws only 2D: the scene's {} model parts, {} "
+                          "particle effects and {} lights are left out. List 'forward' to draw "
+                          "them",
+                          frame.meshes.size(), frame.particles.size(), frame.lights.size());
+    }
+    commands.begin_render_pass(frame.clear_color);
+    if (frame.sprite_view.has_value()) {
+        draw_sprites(commands, frame, stats);
+        // Debug lines, such as Physics2D's, in the 2D camera's view.
+        FrameUniforms flat{};
+        flat.view_projection = *frame.sprite_view;
+        commands.set_uniforms(std::as_bytes(std::span(&flat, 1)));
+        draw_lines(commands, frame.lines, stats);
+    }
+    draw_ui(commands, frame, stats);
+    commands.end_render_pass();
+    DREAM_PROFILE_VALUE("Debug lines", stats.lines);
+    DREAM_PROFILE_VALUE("UI draw commands", stats.ui_commands);
+    return stats;
+}
+
 FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& frame) {
     DREAM_PROFILE_ZONE("Draw scene");
     FrameStats stats;
@@ -2200,6 +2314,15 @@ FrameStats ForwardRenderer::render(rhi::CommandList& commands, const Frame& fram
         commands.end_render_pass();
         return stats;
     }
+    if constexpr (k_sprites_only) {
+        return render_flat(commands, frame);
+    } else {
+        return render_scene(commands, frame);
+    }
+}
+
+FrameStats ForwardRenderer::render_scene(rhi::CommandList& commands, const Frame& frame) {
+    FrameStats stats;
 
     // The frame's uniforms, which every pass reads, or nothing without a camera.
     std::optional<FrameUniforms> uniforms;
@@ -2404,7 +2527,9 @@ core::Result<std::unique_ptr<SceneRenderer>> create(const core::Config& config) 
 
 } // namespace
 
-#if defined(DREAM_FORWARD_PLUS)
+#if defined(DREAM_SPRITES_RENDERER)
+[[nodiscard]] core::Result<void> register_renderer_sprites(core::ModuleRegistry& registry) {
+#elif defined(DREAM_FORWARD_PLUS)
 [[nodiscard]] core::Result<void> register_renderer_forward_plus(core::ModuleRegistry& registry) {
 #else
 [[nodiscard]] core::Result<void> register_renderer_forward(core::ModuleRegistry& registry) {

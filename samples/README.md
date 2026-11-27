@@ -20,7 +20,7 @@ Each compares a picture with a reference on all five PC graphics backends, and o
 | [input](input) | A ball moved by keys, sticks, triggers or a finger, and a panel showing each action's state and strength | [Input](../docs/guides/input.md) |
 | [ui](ui) | A title menu, settings with sliders and switches, and a HUD with health, score and timer, in RML and RCSS | [ADR 0012](../docs/adr/0012-audio-and-ui.md) |
 | [platformer](platformer) | A 2D platformer: a tile map level with collisions, parallax hills and clouds, animated tiles, a 9-slice sign, an animated pixel-art hero moved by Box2D, coins and a following camera, on keyboard, gamepad and touch | [2D games](../docs/guides/sprites.md) |
-| [top_down](top_down) | A top-down 2D garden made in the Tiled map editor: its layers, animated water, solid tiles and objects read by the `tiled` module, and a gardener who walks among trees sorted by height | [2D games](../docs/guides/sprites.md) |
+| [top_down](top_down) | A top-down 2D garden made in the Tiled map editor: its layers, animated water, solid tiles and objects read by the `tiled` module, and a gardener who walks among trees sorted by height, drawn by the `sprites` renderer for 2D alone | [2D games](../docs/guides/sprites.md) |
 
 Games and checks that use many features together:
 
