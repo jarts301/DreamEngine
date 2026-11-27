@@ -34,19 +34,23 @@ editor, atlases packed at build time, and making the art. The design is in
 platform = ["sdl3"]
 input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
-renderer = ["forward", "null"]
+renderer = ["sprites", "null"]
 physics2d = ["box2d", "chipmunk"]
 
 [modules.android]
 platform = ["sdl3"]
 input_device = ["sdl3_gamepad", "null"]
 rhi = ["vulkan", "opengles", "null"]
-renderer = ["forward", "null"]
+renderer = ["sprites", "null"]
 physics2d = ["box2d"]
 ```
 
-`forward` draws sprites; a 2D game needs no 3D modules. `physics2d` is only needed for collisions,
-and `tile_map_format = ["tiled", "null"]` only for maps made in Tiled.
+The `sprites` renderer draws only 2D: sprites, debug lines and the interface, straight into the
+window, with three shaders instead of the 3D renderer's sixteen, and no shadow map or HDR targets
+([ADR 0053](../adr/0053-sprites-renderer.md)). A 2D game that also wants particles or a 3D scene
+behind its sprites lists `forward`, which draws the same sprites over it. A 2D game needs no other
+3D modules. `physics2d` is only needed for collisions, and `tile_map_format = ["tiled", "null"]`
+only for maps made in Tiled.
 
 ```cpp
 class MyGame final : public runtime::Game {
@@ -498,6 +502,7 @@ before opening it.
 | You see | Likely cause | Fix |
 |---|---|---|
 | Nothing | No `camera_2d`, the sprites are out of its view, or `update_transforms` isn't called | Check the camera's position and height |
+| Models, particles or lights are missing, and the log says the 'sprites' renderer left them out | The game lists `sprites`, which draws only 2D | List `forward` |
 | A white rectangle | The sprite has no texture, or its path is wrong (the log says) | Fix `texture` |
 | Blurry pixel art | `filter = "smooth"` | Use `"pixel"`, the default |
 | Pixel art with blotchy colors on phones | It is in a `textures` folder, so compressed | Move it to a `sprites` folder |
@@ -526,7 +531,7 @@ Each of these is a later step on the roadmap:
 
 - Tile maps and Tiled tilesets from atlases; trimming images' empty edges when packing.
 - Lights and shadows for sprites.
-- A renderer module made for 2D games alone.
+- Particles and bloom with the `sprites` renderer; list `forward` for them.
 
 ## How it works inside
 

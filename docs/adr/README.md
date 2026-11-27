@@ -57,6 +57,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0050](0050-tiled-maps.md) | Maps from the Tiled map editor through a `tile_map_format` interface: `tiled`, reading JSON with yyjson, and `null`; layers, tilesets, animations, solid tiles and objects added to the 2D world |
 | [0051](0051-feature-samples.md) | A sample for each feature that can be seen, each a scene and a short game with its picture checked on every backend from one template; `module_demo` and the `greeter` interface removed |
 | [0052](0052-sprite-atlases.md) | Sprite atlases packed at build time by `dream_atlas_cook` from folders named in `[atlases]`, and sprites drawing a region of their texture, named with `atlas` and `region` |
+| [0053](0053-sprites-renderer.md) | The `sprites` renderer module, for games without a 3D scene: sprites, debug lines and the interface, from the forward renderer's source, with only their shaders |
 
 ## Template
 
