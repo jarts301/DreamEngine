@@ -1,0 +1,54 @@
+[app]
+organization = "DreamEngine"
+name = "DreamInput"
+title = "Dream Input"
+width = 1280
+height = 720
+
+# Every action has bindings for keys, a gamepad and, where it fits, the mouse or a finger. The game
+# only ever names the actions (docs/guides/input.md).
+[input]
+stick_deadzone = 0.2
+trigger_deadzone = 0.1
+
+[input.actions]
+move_left = ["key:a", "key:left", "gamepad:left_stick_left", "gamepad:dpad_left"]
+move_right = ["key:d", "key:right", "gamepad:left_stick_right", "gamepad:dpad_right"]
+move_up = ["key:w", "key:up", "gamepad:left_stick_up", "gamepad:dpad_up"]
+move_down = ["key:s", "key:down", "gamepad:left_stick_down", "gamepad:dpad_down"]
+jump = ["key:space", "gamepad:south"]
+boost = ["key:left_shift", "gamepad:right_trigger"]
+brake = ["key:left_control", "gamepad:left_trigger"]
+touch = ["mouse:left", "touch"]
+quit = ["key:escape", "gamepad:back"]
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
+renderer = ["forward_plus", "forward", "null"]
+ui = ["rmlui", "markup"]
+texture_decoder = ["ktx", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "opengles", "null"]
+renderer = ["forward_plus", "forward", "null"]
+ui = ["rmlui", "markup"]
+texture_decoder = ["ktx", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "null"]
+renderer = ["forward_plus", "forward", "null"]
+ui = ["rmlui", "markup"]
+texture_decoder = ["ktx", "null"]
+
+# What the editor opens (ADR 0046): dream_editor samples/input
+[editor]
+scene = "assets:/scenes/arena.toml"
+game = "dream_input"
+assets = ["assets", "../assets"]
+build = "../../build/windows-debug"

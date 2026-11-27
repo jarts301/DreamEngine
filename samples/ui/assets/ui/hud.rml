@@ -1,0 +1,17 @@
+<rml>
+<head>
+    <title>HUD</title>
+    <link type="text/rcss" href="style.rcss"/>
+</head>
+<body>
+    <div id="health_box">
+        <span class="caption">Health</span>
+        <div id="health">
+            <div class="cell" id="cell0"/><div class="cell" id="cell1"/><div class="cell" id="cell2"/><div class="cell" id="cell3"/><div class="cell" id="cell4"/><div class="cell" id="cell5"/><div class="cell" id="cell6"/><div class="cell" id="cell7"/><div class="cell" id="cell8"/><div class="cell" id="cell9"/>
+        </div>
+    </div>
+    <div id="score_box">Score <span id="score">0</span></div>
+    <div id="timer_box">Time <span id="timer">0:00</span></div>
+    <button id="pause">Pause</button>
+</body>
+</rml>

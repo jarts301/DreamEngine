@@ -7,7 +7,7 @@ A module depends only on interfaces and Core. See
 
 ## Adding a backend
 
-`modules/greeter/english/` is the smallest working example. A backend needs two things:
+`modules/texture_decoder/null/` is the smallest working example. A backend needs two things:
 
 1. A `CMakeLists.txt` that calls `dream_add_module`, which is the only build setup required:
 

@@ -1,0 +1,146 @@
+# How surfaces answer light (docs/guides/materials.md). The back row is plastic and the middle row
+# metal, each from mirror-smooth on the left to fully rough on the right. In front: a brick wall with
+# a normal map, gold, blended glass, a fence cut out by its texture's alpha and seen from both sides,
+# and a lamp whose emission is brighter than white, so it glows. The sky lights them all and shows in
+# the smooth ones.
+
+[entities.camera.transform]
+position = [0.0, 3.2, 9.5]
+
+[entities.camera.camera]
+vertical_fov = 40.0
+target = [0.0, 1.35, 0.0]
+
+[entities.sun.directional_light]
+direction = [-0.5, -1.0, -0.6]
+color = [1.0, 0.95, 0.85]
+intensity = 1.3
+
+[entities.sky.environment]
+map = "assets:/environments/sky.hdr"
+intensity = 0.8
+
+[entities.ground.transform]
+scale = [8.0, 1.0, 8.0]
+
+[entities.ground.mesh]
+model = "assets:/models/ground.glb"
+
+
+[entities.plastic_0.transform]
+position = [-2.8, 2.75, -1.2]
+scale = [0.55, 0.55, 0.55]
+
+[entities.plastic_0.mesh]
+model = "assets:/models/plastic_0.glb"
+tint = [0.80, 0.10, 0.08]
+
+[entities.plastic_1.transform]
+position = [-1.4, 2.75, -1.2]
+scale = [0.55, 0.55, 0.55]
+
+[entities.plastic_1.mesh]
+model = "assets:/models/plastic_1.glb"
+tint = [0.80, 0.10, 0.08]
+
+[entities.plastic_2.transform]
+position = [0.0, 2.75, -1.2]
+scale = [0.55, 0.55, 0.55]
+
+[entities.plastic_2.mesh]
+model = "assets:/models/plastic_2.glb"
+tint = [0.80, 0.10, 0.08]
+
+[entities.plastic_3.transform]
+position = [1.4, 2.75, -1.2]
+scale = [0.55, 0.55, 0.55]
+
+[entities.plastic_3.mesh]
+model = "assets:/models/plastic_3.glb"
+tint = [0.80, 0.10, 0.08]
+
+[entities.plastic_4.transform]
+position = [2.8, 2.75, -1.2]
+scale = [0.55, 0.55, 0.55]
+
+[entities.plastic_4.mesh]
+model = "assets:/models/plastic_4.glb"
+tint = [0.80, 0.10, 0.08]
+
+[entities.metal_0.transform]
+position = [-2.8, 1.5, 0.0]
+scale = [0.55, 0.55, 0.55]
+
+[entities.metal_0.mesh]
+model = "assets:/models/metal_0.glb"
+
+[entities.metal_1.transform]
+position = [-1.4, 1.5, 0.0]
+scale = [0.55, 0.55, 0.55]
+
+[entities.metal_1.mesh]
+model = "assets:/models/metal_1.glb"
+
+[entities.metal_2.transform]
+position = [0.0, 1.5, 0.0]
+scale = [0.55, 0.55, 0.55]
+
+[entities.metal_2.mesh]
+model = "assets:/models/metal_2.glb"
+
+[entities.metal_3.transform]
+position = [1.4, 1.5, 0.0]
+scale = [0.55, 0.55, 0.55]
+
+[entities.metal_3.mesh]
+model = "assets:/models/metal_3.glb"
+
+[entities.metal_4.transform]
+position = [2.8, 1.5, 0.0]
+scale = [0.55, 0.55, 0.55]
+
+[entities.metal_4.mesh]
+model = "assets:/models/metal_4.glb"
+
+[entities.wall.transform]
+position = [-2.7, 0.5, 2.1]
+rotation = [0.0, 20.0, 0.0]
+scale = [0.6, 0.67, 0.6]
+
+[entities.wall.mesh]
+model = "assets:/models/brick_wall.glb"
+
+[entities.gold.transform]
+position = [-1.1, 0.45, 2.6]
+scale = [0.45, 0.45, 0.45]
+
+[entities.gold.mesh]
+model = "assets:/models/gold_ball.glb"
+
+[entities.glass.transform]
+position = [0.3, 0.8, 2.8]
+rotation = [0.0, -15.0, 0.0]
+
+[entities.glass.mesh]
+model = "assets:/models/glass_pane.glb"
+
+[entities.fence.transform]
+position = [1.9, 0.6, 2.4]
+rotation = [0.0, -35.0, 0.0]
+scale = [0.8, 1.0, 1.0]
+
+[entities.fence.mesh]
+model = "assets:/models/fence.glb"
+
+[entities.lamp.transform]
+position = [3.2, 0.35, 2.9]
+scale = [0.3, 0.3, 0.3]
+
+[entities.lamp.mesh]
+model = "assets:/models/lamp.glb"
+casts_shadows = false
+
+[entities.lamp.point_light]
+color = [1.0, 0.45, 0.12]
+intensity = 2.0
+range = 3.0

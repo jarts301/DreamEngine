@@ -1,1 +1,0 @@
-dream_add_interface(greeter)

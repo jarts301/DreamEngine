@@ -1,0 +1,53 @@
+[app]
+organization = "DreamEngine"
+name = "DreamForest"
+title = "Dream Forest"
+width = 1280
+height = 720
+
+[input.actions]
+quit = ["key:escape", "gamepad:back"]
+pause = ["key:space", "gamepad:south"]
+orbit_left = ["key:a", "key:left", "gamepad:left_stick_left", "gamepad:dpad_left"]
+orbit_right = ["key:d", "key:right", "gamepad:left_stick_right", "gamepad:dpad_right"]
+zoom_in = ["key:w", "key:up", "gamepad:left_stick_up", "gamepad:right_trigger"]
+zoom_out = ["key:s", "key:down", "gamepad:left_stick_down", "gamepad:left_trigger"]
+drag = ["mouse:left", "touch"]
+
+# Simpler versions of each model, made at build time by the mesh_simplifier listed below
+# (docs/adr/0032, 0042), and drawn for trees far enough away that the difference is under a pixel.
+[lods]
+levels = 3
+reduction = 0.5
+min_triangles = 64
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
+renderer = ["forward_plus", "forward", "null"]
+texture_decoder = ["ktx", "null"]
+mesh_simplifier = ["meshoptimizer", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "opengles", "null"]
+renderer = ["forward_plus", "forward", "null"]
+texture_decoder = ["ktx", "null"]
+mesh_simplifier = ["meshoptimizer", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "null"]
+renderer = ["forward_plus", "forward", "null"]
+texture_decoder = ["ktx", "null"]
+mesh_simplifier = ["meshoptimizer", "null"]
+
+# What the editor opens (ADR 0046): dream_editor samples/forest
+[editor]
+scene = "assets:/scenes/forest.toml"
+game = "dream_forest"
+assets = ["assets", "../assets"]
+build = "../../build/windows-debug"

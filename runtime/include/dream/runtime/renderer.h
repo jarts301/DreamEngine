@@ -222,6 +222,18 @@ public:
         return m_last_stats.sprites;
     }
 
+    // How many draw commands the last call to render recorded for the scene and its shadows. Copies
+    // of a model are drawn together (ADR 0031), so this is far below the parts drawn.
+    [[nodiscard]] std::uint32_t last_draw_call_count() const noexcept {
+        return m_last_stats.draw_calls;
+    }
+
+    // How many parts of models the last call to render drew with one of their simpler versions
+    // (ADR 0032).
+    [[nodiscard]] std::uint32_t last_simplified_count() const noexcept {
+        return m_last_stats.simplified;
+    }
+
     // How many parts of models the last call to render skipped, because they were out of view.
     [[nodiscard]] std::uint32_t last_culled_count() const noexcept {
         return m_last_stats.culled;

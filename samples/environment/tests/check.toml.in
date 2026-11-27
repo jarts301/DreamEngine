@@ -1,0 +1,56 @@
+# The checks' configuration, made into one per graphics backend by dream_add_feature_sample.
+[app]
+window = "hidden"
+title = "Dream Environment Check"
+width = 960
+height = 540
+max_fps = 0
+
+[demo]
+look = 1
+quit_after_frames = @QUIT_AFTER@
+
+[input.actions]
+quit = ["key:escape"]
+next_look = ["key:space"]
+orbit_left = ["key:a"]
+orbit_right = ["key:d"]
+zoom_in = ["key:w"]
+zoom_out = ["key:s"]
+drag = ["mouse:left"]
+
+[renderer]
+bloom = true
+bloom_intensity = 0.7
+bloom_threshold = 1.3
+
+@RHI_TABLE@
+
+@SCREENSHOT@
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+tangent_generator = ["mikktspace"]
+texture_decoder = ["ktx", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+tangent_generator = ["mikktspace"]
+texture_decoder = ["ktx", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+tangent_generator = ["mikktspace"]
+texture_decoder = ["ktx", "null"]
+
+[audio]
+muted = true

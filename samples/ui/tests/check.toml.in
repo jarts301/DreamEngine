@@ -1,0 +1,47 @@
+# The checks' configuration, made into one per graphics backend by dream_add_feature_sample. They
+# show the settings over the HUD, with the game held at a moment.
+[app]
+window = "hidden"
+title = "Dream Interface Check"
+width = 960
+height = 540
+max_fps = 0
+
+[demo]
+quit_after_frames = @QUIT_AFTER@
+screen = "settings"
+hold = true
+
+[input.actions]
+pause = ["key:escape"]
+
+@RHI_TABLE@
+
+@SCREENSHOT@
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+ui = ["rmlui"]
+texture_decoder = ["ktx", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+ui = ["rmlui"]
+texture_decoder = ["ktx", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+ui = ["rmlui"]
+texture_decoder = ["ktx", "null"]
+
+[audio]
+muted = true

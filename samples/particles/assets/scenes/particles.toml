@@ -1,0 +1,210 @@
+# Particle effects at dusk (docs/guides/particles.md), each from the guide's table "Making effects":
+# a campfire of flames, sparks and smoke; a fountain of water falling back; sparkles around a
+# glowing crystal; snow over everything; and, by the crate, an explosion that only goes off when
+# the game asks, since its emitter has a burst and doesn't loop.
+
+[entities.camera.transform]
+position = [0.0, 3.0, 9.0]
+
+[entities.camera.camera]
+vertical_fov = 45.0
+target = [0.0, 1.0, 0.0]
+
+[entities.sun.directional_light]
+direction = [0.8, -0.3, -0.5]
+color = [1.0, 0.55, 0.3]
+intensity = 0.5
+ambient = 0.15
+
+[entities.ground.transform]
+scale = [8.0, 1.0, 8.0]
+
+[entities.ground.mesh]
+model = "assets:/models/ground.glb"
+tint = [0.45, 0.45, 0.5]
+
+# The campfire, on the left.
+[entities.campfire.transform]
+position = [-3.0, 0.05, 0.5]
+
+[entities.campfire.point_light]
+color = [1.0, 0.5, 0.15]
+intensity = 2.0
+range = 3.5
+
+[entities.flames]
+parent = "campfire"
+
+[entities.flames.particle_emitter]
+blend = "additive"
+shape = "cone"
+radius = 0.22
+cone_angle = 15.0
+rate = 80.0
+max_particles = 128
+lifetime = [0.5, 0.9]
+speed = [0.6, 1.1]
+size = [0.4, 0.6]
+end_size = 0.2
+start_color = [1.6, 0.6, 0.16]
+end_color = [0.9, 0.12, 0.02]
+end_alpha = 0.0
+gravity = [0.0, 0.8, 0.0]
+seed = 1
+
+[entities.sparks]
+parent = "campfire"
+
+[entities.sparks.particle_emitter]
+blend = "additive"
+shape = "cone"
+radius = 0.15
+cone_angle = 25.0
+rate = 18.0
+lifetime = [0.9, 1.5]
+speed = [2.2, 3.2]
+size = [0.05, 0.08]
+end_size = 0.5
+start_color = [4.0, 2.0, 0.6]
+end_color = [2.0, 0.4, 0.05]
+end_alpha = 0.0
+gravity = [0.0, -3.0, 0.0]
+drag = 0.6
+seed = 2
+
+[entities.smoke]
+parent = "campfire"
+
+[entities.smoke.transform]
+position = [0.0, 0.7, 0.0]
+
+[entities.smoke.particle_emitter]
+texture = "assets:/textures/smoke.png"
+shape = "cone"
+radius = 0.15
+cone_angle = 12.0
+rate = 8.0
+max_particles = 64
+lifetime = [3.5, 4.5]
+speed = [0.5, 0.7]
+size = [0.6, 0.8]
+end_size = 4.0
+rotation = [0.0, 360.0]
+spin = [-25.0, 25.0]
+start_color = [0.22, 0.21, 0.2]
+start_alpha = 0.8
+end_color = [0.55, 0.55, 0.55]
+end_alpha = 0.0
+gravity = [0.3, 0.1, 0.0]
+drag = 0.3
+seed = 3
+
+# A fountain in the middle: drops thrown up in a narrow cone, falling back under gravity.
+[entities.basin.transform]
+position = [0.0, 0.15, -1.0]
+scale = [0.6, 0.15, 0.6]
+
+[entities.basin.mesh]
+model = "assets:/models/block.glb"
+tint = [0.6, 0.6, 0.62]
+
+[entities.fountain.transform]
+position = [0.0, 0.3, -1.0]
+
+[entities.fountain.particle_emitter]
+shape = "cone"
+radius = 0.05
+cone_angle = 6.0
+rate = 220.0
+max_particles = 512
+lifetime = [1.1, 1.3]
+speed = [5.0, 5.6]
+size = [0.06, 0.09]
+end_size = 1.5
+start_color = [0.6, 0.8, 1.0]
+start_alpha = 0.9
+end_color = [0.85, 0.95, 1.0]
+end_alpha = 0.2
+gravity = [0.0, -9.8, 0.0]
+seed = 4
+
+# Sparkles around a glowing crystal, on the right.
+[entities.crystal.transform]
+position = [3.0, 0.9, 0.3]
+scale = [0.3, 0.3, 0.3]
+
+[entities.crystal.mesh]
+model = "assets:/models/lamp_blue.glb"
+casts_shadows = false
+
+[entities.crystal.point_light]
+color = [0.3, 0.6, 1.0]
+intensity = 1.5
+range = 3.0
+
+[entities.sparkles]
+parent = "crystal"
+
+[entities.sparkles.particle_emitter]
+blend = "additive"
+shape = "sphere"
+radius = 2.0
+rate = 30.0
+lifetime = [1.0, 2.0]
+speed = [0.1, 0.3]
+size = [0.04, 0.04]
+start_color = [0.6, 1.5, 3.0]
+end_color = [0.3, 0.2, 2.0]
+end_alpha = 0.0
+gravity = [0.0, 0.3, 0.0]
+seed = 5
+
+# Snow over everything, born on a wide square high above.
+[entities.snow.transform]
+position = [0.0, 6.0, 0.0]
+
+[entities.snow.particle_emitter]
+shape = "box"
+extents = [8.0, 0.0, 6.0]
+rate = 200.0
+max_particles = 2000
+lifetime = [8.0, 10.0]
+speed = 0.0
+size = 0.05
+end_size = 1.0
+start_color = [1.0, 1.0, 1.0]
+end_color = [1.0, 1.0, 1.0]
+end_alpha = 1.0
+gravity = [0.0, -1.0, 0.0]
+drag = 1.0
+seed = 6
+
+# The crate the explosions go off by, and the explosion: only a burst, set off by the game.
+[entities.crate.transform]
+position = [1.6, 0.4, 2.0]
+rotation = [0.0, 30.0, 0.0]
+scale = [0.4, 0.4, 0.4]
+
+[entities.crate.mesh]
+model = "assets:/models/crate.glb"
+
+[entities.explosion.transform]
+position = [1.0, 0.6, 2.6]
+
+[entities.explosion.particle_emitter]
+blend = "additive"
+shape = "sphere"
+radius = 0.2
+burst = 0
+rate = 0.0
+loop = false
+max_particles = 256
+lifetime = [0.3, 0.6]
+speed = [4.0, 8.0]
+size = [0.2, 0.3]
+end_size = 0.1
+start_color = [6.0, 3.0, 1.0]
+end_color = [1.0, 0.2, 0.0]
+end_alpha = 0.0
+drag = 3.0
+seed = 7

@@ -1,0 +1,55 @@
+# The checks' configuration, made into one per graphics backend by dream_add_feature_sample. The
+# simulation runs 1.6 s in fixed steps as the game starts, and holds there.
+[app]
+window = "hidden"
+title = "Dream Physics 3D Check"
+width = 960
+height = 540
+max_fps = 0
+fixed_rate = 120
+
+[demo]
+quit_after_frames = @QUIT_AFTER@
+time = 1.6
+
+[input.actions]
+quit = ["key:escape"]
+throw = ["key:space"]
+restart = ["key:r"]
+shapes = ["key:f"]
+orbit_left = ["key:a"]
+orbit_right = ["key:d"]
+zoom_in = ["key:w"]
+zoom_out = ["key:s"]
+drag = ["mouse:right"]
+
+@RHI_TABLE@
+
+@SCREENSHOT@
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+physics3d = ["jolt"]
+texture_decoder = ["ktx", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+physics3d = ["jolt"]
+texture_decoder = ["ktx", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+physics3d = ["jolt"]
+texture_decoder = ["ktx", "null"]
+
+[audio]
+muted = true

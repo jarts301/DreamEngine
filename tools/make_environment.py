@@ -14,7 +14,7 @@ It needs only Python's standard library, and gives the same file every run.
 import math
 from pathlib import Path
 
-OUTPUT = Path("samples/render_demo/assets/environments/sky.hdr")
+OUTPUT = Path("samples/assets_3d/environments/sky.hdr")
 WIDTH, HEIGHT = 512, 256
 
 # Toward the sun: the yard's light travels along (-0.5, -1.0, -0.6).

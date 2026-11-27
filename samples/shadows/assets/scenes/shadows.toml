@@ -1,0 +1,291 @@
+# A long avenue under a low sun (docs/adr/0029, 0041): pillars and arches every 6 m to 66 m away,
+# balls and crates, and a fence near the camera whose holes, cut out by its texture, show in its
+# shadow. The game turns the sun, so shadows sweep across the ground.
+
+[entities.camera.transform]
+position = [5.0, 3.5, 9.0]
+
+[entities.camera.camera]
+vertical_fov = 50.0
+target = [0.0, 1.0, -8.0]
+
+[entities.sun.directional_light]
+direction = [-0.7, -0.45, -0.3]
+color = [1.0, 0.88, 0.72]
+intensity = 1.6
+ambient = 0.15
+
+[entities.ground_0.transform]
+position = [0.0, 0.0, 0.0]
+scale = [10.0, 1.0, 10.0]
+
+[entities.ground_0.mesh]
+model = "assets:/models/ground.glb"
+
+[entities.ground_1.transform]
+position = [0.0, 0.0, -20.0]
+scale = [10.0, 1.0, 10.0]
+
+[entities.ground_1.mesh]
+model = "assets:/models/ground.glb"
+
+[entities.ground_2.transform]
+position = [0.0, 0.0, -40.0]
+scale = [10.0, 1.0, 10.0]
+
+[entities.ground_2.mesh]
+model = "assets:/models/ground.glb"
+
+[entities.ground_3.transform]
+position = [0.0, 0.0, -60.0]
+scale = [10.0, 1.0, 10.0]
+
+[entities.ground_3.mesh]
+model = "assets:/models/ground.glb"
+
+[entities.pillar_left_0.transform]
+position = [-3.0, 1.5, -0.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_left_0.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_right_0.transform]
+position = [3.0, 1.5, -0.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_right_0.mesh]
+model = "assets:/models/block.glb"
+
+[entities.arch_0.transform]
+position = [0.0, 3.2, -0.0]
+scale = [3.3, 0.2, 0.3]
+
+[entities.arch_0.mesh]
+model = "assets:/models/block.glb"
+tint = [0.85, 0.8, 0.7]
+
+[entities.pillar_left_1.transform]
+position = [-3.0, 1.5, -6.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_left_1.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_right_1.transform]
+position = [3.0, 1.5, -6.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_right_1.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_left_2.transform]
+position = [-3.0, 1.5, -12.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_left_2.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_right_2.transform]
+position = [3.0, 1.5, -12.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_right_2.mesh]
+model = "assets:/models/block.glb"
+
+[entities.arch_2.transform]
+position = [0.0, 3.2, -12.0]
+scale = [3.3, 0.2, 0.3]
+
+[entities.arch_2.mesh]
+model = "assets:/models/block.glb"
+tint = [0.85, 0.8, 0.7]
+
+[entities.pillar_left_3.transform]
+position = [-3.0, 1.5, -18.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_left_3.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_right_3.transform]
+position = [3.0, 1.5, -18.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_right_3.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_left_4.transform]
+position = [-3.0, 1.5, -24.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_left_4.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_right_4.transform]
+position = [3.0, 1.5, -24.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_right_4.mesh]
+model = "assets:/models/block.glb"
+
+[entities.arch_4.transform]
+position = [0.0, 3.2, -24.0]
+scale = [3.3, 0.2, 0.3]
+
+[entities.arch_4.mesh]
+model = "assets:/models/block.glb"
+tint = [0.85, 0.8, 0.7]
+
+[entities.pillar_left_5.transform]
+position = [-3.0, 1.5, -30.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_left_5.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_right_5.transform]
+position = [3.0, 1.5, -30.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_right_5.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_left_6.transform]
+position = [-3.0, 1.5, -36.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_left_6.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_right_6.transform]
+position = [3.0, 1.5, -36.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_right_6.mesh]
+model = "assets:/models/block.glb"
+
+[entities.arch_6.transform]
+position = [0.0, 3.2, -36.0]
+scale = [3.3, 0.2, 0.3]
+
+[entities.arch_6.mesh]
+model = "assets:/models/block.glb"
+tint = [0.85, 0.8, 0.7]
+
+[entities.pillar_left_7.transform]
+position = [-3.0, 1.5, -42.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_left_7.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_right_7.transform]
+position = [3.0, 1.5, -42.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_right_7.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_left_8.transform]
+position = [-3.0, 1.5, -48.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_left_8.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_right_8.transform]
+position = [3.0, 1.5, -48.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_right_8.mesh]
+model = "assets:/models/block.glb"
+
+[entities.arch_8.transform]
+position = [0.0, 3.2, -48.0]
+scale = [3.3, 0.2, 0.3]
+
+[entities.arch_8.mesh]
+model = "assets:/models/block.glb"
+tint = [0.85, 0.8, 0.7]
+
+[entities.pillar_left_9.transform]
+position = [-3.0, 1.5, -54.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_left_9.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_right_9.transform]
+position = [3.0, 1.5, -54.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_right_9.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_left_10.transform]
+position = [-3.0, 1.5, -60.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_left_10.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_right_10.transform]
+position = [3.0, 1.5, -60.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_right_10.mesh]
+model = "assets:/models/block.glb"
+
+[entities.arch_10.transform]
+position = [0.0, 3.2, -60.0]
+scale = [3.3, 0.2, 0.3]
+
+[entities.arch_10.mesh]
+model = "assets:/models/block.glb"
+tint = [0.85, 0.8, 0.7]
+
+[entities.pillar_left_11.transform]
+position = [-3.0, 1.5, -66.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_left_11.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_right_11.transform]
+position = [3.0, 1.5, -66.0]
+scale = [0.3, 1.5, 0.3]
+
+[entities.pillar_right_11.mesh]
+model = "assets:/models/block.glb"
+
+[entities.fence.transform]
+position = [-1.6, 0.6, 1.5]
+rotation = [0.0, 10.0, 0.0]
+
+[entities.fence.mesh]
+model = "assets:/models/fence.glb"
+
+[entities.ball.transform]
+position = [1.0, 0.6, -2.0]
+scale = [0.6, 0.6, 0.6]
+
+[entities.ball.mesh]
+model = "assets:/models/ball.glb"
+tint = [0.2, 0.45, 0.85]
+
+[entities.crate.transform]
+position = [0.8, 0.5, -9.0]
+rotation = [0.0, 30.0, 0.0]
+scale = [0.5, 0.5, 0.5]
+
+[entities.crate.mesh]
+model = "assets:/models/crate.glb"
+
+[entities.crate_far.transform]
+position = [-1.0, 0.5, -27.0]
+rotation = [0.0, 15.0, 0.0]
+scale = [0.5, 0.5, 0.5]
+
+[entities.crate_far.mesh]
+model = "assets:/models/crate.glb"

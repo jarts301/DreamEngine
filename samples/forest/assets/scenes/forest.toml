@@ -1,0 +1,15 @@
+# A forest's light and ground (docs/adr/0031, 0032). The game plants the trees and rocks, too many
+# to write here, and moves the camera.
+
+[entities.camera.transform]
+position = [0.0, 24.0, 42.0]
+
+[entities.camera.camera]
+vertical_fov = 50.0
+target = [0.0, 0.0, 0.0]
+
+[entities.sun.directional_light]
+direction = [-0.5, -0.8, -0.4]
+color = [1.0, 0.95, 0.85]
+intensity = 1.4
+ambient = 0.35

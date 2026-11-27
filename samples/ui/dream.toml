@@ -1,0 +1,40 @@
+[app]
+organization = "DreamEngine"
+name = "DreamInterface"
+title = "Dream Interface"
+width = 1280
+height = 720
+
+[input.actions]
+pause = ["key:escape", "key:back", "gamepad:start"]
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
+renderer = ["forward_plus", "forward", "null"]
+ui = ["rmlui", "markup"]
+texture_decoder = ["ktx", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "opengles", "null"]
+renderer = ["forward_plus", "forward", "null"]
+ui = ["rmlui", "markup"]
+texture_decoder = ["ktx", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "null"]
+renderer = ["forward_plus", "forward", "null"]
+ui = ["rmlui", "markup"]
+texture_decoder = ["ktx", "null"]
+
+# What the editor opens (ADR 0046): dream_editor samples/ui
+[editor]
+scene = "assets:/scenes/backdrop.toml"
+game = "dream_ui"
+assets = ["assets", "../assets"]
+build = "../../build/windows-debug"
