@@ -6,7 +6,7 @@ This document has three parts:
   Store and similar stores;
 - the plan to close those gaps, including macOS, iOS and online play.
 
-It reflects the repository on 2026-11-20. The plan is a proposal: each phase gets its own decisions
+It reflects the repository on 2026-11-27. The plan is a proposal: each phase gets its own decisions
 and ADRs when it starts.
 
 ## 1. The rule every plan follows: everything is a module
@@ -132,19 +132,19 @@ saved progress, music and settings, built this way and played on PC and phones.
 | Area | Available now |
 |---|---|
 | Platforms | Windows, and Android phones (arm64, Android 10 and up). Linux builds but is untested. |
-| Graphics | Five graphics APIs; the same picture on each. glTF models, static or skinned and animated, with metallic-roughness PBR materials, normal, occlusion and emissive maps, and opaque, cut-out, blended and double-sided surfaces; one directional light with soft cascaded shadows, and point and spot lights, up to 256 with `forward_plus`; lighting from an HDR environment, which shiny surfaces reflect; HDR with PBR Neutral tone mapping and bloom; frustum culling, instancing and levels of detail, made at build time; particles; 2D sprites, sprite-sheet animation and tile maps, with crisp pixel art; debug lines. |
+| Graphics | Five graphics APIs; the same picture on each. glTF models, static or skinned and animated, with metallic-roughness PBR materials, normal, occlusion and emissive maps, and opaque, cut-out, blended and double-sided surfaces; one directional light with soft cascaded shadows, and point and spot lights, up to 256 with `forward_plus`; lighting from an HDR environment, which shiny surfaces reflect; HDR with PBR Neutral tone mapping and bloom; frustum culling, instancing and levels of detail, made at build time; particles; 2D sprites, sprite-sheet animation and tile maps, with crisp pixel art, parallax backgrounds, 9-slice sprites, sorting by height for top-down games, animated tiles, and levels from the Tiled map editor; debug lines. |
 | Textures | PNG cooked at build time by a cooker chosen per platform: KTX2 with UASTC, or the smaller ETC1S, sent to the GPU as BC7 on PC and ASTC on phones; or PNG kept as it is, as for pixel art. |
 | Physics | 3D (Jolt or the engine's own impulse solver): bodies, joints, triggers, ray casts. 2D (Box2D or Chipmunk). |
 | Audio | WAV, MP3 and FLAC; streamed music; buses with volumes; sounds placed in 3D. |
 | Interface | Menus and HUDs written in RML and RCSS (RmlUi or the engine's own `markup`); Dear ImGui for debug tools. |
 | Input | Keyboard, mouse, touch and gamepads, bound to named actions in the config, with analog values for sticks and triggers. |
-| Data | Scenes as TOML; saves and settings written to the user folder. |
+| Data | Scenes as TOML; levels from the Tiled map editor; saves and settings written to the user folder. |
 | Workflow | Hot reload of shaders, models and textures; profiling; memory budgets; crash reports with stack traces and minidumps, uploaded to Sentry or Backtrace from Windows and Android; screenshot tests. |
 | Power | A frame limit, and a lower one on battery, which also asks a phone's display to slow to match. |
 | Shipping | A PC folder with the executable and `assets.pak`; an Android APK signed with the debug key. |
 
 Good fits today: puzzle and physics games, arcade and casual mobile games, 2D platformers and
-pixel-art games, small 3D scenes with
+pixel-art games, top-down 2D games, small 3D scenes with
 static props, prototypes and game jams.
 
 Not yet possible without writing engine code first:
@@ -153,8 +153,8 @@ Not yet possible without writing engine code first:
 - **Rendering:** reflection probes for interiors (one environment lights the whole scene),
   shadows from point and spot lights, visual effects beyond particles, very
   large worlds (culling, instancing and LODs exist, but no streaming or spatial structures).
-- **2D:** levels from Tiled, parallax backgrounds, animated tiles and lit sprites (sprites, sprite
-  sheets, tile maps and tile collisions exist).
+- **2D:** lit sprites, and atlases packed at build time (sprites, sprite sheets, tile maps with
+  collisions, parallax, 9-slice sprites, animated tiles and Tiled maps exist).
 - **Input:** menus driven by a gamepad (no focus navigation in `ui`), and rebinding while the game runs.
 - **Online:** any online play.
 
@@ -244,22 +244,23 @@ and the remaining platforms.
 ### Phase 12: features (in progress)
 
 Phase 12 adds the features games most often need, each as a module or a renderer setting, checked
-on the five PC graphics backends and on a phone.
+on the five PC graphics backends and on a phone. Each one that can be seen has a sample of its
+own, whose picture is compared on every backend ([samples/README.md](../samples/README.md)).
 
 **Done**
 
-| Area | What works now | Design | Guide |
-|---|---|---|---|
-| Rendering base | The OpenGL backends; render targets; HDR with PBR Neutral tone mapping; the renderer as a module | ADR 0026, 0027, 0028, 0030 | |
-| Shadows | Cascaded shadows from the sun, blended between cascades | ADR 0029, 0041 | |
-| Performance | Frustum culling; instancing; levels of detail, made at build time; almost no heap allocations per frame; a frame limit on battery | ADR 0031, 0032, 0041, 0042 | |
-| Materials | Metallic-roughness PBR with normal, occlusion and emissive maps; transparent, cut-out and double-sided surfaces | ADR 0033, 0034 | [Materials](guides/materials.md) |
-| Lights | Point and spot lights: 16 with `forward`, 256 with `forward_plus` | ADR 0037 | [Lighting](guides/lighting.md) |
-| Environment | Lighting and reflections from HDR images, drawn as the sky; bloom | ADR 0040 | [Environment](guides/environment.md) |
-| Effects | Particles on the CPU: fire, smoke, sparks, one-off bursts | ADR 0038 | [Particles](guides/particles.md) |
-| 2D | Sprites, sprite-sheet animation, tile maps with collisions, pixel art kept crisp; parallax backgrounds that repeat, 9-slice sprites, sorting by height for top-down games, animated tiles; levels from the Tiled map editor | ADR 0039, 0049, 0050 | [2D games](guides/sprites.md) |
-| Characters | Skeletal animation with fades between clips, skinned on the GPU | ADR 0036 | [Animation](guides/animation.md) |
-| Input | Gamepads, with analog sticks and triggers bound to actions | ADR 0035 | [Input](guides/input.md) |
+| Area | What works now | Design | Guide | Sample |
+|---|---|---|---|---|
+| Rendering base | The OpenGL backends; render targets; HDR with PBR Neutral tone mapping; the renderer as a module | ADR 0026, 0027, 0028, 0030 | | `render_targets`, `render_demo` |
+| Shadows | Cascaded shadows from the sun, blended between cascades | ADR 0029, 0041 | | `shadows` |
+| Performance | Frustum culling; instancing; levels of detail, made at build time; almost no heap allocations per frame; a frame limit on battery | ADR 0031, 0032, 0041, 0042 | | `forest` |
+| Materials | Metallic-roughness PBR with normal, occlusion and emissive maps; transparent, cut-out and double-sided surfaces | ADR 0033, 0034 | [Materials](guides/materials.md) | `materials` |
+| Lights | Point and spot lights: 16 with `forward`, 256 with `forward_plus` | ADR 0037 | [Lighting](guides/lighting.md) | `lights` |
+| Environment | Lighting and reflections from HDR images, drawn as the sky; bloom | ADR 0040 | [Environment](guides/environment.md) | `environment` |
+| Effects | Particles on the CPU: fire, smoke, sparks, one-off bursts | ADR 0038 | [Particles](guides/particles.md) | `particles` |
+| 2D | Sprites, sprite-sheet animation, tile maps with collisions, pixel art kept crisp; parallax backgrounds that repeat, 9-slice sprites, sorting by height for top-down games, animated tiles; levels from the Tiled map editor | ADR 0039, 0049, 0050 | [2D games](guides/sprites.md) | `platformer`, `top_down` |
+| Characters | Skeletal animation with fades between clips, skinned on the GPU | ADR 0036 | [Animation](guides/animation.md) | `animation` |
+| Input | Gamepads, with analog sticks and triggers bound to actions | ADR 0035 | [Input](guides/input.md) | `input` |
 
 **Missing, in the order planned**
 
@@ -272,7 +273,7 @@ on the five PC graphics backends and on a phone.
 | 5 | Input | Focus navigation in `ui` menus for gamepads, an on-screen aiming cursor for pointer-aimed games such as Toppler, rebinding in a settings menu, a check with a real gamepad on a phone | ADR 0035 |
 | 6 | Materials and environment | Reflection probes for interiors, environments prepared at build time, order-independent transparency, antialiased cut-outs, reading `.gltf` files so Blender's images are cooked, half-precision lighting math for phones (PBR costs 1.4 ms of GPU time per frame on the A52s at full screen) | ADR 0033, 0034, 0040 |
 | 7 | Levels of detail | Hand-made versions, such as glTF's `MSFT_lod`, taking priority over made ones | ADR 0032, 0042 |
-| 8 | Checking | Each rendering feature's pictures on an Adreno, a Mali and an Xclipse phone before it is called done. So far the A52s's Adreno is checked for everything, with Vulkan and OpenGL ES; the A57's Xclipse with Vulkan for the render demo, through environment lighting and bloom (ADR 0040), but not yet the 2D sprites; and no Mali phone yet | All |
+| 8 | Checking | Each rendering feature's pictures on an Adreno, a Mali and an Xclipse phone before it is called done. So far the A52s's Adreno is checked for everything, with Vulkan and OpenGL ES; the A57's Xclipse 550 with Vulkan for the render demo and every feature sample (ADR 0051), but not yet the 2D samples; and no Mali phone yet | All |
 
 ### Phase 13: tools for making games
 

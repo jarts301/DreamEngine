@@ -55,6 +55,7 @@ Changing a decision means adding a new record that supersedes the old one, not r
 | [0048](0048-release-pipeline.md) | The release pipeline: versions from tags, release builds with symbols kept apart, `<game>_release` and `<game>_aab`, and release workflows for the engine and each game |
 | [0049](0049-parallax-9-slice-y-sorting-and-animated-tiles.md) | Parallax backgrounds that repeat, 9-slice sprites, layers sorted by height for top-down games, and animated tiles, as settings of the 2D components |
 | [0050](0050-tiled-maps.md) | Maps from the Tiled map editor through a `tile_map_format` interface: `tiled`, reading JSON with yyjson, and `null`; layers, tilesets, animations, solid tiles and objects added to the 2D world |
+| [0051](0051-feature-samples.md) | A sample for each feature that can be seen, each a scene and a short game with its picture checked on every backend from one template; `module_demo` and the `greeter` interface removed |
 
 ## Template
 

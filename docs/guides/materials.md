@@ -239,6 +239,10 @@ texture's alpha, and double-sided; and a glowing lamp. `tools/make_sample_models
 beside them in `samples/render_demo/assets/scenes/yard.toml` to see it under the same light.
 Hot reload picks up a re-exported model while the game runs.
 
+[samples/materials](../../samples/materials) puts the same materials side by side under the sky:
+plastic and metal from mirror-smooth (roughness 0.05) to fully rough (1.0), then the wall, gold,
+glass, fence and lamp. Drag or use the arrows to turn around them and see how each answers light.
+
 | You see | Likely cause | Fix |
 |---|---|---|
 | Everything looks dull, dark or like colored metal | The material doesn't state metallic, so glTF's default of 1 applies | Set Metallic to 0 in Blender, or `metallicFactor: 0` |

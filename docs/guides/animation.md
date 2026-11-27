@@ -157,6 +157,10 @@ N, or north on a gamepad (Y on Xbox, Triangle on PlayStation), to fade between t
 `samples/render_demo/assets/scenes/yard.toml` with an `animator` to see it beside the tentacle;
 hot reload picks up a re-exported model while the game runs.
 
+[samples/animation](../../samples/animation) plays the tentacle's clips seven ways: at half and
+twice the speed, backward with a negative speed, once with `loop = false`, and fading between clips
+with `Animation::play` every two seconds.
+
 | You see | Likely cause | Fix |
 |---|---|---|
 | The model stands still in its rest pose | No `Animator`, a misspelled clip name, `Animation` not created or not updated, or `animation` not listed | Check the log for the module in use, and the names `Animation::clip_names` gives |

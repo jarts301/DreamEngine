@@ -38,6 +38,7 @@ Games and checks that use many features together:
 
 ## Making a feature sample
 
+[ADR 0051](../docs/adr/0051-feature-samples.md) records why each feature has a sample, and how.
 [cmake/FeatureSample.cmake](cmake/FeatureSample.cmake) builds a feature sample and its checks from
 two files: `dream.toml`, the game's own configuration, and `tests/check.toml.in`, the checks', with
 `@RHI@`, `@RHI_TABLE@`, `@SCREENSHOT@` and `@QUIT_AFTER@` filled in for each graphics backend:
