@@ -169,6 +169,10 @@ unattended check. Unit tests feed `InputActions::apply` gamepad states directly,
 `sdl3_gamepad` module's tests use SDL's virtual gamepads, which go through the same code in SDL as
 real ones.
 
+To see what a binding does, run [samples/input](../../samples/input): its panel shows each action's
+strength as `value()` gives it, highlights it while `is_down()`, and names what `last_source()`
+says was last used. Push a stick part way, or pull a trigger slowly, to see the deadzones at work.
+
 ## Limits
 
 - No focus navigation in `ui` menus with a gamepad.

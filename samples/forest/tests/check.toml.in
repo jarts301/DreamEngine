@@ -1,0 +1,56 @@
+# The checks' configuration, made into one per graphics backend by dream_add_feature_sample.
+[app]
+window = "hidden"
+title = "Dream Forest Check"
+width = 960
+height = 540
+max_fps = 0
+
+[demo]
+hold = true
+quit_after_frames = @QUIT_AFTER@
+
+[input.actions]
+quit = ["key:escape"]
+pause = ["key:space"]
+orbit_left = ["key:a"]
+orbit_right = ["key:d"]
+zoom_in = ["key:w"]
+zoom_out = ["key:s"]
+drag = ["mouse:left"]
+
+[lods]
+levels = 3
+reduction = 0.5
+min_triangles = 64
+
+@RHI_TABLE@
+
+@SCREENSHOT@
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+texture_decoder = ["ktx", "null"]
+mesh_simplifier = ["meshoptimizer"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+texture_decoder = ["ktx", "null"]
+mesh_simplifier = ["meshoptimizer"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+texture_decoder = ["ktx", "null"]
+mesh_simplifier = ["meshoptimizer"]
+
+[audio]
+muted = true

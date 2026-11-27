@@ -1,0 +1,48 @@
+[app]
+window = "hidden"
+max_fps = 0
+
+[demo]
+quit_after_frames = 5
+hold_animation = true
+
+[input.actions]
+move_left = ["key:a"]
+move_right = ["key:d"]
+move_up = ["key:w"]
+move_down = ["key:s"]
+touch = ["touch"]
+quit = ["key:escape"]
+
+[physics2d]
+gravity = [0.0, 0.0]    # Seen from above: nothing falls.
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["null"]
+renderer = ["forward"]
+physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
+tile_map_format = ["tiled", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["null"]
+renderer = ["forward"]
+physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
+tile_map_format = ["tiled", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["null"]
+renderer = ["forward"]
+physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
+tile_map_format = ["tiled", "null"]
+
+[audio]
+muted = true

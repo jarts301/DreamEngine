@@ -1,5 +1,6 @@
 // A small 2D platformer: a tile map level with colliders made from its tiles, an animated hero that
-// runs and jumps with 2D physics, coins to collect, and a camera that follows (ADR 0039).
+// runs and jumps with 2D physics, coins to collect, and a camera that follows (ADR 0039), with
+// parallax hills and clouds, animated tiles and a 9-slice sign (ADR 0049).
 //
 // Controls: move with A and D, the arrows, a gamepad's stick or d-pad, or by holding the left or
 // right third of a touch screen; jump with Space, W, a gamepad's south button, or a tap in the
@@ -89,6 +90,11 @@ public:
         if (config.get_bool("demo.hold_animation").value_or(false)) {
             for (auto [entity, animator] : m_world->registry().view<runtime::SpriteAnimator>().each()) {
                 animator.speed = 0.0f;
+            }
+            // Animated tiles held on their second frame, so the picture shows one.
+            for (auto [entity, map] : m_world->registry().view<runtime::TileMap>().each()) {
+                map.animation_speed = 0.0f;
+                map.animation_time = 0.4;
             }
         }
         DREAM_LOG_INFO("{} coins to collect", m_coins_left);

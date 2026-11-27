@@ -1,0 +1,89 @@
+/* RmlUi starts with no styles at all, so even block layout is declared here. Sizes use dp, which
+   the engine scales with the screen's density. */
+
+body {
+    width: 100%;
+    height: 100%;
+    font-family: LatoLatin;
+    font-size: 15dp;
+    color: #ffffff;
+}
+
+div, h1, p {
+    display: block;
+}
+
+h1 {
+    font-size: 22dp;
+    font-weight: bold;
+    margin-bottom: 8dp;
+}
+
+.panel {
+    position: absolute;
+    left: 16dp;
+    top: 16dp;
+    width: 260dp;
+    padding: 12dp 16dp;
+    background-color: #101826d9;
+    border-radius: 10dp;
+}
+
+.row {
+    height: 24dp;
+    margin: 2dp 0dp;
+    padding: 0dp 6dp;
+    border-radius: 6dp;
+}
+
+/* An action that is down. */
+.row.down {
+    background-color: #3d7be0aa;
+}
+
+.row label {
+    display: inline-block;
+    width: 100dp;
+}
+
+#source, #pointer {
+    font-weight: bold;
+    color: #ffd75e;
+}
+
+#hint {
+    position: absolute;
+    left: 16dp;
+    right: 16dp;
+    bottom: 16dp;
+    padding: 6dp 12dp;
+    background-color: #000000a0;
+    border-radius: 8dp;
+    color: #ffffffdd;
+    text-align: center;
+}
+
+/* Each action's strength, from 0 to 1, shown on a slider the game moves. */
+input.range {
+    display: inline-block;
+    width: 130dp;
+    height: 18dp;
+}
+
+input.range slidertrack {
+    margin-top: 7dp;
+    height: 4dp;
+    background-color: #ffffff55;
+}
+
+input.range sliderbar {
+    width: 12dp;
+    height: 18dp;
+    background-color: #ffd75e;
+    border-radius: 6dp;
+}
+
+input.range sliderarrowdec, input.range sliderarrowinc {
+    width: 0dp;
+    height: 0dp;
+}

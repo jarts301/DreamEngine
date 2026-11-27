@@ -1,0 +1,86 @@
+# A courtyard at night (docs/guides/lighting.md): a faint moon, pillars and a fountain of crates. The
+# game adds the lights: 240 small colored point lights circling in rings, and four spot lights
+# sweeping the ground, more than the 16 that `forward` draws, so it uses `forward_plus`.
+
+[entities.camera.transform]
+position = [0.0, 9.0, 15.0]
+
+[entities.camera.camera]
+vertical_fov = 45.0
+target = [0.0, 0.0, 0.0]
+
+[entities.moon.directional_light]
+direction = [0.3, -1.0, -0.4]
+color = [0.55, 0.65, 1.0]
+intensity = 0.08
+ambient = 0.03
+
+[entities.ground.transform]
+scale = [12.0, 1.0, 12.0]
+
+[entities.ground.mesh]
+model = "assets:/models/ground.glb"
+
+[entities.fountain.transform]
+position = [0.0, 0.6, 0.0]
+rotation = [0.0, 45.0, 0.0]
+scale = [0.6, 0.6, 0.6]
+
+[entities.fountain.mesh]
+model = "assets:/models/crate.glb"
+
+[entities.pillar_0.transform]
+position = [0.00, 1.5, 6.50]
+scale = [0.4, 1.5, 0.4]
+
+[entities.pillar_0.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_1.transform]
+position = [4.60, 1.5, 4.60]
+scale = [0.4, 1.5, 0.4]
+
+[entities.pillar_1.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_2.transform]
+position = [6.50, 1.5, 0.00]
+scale = [0.4, 1.5, 0.4]
+
+[entities.pillar_2.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_3.transform]
+position = [4.60, 1.5, -4.60]
+scale = [0.4, 1.5, 0.4]
+
+[entities.pillar_3.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_4.transform]
+position = [0.00, 1.5, -6.50]
+scale = [0.4, 1.5, 0.4]
+
+[entities.pillar_4.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_5.transform]
+position = [-4.60, 1.5, -4.60]
+scale = [0.4, 1.5, 0.4]
+
+[entities.pillar_5.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_6.transform]
+position = [-6.50, 1.5, -0.00]
+scale = [0.4, 1.5, 0.4]
+
+[entities.pillar_6.mesh]
+model = "assets:/models/block.glb"
+
+[entities.pillar_7.transform]
+position = [-4.60, 1.5, 4.60]
+scale = [0.4, 1.5, 0.4]
+
+[entities.pillar_7.mesh]
+model = "assets:/models/block.glb"

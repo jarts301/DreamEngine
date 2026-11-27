@@ -1,0 +1,50 @@
+# The top-down sample's garden (see docs/guides/sprites.md): a map made in Tiled, whose things
+# layer (drawing layer 1) the camera sorts by height, so the gardener walks in front of the trees
+# behind and behind the trees in front. The map's bottom left corner is at the world's origin, one
+# world unit per 16-pixel tile.
+
+[entities.camera.transform]
+position = [12.0, 8.0, 0.0]
+
+[entities.camera.camera_2d]
+height = 11.25        # 48 screen pixels per tile, 3 per art pixel, on a window 540 high.
+min_width = 10.0      # On a phone held upright, still 10 units across.
+y_sort_layers = [1]
+
+[entities.garden.tile_map_file]
+file = "assets:/maps/garden.tmj"
+
+[entities.gardener.transform]
+position = [0.0, 0.0, 0.0]    # Placed at the map's "start".
+
+[entities.gardener.sprite]
+texture = "assets:/sprites/gardener.png"
+columns = 4
+rows = 2
+pivot = [0.5, 0.0]    # At its feet, so it sorts by where it stands.
+layer = 1
+
+[entities.gardener.sprite_animator]
+clip = "down"
+
+[entities.gardener.sprite_animator.clips.down]
+frames = [0, 1]
+fps = 6.0
+
+[entities.gardener.sprite_animator.clips.up]
+frames = [2, 3]
+fps = 6.0
+
+[entities.gardener.sprite_animator.clips.left]
+frames = [4, 5]
+fps = 6.0
+
+[entities.gardener.sprite_animator.clips.right]
+frames = [6, 7]
+fps = 6.0
+
+[entities.gardener.rigid_body_2d]
+shape = "circle"
+radius = 0.3
+fixed_rotation = true
+friction = 0.0

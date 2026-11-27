@@ -171,6 +171,254 @@ TEST_CASE("Tile maps give their tiles in view, from their bottom left corner") {
     CHECK_FALSE(placed.cell_at(Vec2{}, Vec2{-0.5f, 0.5f}).has_value());
 }
 
+TEST_CASE("Parallax moves sprites and tile maps by part of the camera's move, and repeats them") {
+    World world;
+    // Sees from 0 to 20 across, and -5 to 5 up.
+    add_camera(world, Vec2{10.0f, 0.0f}, 10.0f);
+    const Entity hills = world.create_entity();
+    world.registry().emplace<SpriteRenderer>(hills, SpriteRenderer{.size = {4.0f, 2.0f}});
+    world.registry().emplace<Parallax>(hills, Parallax{.factor = {0.5f, 1.0f}});
+    world.update_transforms();
+
+    std::vector<renderer::SpriteQuad> quads;
+    std::vector<renderer::SpriteBatch> batches;
+    SpriteScratch scratch;
+    gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
+    REQUIRE(quads.size() == 1);
+    // Half of the camera's 10 across.
+    CHECK(quads[0].position.x == Approx(5.0f));
+    CHECK(quads[0].position.y == Approx(0.0f));
+
+    // Repeated every 4 units, from [3, 7] at 5: the copies that reach into 0 to 20.
+    world.registry().get<Parallax>(hills).repeat_x = true;
+    gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
+    REQUIRE(quads.size() == 6);
+    CHECK(quads.front().position.x == Approx(1.0f));
+    CHECK(quads.back().position.x == Approx(21.0f));
+
+    // A tile map 2 tiles across, fixed on screen and repeated across it.
+    world.registry().remove<SpriteRenderer>(hills);
+    TileMap strip{.columns = 2, .rows = 1};
+    strip.tiles = {0, 1};
+    world.registry().emplace<TileMap>(hills, strip);
+    world.registry().get<Parallax>(hills).factor = Vec2{0.0f, 0.0f};
+    gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
+    // Starting at 10, where the camera is, and every 2 units to either side: 10 copies of 2 tiles.
+    REQUIRE(quads.size() == 20);
+    CHECK(quads[0].position.x == Approx(0.0f));
+    CHECK(quads[0].position.y == Approx(0.0f));
+    CHECK(quads[19].position.x == Approx(19.0f));
+}
+
+TEST_CASE("9-slice sprites keep their corners' size and stretch the rest") {
+    World world;
+    add_camera(world, Vec2{}, 10.0f);
+    const Entity panel = world.create_entity();
+    world.registry().get<Transform>(panel).position = Vec3{1.0f, 1.0f, 0.0f};
+    // A 16 x 16 texture with 4-pixel borders, at 16 pixels per unit: corners of a quarter unit.
+    // An invalid handle, which the fake device is never asked to destroy.
+    FakeDeviceState device_state;
+    FakeDevice device(device_state);
+    const AssetRef<TextureAsset> texture(std::make_shared<const TextureAsset>(TextureAsset{
+        .texture = GpuTexture(device, rhi::TextureHandle{}), .width = 16, .height = 16}));
+    world.registry().emplace<SpriteRenderer>(panel,
+                                             SpriteRenderer{.texture = texture,
+                                                            .size = {4.0f, 2.0f},
+                                                            .pivot = {0.0f, 0.0f},
+                                                            .slice = {4.0f, 4.0f, 4.0f, 4.0f}});
+    world.update_transforms();
+
+    std::vector<renderer::SpriteQuad> quads;
+    std::vector<renderer::SpriteBatch> batches;
+    SpriteScratch scratch;
+    gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
+    REQUIRE(quads.size() == 9);
+    // Bottom left corner, bottom row first: the texture's bottom left 4 x 4 pixels.
+    CHECK(quads[0].position.x == Approx(1.0f));
+    CHECK(quads[0].position.y == Approx(1.0f));
+    CHECK(quads[0].size.x == Approx(0.25f));
+    CHECK(quads[0].size.y == Approx(0.25f));
+    CHECK(quads[0].uv.x == Approx(0.0f));
+    CHECK(quads[0].uv.z == Approx(0.25f));
+    CHECK(quads[0].uv.y == Approx(0.75f));
+    CHECK(quads[0].uv.w == Approx(1.0f));
+    // The middle stretches over the rest, from the texture's middle 8 x 8 pixels.
+    CHECK(quads[4].position.x == Approx(1.25f));
+    CHECK(quads[4].position.y == Approx(1.25f));
+    CHECK(quads[4].size.x == Approx(3.5f));
+    CHECK(quads[4].size.y == Approx(1.5f));
+    CHECK(quads[4].uv.x == Approx(0.25f));
+    CHECK(quads[4].uv.z == Approx(0.75f));
+    // Top right corner.
+    CHECK(quads[8].position.x == Approx(4.75f));
+    CHECK(quads[8].position.y == Approx(2.75f));
+    CHECK(quads[8].uv.x == Approx(0.75f));
+    CHECK(quads[8].uv.y == Approx(0.0f));
+
+    // Turned a quarter turn around its pivot: the top right corner goes up and to the left.
+    world.registry().get<Transform>(panel).rotation =
+        core::quat_from_axis_angle(Vec3{0.0f, 0.0f, 1.0f}, 1.5707963f);
+    world.update_transforms();
+    gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
+    REQUIRE(quads.size() == 9);
+    CHECK(quads[8].position.x == Approx(1.0f - 1.75f));
+    CHECK(quads[8].position.y == Approx(1.0f + 3.75f));
+    CHECK(quads[8].rotation == Approx(1.5707963f));
+
+    // Narrower than its borders: the corners shrink to fit, and the middle column goes.
+    world.registry().get<Transform>(panel).rotation = core::Quat{};
+    world.registry().get<SpriteRenderer>(panel).size = Vec2{0.25f, 2.0f};
+    world.update_transforms();
+    gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
+    REQUIRE(quads.size() == 6);
+    CHECK(quads[0].size.x == Approx(0.125f));
+}
+
+TEST_CASE("Layers sorted by height draw what stands lower over what stands higher") {
+    World world;
+    const Entity camera = add_camera(world, Vec2{}, 10.0f);
+    world.registry().get<Camera2D>(camera).y_sort_layers = {1};
+    const auto add_sprite = [&](float y, std::int32_t layer, std::int32_t order) {
+        const Entity entity = world.create_entity();
+        world.registry().get<Transform>(entity).position = Vec3{0.0f, y, 0.0f};
+        world.registry().emplace<SpriteRenderer>(
+            entity, SpriteRenderer{.size = {1.0f, 1.0f}, .layer = layer, .order = order});
+        return entity;
+    };
+    add_sprite(-1.0f, 1, 0);  // In front: lowest.
+    add_sprite(2.0f, 1, 5);   // Behind, despite its order.
+    add_sprite(0.5f, 0, 9);   // A layer below, drawn first.
+    add_sprite(-3.0f, 2, -9); // A layer above, not sorted by height.
+    // A tile map in the sorted layer: its rows stand among the sprites, at their bottoms.
+    const Entity trees = world.create_entity();
+    world.registry().get<Transform>(trees).position = Vec3{2.0f, -2.0f, 0.0f};
+    TileMap map{.columns = 1, .rows = 3, .layer = 1};
+    map.tiles = {7, -1, 8}; // From the top: a row at y 0, an empty one, and one at y -2.
+    world.registry().emplace<TileMap>(trees, map);
+    world.update_transforms();
+
+    std::vector<renderer::SpriteQuad> quads;
+    std::vector<renderer::SpriteBatch> batches;
+    SpriteScratch scratch;
+    gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
+    std::vector<float> heights;
+    for (const renderer::SpriteQuad& quad : quads) {
+        heights.push_back(quad.position.y);
+    }
+    // Layer 0; then layer 1 from the highest down: the sprite at 2, the tiles' row at 0, the
+    // sprite at -1 and the row at -2; then layer 2.
+    CHECK(heights == std::vector<float>{0.5f, 2.0f, 0.0f, -1.0f, -2.0f, -3.0f});
+}
+
+TEST_CASE("Animated tiles show their frames in turn, as the map's animation time goes on") {
+    World world;
+    add_camera(world, Vec2{}, 10.0f);
+    const Entity water = world.create_entity();
+    TileMap map{.columns = 2, .rows = 1};
+    map.tiles = {4, 1};
+    map.animations.push_back(TileAnimation{.tile = 4, .frames = {4, 5, 6}, .fps = 2.0f});
+    world.registry().emplace<TileMap>(water, map);
+    world.update_transforms();
+
+    // Without a tileset, the tileset is one tile across, 16 texture heights per tile: each tile's
+    // number is its top edge over 16.
+    const auto shown = [&] {
+        std::vector<renderer::SpriteQuad> quads;
+        std::vector<renderer::SpriteBatch> batches;
+        SpriteScratch scratch;
+        gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
+        REQUIRE(quads.size() == 2);
+        return std::pair(quads[0].uv.y / 16.0f, quads[1].uv.y / 16.0f);
+    };
+    CHECK(shown().first == Approx(4.0f).epsilon(0.01));
+    update_sprite_animators(world, 0.6);
+    CHECK(shown().first == Approx(5.0f).epsilon(0.01));
+    update_sprite_animators(world, 1.0);
+    // 1.6 s: the fourth frame, which wraps to the first; the other tile never changes.
+    CHECK(shown().first == Approx(4.0f).epsilon(0.01));
+    CHECK(shown().second == Approx(1.0f).epsilon(0.01));
+    CHECK(world.registry().get<TileMap>(water).tiles[0] == 4);
+
+    // Held still.
+    world.registry().get<TileMap>(water).animation_speed = 0.0f;
+    update_sprite_animators(world, 0.5);
+    CHECK(shown().first == Approx(4.0f).epsilon(0.01));
+}
+
+TEST_CASE("Tile maps mirror and turn their cells, and read tilesets with margins and spacing") {
+    World world;
+    add_camera(world, Vec2{}, 10.0f);
+    // A 12 x 12 tileset of 4 x 4 tiles, 1 pixel in from its edge and 2 apart: 2 tiles across.
+    FakeDeviceState device_state;
+    FakeDevice device(device_state);
+    const AssetRef<TextureAsset> tileset(std::make_shared<const TextureAsset>(TextureAsset{
+        .texture = GpuTexture(device, rhi::TextureHandle{}), .width = 12, .height = 12}));
+    const Entity level = world.create_entity();
+    TileMap map{.tileset = tileset,
+                .tile_width = 4,
+                .tile_height = 4,
+                .tile_margin = 1,
+                .tile_spacing = 2,
+                .columns = 4,
+                .rows = 1};
+    map.tiles = {3, 3, 3, 3};
+    map.flips = {0, k_tile_flip_x, k_tile_flip_diagonal,
+                 static_cast<std::uint8_t>(k_tile_flip_diagonal | k_tile_flip_x)};
+    world.registry().emplace<TileMap>(level, map);
+    world.update_transforms();
+
+    std::vector<renderer::SpriteQuad> quads;
+    std::vector<renderer::SpriteBatch> batches;
+    SpriteScratch scratch;
+    gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
+    REQUIRE(quads.size() == 4);
+    // Tile 3: the second across, second down, from (7, 7) to (11, 11) in pixels.
+    CHECK(quads[0].uv.x == Approx(7.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[0].uv.y == Approx(7.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[0].uv.z == Approx(11.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[0].rotation == Approx(0.0f));
+    // Mirrored across: left and right swap.
+    CHECK(quads[1].uv.x == Approx(11.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[1].uv.z == Approx(7.0f / 12.0f).epsilon(0.002));
+    // Across the diagonal: turned a quarter around its middle, and mirrored across.
+    CHECK(quads[2].rotation == Approx(1.5707963f));
+    CHECK(quads[2].pivot.x == Approx(0.5f));
+    CHECK(quads[2].position.x == Approx(2.5f));
+    CHECK(quads[2].position.y == Approx(0.5f));
+    CHECK(quads[2].uv.x == Approx(11.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[2].uv.y == Approx(7.0f / 12.0f).epsilon(0.002));
+    // And mirrored across as well: a quarter turn to the right, which mirrors it up and down.
+    CHECK(quads[3].uv.x == Approx(11.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[3].uv.y == Approx(11.0f / 12.0f).epsilon(0.002));
+    CHECK(quads[3].uv.w == Approx(7.0f / 12.0f).epsilon(0.002));
+}
+
+TEST_CASE("Animated tiles can give each frame a length of its own") {
+    World world;
+    add_camera(world, Vec2{}, 10.0f);
+    const Entity torch = world.create_entity();
+    TileMap map{.columns = 1, .rows = 1};
+    map.tiles = {2};
+    map.animations.push_back(
+        TileAnimation{.tile = 2, .frames = {2, 3}, .fps = 1.0f, .durations = {0.1f, 0.5f}});
+    world.registry().emplace<TileMap>(torch, map);
+    world.update_transforms();
+    const auto shown = [&] {
+        std::vector<renderer::SpriteQuad> quads;
+        std::vector<renderer::SpriteBatch> batches;
+        SpriteScratch scratch;
+        gather_sprites(world, *camera_2d_view(world, k_size), quads, batches, scratch);
+        REQUIRE(quads.size() == 1);
+        return quads[0].uv.y / 16.0f;
+    };
+    CHECK(shown() == Approx(2.0f).epsilon(0.01));
+    update_sprite_animators(world, 0.2);
+    CHECK(shown() == Approx(3.0f).epsilon(0.01));
+    update_sprite_animators(world, 0.45);
+    // 0.65 s wraps to 0.05 s.
+    CHECK(shown() == Approx(2.0f).epsilon(0.01));
+}
+
 TEST_CASE("Sprite animators step through their clip's frames") {
     World world;
     const Entity hero = world.create_entity();
@@ -275,11 +523,31 @@ rows = [
 [entities.level.tile_map.legend]
 "#" = 1
 "=" = 7
+
+[entities.level.tile_map.animations."="]
+frames = [7, 8]
+fps = 3.0
+
+[entities.level.tile_map.animations.12]
+frames = [12, -1]
+
+[entities.camera.parallax]
+factor = [0.25, 1.0]
+repeat_x = true
+
+[entities.panel.sprite]
+slice = [3, 4, 5, 6]
+
+[entities.button.sprite]
+slice = 2
 )";
     Camera2D camera;
     SpriteRenderer sprite;
     SpriteAnimator animator;
     TileMap map;
+    Parallax parallax;
+    core::Vec4 panel_slice;
+    core::Vec4 button_slice;
     in_frame([&](App& app, Renderer&, rhi::CommandList&) {
         auto world = app.scenes().parse(scene);
         if (!world.has_value()) {
@@ -290,7 +558,23 @@ rows = [
         sprite = registry.get<SpriteRenderer>(world.value()->find("hero"));
         animator = registry.get<SpriteAnimator>(world.value()->find("hero"));
         map = registry.get<TileMap>(world.value()->find("level"));
+        parallax = registry.get<Parallax>(world.value()->find("camera"));
+        panel_slice = registry.get<SpriteRenderer>(world.value()->find("panel")).slice;
+        button_slice = registry.get<SpriteRenderer>(world.value()->find("button")).slice;
     });
+    CHECK(parallax.factor.x == Approx(0.25f));
+    CHECK(parallax.repeat_x);
+    CHECK_FALSE(parallax.repeat_y);
+    CHECK(panel_slice == core::Vec4{3.0f, 4.0f, 5.0f, 6.0f});
+    CHECK(button_slice == core::Vec4{2.0f, 2.0f, 2.0f, 2.0f});
+    REQUIRE(map.animations.size() == 2);
+    const auto water = std::ranges::find(map.animations, 7, &TileAnimation::tile);
+    REQUIRE(water != map.animations.end());
+    CHECK(water->frames == std::vector<std::int32_t>{7, 8});
+    CHECK(water->fps == Approx(3.0f));
+    const auto blink = std::ranges::find(map.animations, 12, &TileAnimation::tile);
+    REQUIRE(blink != map.animations.end());
+    CHECK(blink->frames == std::vector<std::int32_t>{12, -1});
     CHECK(camera.height == Approx(12.0f));
     CHECK(sprite.columns == 4);
     CHECK(sprite.frame == 3);
@@ -327,13 +611,21 @@ TEST_CASE_FIXTURE(SpriteFixture, "Scene files with wrong sprite settings don't l
                  "[entities.a.tile_map]\nrows = [\"ab\"]\n[entities.a.tile_map.legend]\na = 1\n",
                  "[entities.a.tile_map]\ntiles = [1, 2, 3]\ncolumns = 2\n",
                  "[entities.a.tile_map]\ntile_size = [1.0, 1.0]\n",
+                 "[entities.a.sprite]\nslice = [1, 2]\n",
+                 "[entities.a.sprite]\nslice = -1\n",
+                 "[entities.a.camera_2d]\ny_sort_layers = [1.5]\n",
+                 "[entities.a.parallax]\nspeed = 1.0\n",
+                 "[entities.a.tile_map]\ntiles = [1]\ncolumns = 1\n"
+                 "[entities.a.tile_map.animations.water]\nframes = [1, 2]\n",
+                 "[entities.a.tile_map]\ntiles = [1]\ncolumns = 1\n"
+                 "[entities.a.tile_map.animations.1]\nfps = 2.0\n",
              }) {
             if (!app.scenes().parse(scene).has_value()) {
                 ++failures;
             }
         }
     });
-    CHECK(failures == 8);
+    CHECK(failures == 14);
 }
 
 TEST_CASE_FIXTURE(SpriteFixture, "Renderer gives sprites through the 2D camera, and lines with it") {

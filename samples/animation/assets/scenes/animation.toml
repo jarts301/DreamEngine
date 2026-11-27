@@ -1,0 +1,107 @@
+# Skeletal animation (docs/guides/animation.md): seven copies of the shared tentacle, skinned to
+# a chain of joints, with its two clips, "sway" and "curl". Each animator is set up here; the game
+# changes the one in the middle between clips, fading from one to the other.
+
+[entities.camera.transform]
+position = [0.0, 2.2, 6.2]
+
+[entities.camera.camera]
+vertical_fov = 45.0
+target = [0.0, 0.9, 0.2]
+
+[entities.sun.directional_light]
+direction = [-0.4, -1.0, -0.5]
+color = [1.0, 0.96, 0.9]
+intensity = 1.3
+ambient = 0.35
+
+[entities.ground.transform]
+scale = [7.0, 1.0, 7.0]
+
+[entities.ground.mesh]
+model = "assets:/models/ground.glb"
+
+# Half speed.
+[entities.slow.transform]
+position = [-2.94, 0.0, 0.70]
+
+[entities.slow.mesh]
+model = "assets:/models/tentacle.glb"
+tint = [0.55, 0.75, 1.0]
+
+[entities.slow.animator]
+clip = "sway"
+speed = 0.5
+
+# As made.
+[entities.sway.transform]
+position = [-2.19, 0.0, -0.20]
+
+[entities.sway.mesh]
+model = "assets:/models/tentacle.glb"
+tint = [0.6, 1.0, 0.6]
+
+[entities.sway.animator]
+clip = "sway"
+speed = 1.0
+
+# Twice as fast.
+[entities.fast.transform]
+position = [-1.16, 0.0, -0.79]
+
+[entities.fast.mesh]
+model = "assets:/models/tentacle.glb"
+tint = [1.0, 0.95, 0.5]
+
+[entities.fast.animator]
+clip = "sway"
+speed = 2.0
+
+# Changed by the game, fading between its clips.
+[entities.dancer.transform]
+position = [0.00, 0.0, -1.00]
+
+[entities.dancer.mesh]
+model = "assets:/models/tentacle.glb"
+tint = [1.0, 1.0, 1.0]
+
+[entities.dancer.animator]
+clip = "sway"
+speed = 1.0
+
+# The other clip.
+[entities.curl.transform]
+position = [1.16, 0.0, -0.79]
+
+[entities.curl.mesh]
+model = "assets:/models/tentacle.glb"
+tint = [1.0, 0.7, 0.4]
+
+[entities.curl.animator]
+clip = "curl"
+speed = 1.0
+
+# Played backward: a negative speed.
+[entities.backward.transform]
+position = [2.19, 0.0, -0.20]
+
+[entities.backward.mesh]
+model = "assets:/models/tentacle.glb"
+tint = [1.0, 0.55, 0.8]
+
+[entities.backward.animator]
+clip = "curl"
+speed = -1.0
+
+# Played once, then held on its last pose.
+[entities.once.transform]
+position = [2.94, 0.0, 0.70]
+
+[entities.once.mesh]
+model = "assets:/models/tentacle.glb"
+tint = [0.75, 0.6, 1.0]
+
+[entities.once.animator]
+clip = "curl"
+speed = 1.0
+loop = false

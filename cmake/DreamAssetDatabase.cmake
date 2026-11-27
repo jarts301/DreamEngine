@@ -13,6 +13,7 @@
 #                 such as a shader's, names every file that starts with it and a dot.
 #   .glb          Each image its model refers to by file, beside it, and its cooked .lods.
 #   .rml, .rcss   The files their href, src and url() name, beside them.
+#   .tmj, .tsj    Tiled maps and tilesets: the images and tilesets they name, beside them.
 #
 # A PNG the build cooked is needed as its .ktx2, the file the game reads. Paths are relative to the
 # assets folder, with forward slashes.
@@ -127,6 +128,23 @@ foreach(file IN LISTS files)
                 elseif(NOT reference MATCHES "^[a-z]+:" AND NOT reference MATCHES "^#")
                     list(APPEND references "${relative_to}${reference}")
                 endif()
+            endforeach()
+        endforeach()
+    elseif(lower MATCHES "\\.(tmj|tsj)$")
+        set(kind map)
+        if(lower MATCHES "\\.tsj$")
+            set(kind tileset)
+        endif()
+        # Tiled's JSON: tilesets' and image layers' "image", and tilesets kept apart by "source",
+        # beside the file.
+        _dream_folder("${file}" relative_to)
+        file(STRINGS "${ASSETS}/${file}" lines REGEX "\"(image|source)\"")
+        foreach(line IN LISTS lines)
+            string(REGEX MATCHALL "\"(image|source)\"[ \t]*:[ \t]*\"[^\"]+\"" named "${line}")
+            foreach(reference IN LISTS named)
+                string(REGEX REPLACE "^\"(image|source)\"[ \t]*:[ \t]*\"(.*)\"$" "\\2" reference
+                    "${reference}")
+                list(APPEND references "${relative_to}${reference}")
             endforeach()
         endforeach()
     elseif(lower MATCHES "\\.(png|ktx2|jpg|jpeg)$")

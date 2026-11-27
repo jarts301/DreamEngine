@@ -1,0 +1,51 @@
+# The checks' configuration, made into one per graphics backend by dream_add_feature_sample.
+[app]
+window = "hidden"
+title = "Dream Lights Check"
+width = 960
+height = 540
+max_fps = 0
+
+[demo]
+time = 2.0
+quit_after_frames = @QUIT_AFTER@
+
+[input.actions]
+quit = ["key:escape"]
+orbit_left = ["key:a"]
+orbit_right = ["key:d"]
+zoom_in = ["key:w"]
+zoom_out = ["key:s"]
+drag = ["mouse:left"]
+pause = ["key:space"]
+
+@RHI_TABLE@
+
+@SCREENSHOT@
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+
+texture_decoder = ["ktx", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+
+texture_decoder = ["ktx", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["@RHI@"]
+renderer = ["forward_plus"]
+
+texture_decoder = ["ktx", "null"]
+
+[audio]
+muted = true

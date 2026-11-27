@@ -64,5 +64,6 @@ on it.
   reliably accepts.
 - The `greeter` interface and its two backends exist only to prove and test this path. They are
   the template for real interfaces, and can be removed once real interfaces cover the same ground.
+  (They were removed, with `samples/module_demo`, once they had: ADR 0051.)
 - A backend's third-party libraries are always installed by vcpkg even when it isn't selected, until
   backends with such dependencies arrive and need vcpkg features.

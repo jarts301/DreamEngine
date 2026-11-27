@@ -1,0 +1,1 @@
+dream_add_interface(tile_map_format)

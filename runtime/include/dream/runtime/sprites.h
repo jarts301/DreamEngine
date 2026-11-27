@@ -32,6 +32,10 @@ struct Camera2D {
     // At least this much is seen across, in world units: on a narrow window, such as a phone held
     // upright, the view grows taller to keep it. 0 for none.
     float min_width = 0.0f;
+    // Layers drawn by height, as top-down games need: within them, what stands lower in the world
+    // covers what stands higher, before `order` is looked at. A sprite stands at its entity, so
+    // its pivot belongs at its feet; a tile map's tiles stand at the bottom of their row.
+    std::vector<std::int32_t> y_sort_layers;
 };
 
 // Draws a rectangle of a texture at its entity: its X and Y, its rotation around Z, and its scale
@@ -49,6 +53,10 @@ struct SpriteRenderer {
     float pixels_per_unit = 16.0f;
     // The point placed at the entity, from {0, 0} at the bottom left to {1, 1} at the top right.
     core::Vec2 pivot{0.5f, 0.5f};
+    // 9-slice borders in the frame's pixels: left, right, top and bottom. When any is above 0, the
+    // corners keep their size in pixels over `pixels_per_unit` however large the sprite is, the
+    // edges stretch along their length, and the middle fills the rest: panels, frames and bars.
+    core::Vec4 slice{};
     // Linear, multiplying the texture, with its opacity in w.
     core::Vec4 color{1.0f, 1.0f, 1.0f, 1.0f};
     bool flip_x = false;
@@ -87,6 +95,39 @@ struct SpriteAnimator {
     [[nodiscard]] float duration(std::string_view name) const;
 };
 
+// Moves its entity's SpriteRenderer or TileMap with the camera by less, or more, than the rest of
+// the world, and can repeat it across the view: backgrounds that seem far away. Where the camera
+// is at the world's origin, it is drawn where its entity is.
+struct Parallax {
+    // How far it moves across the screen as the camera moves, in X and Y: {1, 1} as the world does,
+    // {0.25, 1} a quarter as far across, as distant hills, and {0, 0} not at all, fixed on screen.
+    core::Vec2 factor{1.0f, 1.0f};
+    // Repeated side by side, or above and below, every its own width or height, to fill the view.
+    // A repeated sprite repeats as though it weren't turned.
+    bool repeat_x = false;
+    bool repeat_y = false;
+};
+
+// A tile shown as a run of other tiles, in turn: water, torches, flowers in the wind.
+struct TileAnimation {
+    std::int32_t tile = 0;
+    std::vector<std::int32_t> frames;
+    // Frames per second.
+    float fps = 4.0f;
+    // Each frame's own length in seconds, in place of `fps`, as map editors give them. Empty for
+    // equal frames.
+    std::vector<float> durations;
+};
+
+// How a tile map's cell is mirrored, in TileMap::flips.
+enum TileFlip : std::uint8_t {
+    k_tile_flip_x = 1,
+    k_tile_flip_y = 2,
+    // Mirrored across the diagonal from the top left to the bottom right, before the other two: with
+    // them, the quarter turns.
+    k_tile_flip_diagonal = 4,
+};
+
 // A grid of tiles from a tileset: a texture cut into equal tiles, numbered from the top left, row
 // by row. The map's bottom left corner is at its entity's X and Y; it isn't turned or scaled.
 struct TileMap {
@@ -94,6 +135,9 @@ struct TileMap {
     // Each tile's size in the tileset, in pixels.
     std::uint32_t tile_width = 16;
     std::uint32_t tile_height = 16;
+    // Pixels around the tileset's edge, and between its tiles.
+    std::uint32_t tile_margin = 0;
+    std::uint32_t tile_spacing = 0;
     // Each tile's size in the world.
     core::Vec2 tile_size{1.0f, 1.0f};
     // The map's size in tiles.
@@ -108,6 +152,14 @@ struct TileMap {
     std::int32_t order = 0;
     renderer::SpriteFilter filter = renderer::SpriteFilter::Pixel;
     bool visible = true;
+    // Animated tiles: cells holding `tile` show its frames instead. Cells and collisions keep the
+    // tile itself.
+    std::vector<TileAnimation> animations;
+    // Seconds into the animations, which update_sprite_animators moves on by `animation_speed`.
+    double animation_time = 0.0;
+    float animation_speed = 1.0f;
+    // Each cell's TileFlip bits, in the order of `tiles`, or empty for none.
+    std::vector<std::uint8_t> flips;
 
     // The tile at a cell, counted from the top left, or -1 outside the map.
     [[nodiscard]] std::int32_t tile(std::uint32_t column, std::uint32_t row) const noexcept;
@@ -128,31 +180,40 @@ struct TileMap {
                                                            platform::SurfaceSize size,
                                                            core::Vec2 pixel);
 
-// Moves every SpriteAnimator on by `seconds` and sets its SpriteRenderer's frame. Games call it
-// once per frame, before rendering.
+// Moves every SpriteAnimator on by `seconds` and sets its SpriteRenderer's frame, and moves tile
+// maps' animated tiles on. Games call it once per frame, before rendering.
 void update_sprite_animators(World& world, double seconds);
 
 // Adds static 2D physics boxes over the tile map's solid tiles, with neighbors merged into larger
-// boxes, as entities of their own, not children of the map, which Physics2D picks up. Call it after
+// boxes, as entities of their own, not children of the map, which Physics2D picks up. Given an
+// entity with a map file (TileMapFile), it does so for each of the file's tile layers. Call it after
 // World::update_transforms, once the map is placed, and again after changing it, having removed
 // the entities it returned before.
 [[nodiscard]] core::Result<std::vector<Entity>> make_tile_colliders(World& world, Entity map);
 
 class SceneLoader;
 
-// For Renderer: lets scene files use "camera_2d", "sprite", "sprite_animator" and "tile_map".
+// For Renderer: lets scene files use "camera_2d", "sprite", "sprite_animator", "tile_map" and
+// "parallax".
 void register_sprite_components(SceneLoader& scenes);
 
 // The lists gather_sprites works with, which its caller keeps between calls, so gathering allocates
 // nothing once they have grown.
 struct SpriteScratch {
-    // Something drawn, in order: layer, order, then a sprite before a map, then the entity.
+    // A tile map drawn whole, rather than one of its rows.
+    static constexpr std::uint32_t k_whole_map = 0xffffffffu;
+    // Something drawn, in order: layer, height in layers sorted by it, order, then a sprite before
+    // a map, then the entity, then a map's row.
     struct Item {
         std::int32_t layer = 0;
+        // Minus the height it stands at, in a layer sorted by height; otherwise 0.
+        float depth = 0.0f;
         std::int32_t order = 0;
         bool map = false;
         std::uint32_t id = 0;
         Entity entity = k_no_entity;
+        // A tile map's row, counted up from its bottom, in a layer sorted by height.
+        std::uint32_t row = k_whole_map;
     };
     // Quads in a row that one batch draws.
     struct Run {

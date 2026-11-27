@@ -36,6 +36,9 @@ cmake --workflow --preset android-arm64-debug
 
 Each preset also has a `-release` version. Output goes to `build/<preset>/`.
 
+Every feature that can be seen has a small sample of its own, such as `samples/materials`,
+`samples/shadows` or `samples/forest`; [samples/README.md](samples/README.md) lists them.
+
 ## Make a game
 
 A game lives in a repository of its own and uses the engine as an SDK. Install the SDK from any
@@ -198,7 +201,7 @@ range = 6.0
 
 `forward_plus` sorts up to 256 of them into clusters of the view each frame, so each pixel lights
 itself only with the lights that reach it; `forward` takes the 16 nearest. They don't cast shadows
-yet. [Lighting](docs/guides/lighting.md) explains placing lights and how bright to make them, and
+yet. `samples/lights` circles 240 of them over a courtyard. [Lighting](docs/guides/lighting.md) explains placing lights and how bright to make them, and
 [ADR 0037](docs/adr/0037-point-and-spot-lights.md) records the design.
 
 ## Environment lighting and bloom
@@ -213,7 +216,8 @@ map = "assets:/environments/sky.hdr"
 intensity = 0.8
 ```
 
-The render demo's yard has a generated sky. [Environment lighting and bloom](docs/guides/environment.md)
+The render demo's yard has a generated sky, and `samples/environment` shows it at day, dusk and
+night. [Environment lighting and bloom](docs/guides/environment.md)
 explains finding images, brightness and tuning bloom, and
 [ADR 0040](docs/adr/0040-environment-lighting-and-bloom.md) records the design.
 
@@ -233,7 +237,8 @@ start_color = [1.6, 0.6, 0.16]
 end_alpha = 0.0
 ```
 
-The render demo's yard has a campfire of flames, sparks and textured smoke.
+The render demo's yard has a campfire of flames, sparks and textured smoke, and `samples/particles`
+adds a fountain, sparkles, snow and explosions set off from code.
 [Particles](docs/guides/particles.md) explains every setting and how to make common effects, and
 [ADR 0038](docs/adr/0038-particles.md) records the design.
 
@@ -257,9 +262,20 @@ rows = ["....##....", "##########"]
 "#" = 0
 ```
 
+Backgrounds move slower than the level with `parallax` and repeat across the view; a sprite's
+`slice` stretches panels without stretching their corners; tiles animate; and a camera's
+`y_sort_layers` draw top-down games by height (ADR 0049). Levels can come from the
+[Tiled](https://www.mapeditor.org/) map editor, read by the `tiled` module (ADR 0050):
+
+```toml
+[entities.garden.tile_map_file]
+file = "assets:/maps/garden.tmj"
+```
+
 `samples/platformer` is a small 2D platformer with a tile map level, an animated hero, coins and
-touch controls. [2D games](docs/guides/sprites.md) explains sprites, animation, tile maps and making
-the art, and [ADR 0039](docs/adr/0039-sprites-and-tile-maps.md) records the design.
+touch controls, and `samples/top_down` a garden made in Tiled. [2D games](docs/guides/sprites.md)
+explains sprites, animation, tile maps, Tiled maps and making the art, and
+[ADR 0039](docs/adr/0039-sprites-and-tile-maps.md) records the design.
 
 ## Animation
 
@@ -274,7 +290,8 @@ clip = "walk"
 
 ozz-animation (MIT) comes from an overlay port in `cmake/ports`, which the presets list, as does
 Jolt 5.7.0, newer than vcpkg's baseline has (ADR 0048). The render
-demo's tentacle has two clips; N or a gamepad's north button fades between them.
+demo's tentacle has two clips; N or a gamepad's north button fades between them, and
+`samples/animation` plays them at other speeds, backward and once.
 [Animation](docs/guides/animation.md) explains how to export animated models from Blender and play
 them, and [ADR 0036](docs/adr/0036-skeletal-animation.md) records the design.
 
@@ -293,7 +310,8 @@ move_right = ["key:d", "gamepad:left_stick_right", "gamepad:dpad_right"]
 
 Sticks and triggers are analog: `app.input().axis("move_left", "move_right")` goes from -1 to 1
 with keys and sticks alike. In the render demo, the left stick, the d-pad or WASD orbit the camera,
-and the triggers zoom. [Input](docs/guides/input.md) explains bindings, deadzones, several
+and the triggers zoom; `samples/input` shows each action's state and strength as it changes.
+[Input](docs/guides/input.md) explains bindings, deadzones, several
 players and rumble, and [ADR 0035](docs/adr/0035-gamepads.md) records the design.
 
 ## Screenshot tests
@@ -449,11 +467,11 @@ The APK contains only `arm64-v8a` code, so it needs a real device rather than an
 ## Choosing modules
 
 A project picks its backends in a TOML file, with one priority list per interface and platform.
-[samples/module_demo/dream.toml](samples/module_demo/dream.toml) is an example:
+[samples/physics_demo/dream.toml](samples/physics_demo/dream.toml) is an example:
 
 ```toml
 [modules.windows]
-greeter = ["english", "spanish"]
+physics3d = ["jolt", "impulse"]
 ```
 
 Only the listed backends are compiled, and the first one that starts is used. To build your own
@@ -482,6 +500,7 @@ checked on a PC and a phone as described in [Backends](docs/reports/backends.md)
 | `platform` | `sdl3`, `null` | all | all | |
 | `profiler` | `timeline`, `null` | all | all | `timeline` saves a trace to open in Perfetto; see [Profiling](#profiling). |
 | `asset_source` | `bundles`, `files` | all | all | Where assets are read from: `bundles` ships a project's bundles apart and reads them while mounted. Optional; without it the platform reads them. See [Asset database and bundles](#asset-database-and-bundles). |
+| `tile_map_format` | `tiled`, `null` | all | all | Reads maps made in a map editor: `tiled` reads Tiled's JSON maps and tilesets. Optional; see [2D games](docs/guides/sprites.md). |
 | `crash_upload` | `sentry`, `backtrace`, `null` | all | all | Uploads saved crash reports in the background at the next start; Windows and Android. Optional; see [crash reports](docs/reports/crash-reports.md). |
 
 ```toml

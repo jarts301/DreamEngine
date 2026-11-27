@@ -1,0 +1,59 @@
+[app]
+window = "hidden"
+title = "Dream Top-Down Direct3D 11 Check"
+width = 960
+height = 540
+
+[demo]
+hold_animation = true
+quit_after_frames = 70
+
+# Compares frame 60 with the reference image, within a tolerance. See docs/adr/0021.
+[screenshot]
+frame = 60
+save = "top_down_directx_screenshot.png"
+reference = "assets:/screenshots/top_down.png"
+tolerance = 24
+max_differing = 0.01
+quit = false
+
+[input.actions]
+move_left = ["key:a"]
+move_right = ["key:d"]
+move_up = ["key:w"]
+move_down = ["key:s"]
+touch = ["touch"]
+quit = ["key:escape"]
+
+[physics2d]
+gravity = [0.0, 0.0]    # Seen from above: nothing falls.
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["directx"]
+renderer = ["forward"]
+physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
+tile_map_format = ["tiled", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["null"]
+renderer = ["forward"]
+physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
+tile_map_format = ["tiled", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["null"]
+rhi = ["null"]
+renderer = ["forward"]
+physics2d = ["box2d"]
+texture_decoder = ["ktx", "null"]
+tile_map_format = ["tiled", "null"]
+
+[audio]
+muted = true

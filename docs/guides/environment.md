@@ -102,6 +102,10 @@ Measured in the render demo on a Galaxy A52s (Adreno 642L) at its full 1080 x 24
 reflect it, the ground behind the floor is the sky's grassland, and the campfire, lamp and ring of
 lights glow.
 
+[samples/environment](../../samples/environment) shows the sky on a mirror ball, brushed and rough
+metal, gold, plastic and glass, with lamps glowing through bloom. Space changes the look between
+day, dusk and night by changing the `environment` and the sun, using the table in "How bright".
+
 | You see | Likely cause | Fix |
 |---|---|---|
 | The scene looks the same as without one | The `environment` failed to load (the log says), or another entity's comes first | Check the path; keep one |

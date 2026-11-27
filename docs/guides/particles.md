@@ -221,6 +221,10 @@ sparks from a torch when it is hit; `Particles::restart` starts an emitter over.
 textured smoke drifting with a little wind, and a point light. Its screenshot checks set
 `demo.particle_time`, which warms the effects up for that many seconds and then holds them.
 
+[samples/particles](../../samples/particles) has an effect from each row of "Making effects": the
+campfire, a fountain, magic sparkles, falling snow, and an explosion that has no rate, only bursts,
+which the game sets off with `Particles::burst`.
+
 | You see | Likely cause | Fix |
 |---|---|---|
 | Nothing | `particles` not listed, `Particles` not created or updated, the entity has no transform, or `update_transforms` isn't called first | Check the log for the module in use |

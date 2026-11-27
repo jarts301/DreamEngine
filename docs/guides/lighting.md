@@ -127,6 +127,11 @@ shrinks. Keep lights at least 0.3–0.5 m from the surfaces they light, or lower
 `samples/render_demo` lights its yard with a lamp, a blue spot on the brick wall, and a ring of
 eight small colored lights around the tentacle, drawn with `forward_plus`.
 
+[samples/lights](../../samples/lights) adds 240 point lights and four spot lights from code, in a
+courtyard at night, and moves them every frame; its report prints how many were drawn and left
+out. [samples/shadows](../../samples/shadows) turns a low sun over a long avenue, to see the
+cascades reach 60 m.
+
 | You see | Likely cause | Fix |
 |---|---|---|
 | A light does nothing | Its intensity is too low against the sun, or its entity has no transform | Raise the intensity, or dim the sun |

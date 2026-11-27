@@ -1,0 +1,46 @@
+[app]
+organization = "DreamEngine"
+name = "DreamParticles"
+title = "Dream Particles"
+width = 1280
+height = 720
+
+[input.actions]
+quit = ["key:escape", "gamepad:back"]
+explode = ["key:space", "gamepad:south"]
+orbit_left = ["key:a", "key:left", "gamepad:left_stick_left", "gamepad:dpad_left"]
+orbit_right = ["key:d", "key:right", "gamepad:left_stick_right", "gamepad:dpad_right"]
+zoom_in = ["key:w", "key:up", "gamepad:left_stick_up", "gamepad:right_trigger"]
+zoom_out = ["key:s", "key:down", "gamepad:left_stick_down", "gamepad:left_trigger"]
+drag = ["mouse:left", "touch"]
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
+renderer = ["forward_plus", "forward", "null"]
+texture_decoder = ["ktx", "null"]
+particles = ["cpu", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "opengles", "null"]
+renderer = ["forward_plus", "forward", "null"]
+texture_decoder = ["ktx", "null"]
+particles = ["cpu", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "null"]
+renderer = ["forward_plus", "forward", "null"]
+texture_decoder = ["ktx", "null"]
+particles = ["cpu", "null"]
+
+# What the editor opens (ADR 0046): dream_editor samples/particles
+[editor]
+scene = "assets:/scenes/particles.toml"
+game = "dream_particles"
+assets = ["assets", "../assets", "../assets_3d"]
+build = "../../build/windows-debug"

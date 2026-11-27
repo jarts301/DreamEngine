@@ -51,5 +51,5 @@ texture_decoder = ["ktx", "null"]
 [editor]
 scene = "assets:/scenes/yard.toml"
 game = "dream_render_demo"
-assets = ["assets", "../assets"]
+assets = ["assets", "../assets", "../assets_3d"]
 build = "../../build/windows-debug"

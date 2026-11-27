@@ -1,0 +1,45 @@
+# What plays behind the interface: crates turning in the evening light.
+
+[entities.camera.transform]
+position = [0.0, 2.5, 7.0]
+
+[entities.camera.camera]
+vertical_fov = 45.0
+target = [0.0, 0.8, 0.0]
+
+[entities.sun.directional_light]
+direction = [0.7, -0.5, -0.5]
+color = [1.0, 0.7, 0.5]
+intensity = 1.0
+ambient = 0.25
+
+[entities.ground.transform]
+scale = [6.0, 1.0, 6.0]
+
+[entities.ground.mesh]
+model = "assets:/models/ground.glb"
+tint = [0.5, 0.5, 0.6]
+
+[entities.crate_left.transform]
+position = [-1.6, 0.6, 0.0]
+rotation = [0.0, 20.0, 0.0]
+scale = [0.6, 0.6, 0.6]
+
+[entities.crate_left.mesh]
+model = "assets:/models/crate.glb"
+
+[entities.crate_right.transform]
+position = [1.5, 0.5, -0.8]
+rotation = [0.0, -35.0, 0.0]
+scale = [0.5, 0.5, 0.5]
+
+[entities.crate_right.mesh]
+model = "assets:/models/crate.glb"
+
+[entities.ball.transform]
+position = [0.1, 0.45, 1.0]
+scale = [0.45, 0.45, 0.45]
+
+[entities.ball.mesh]
+model = "assets:/models/ball.glb"
+tint = [0.2, 0.5, 0.9]

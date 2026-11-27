@@ -1,0 +1,22 @@
+<rml>
+<head>
+    <title>Input</title>
+    <link type="text/rcss" href="input.rcss"/>
+</head>
+<body>
+    <div class="panel">
+        <h1>Input</h1>
+        <p>Last used: <span id="source">nothing yet</span></p>
+        <div class="row" id="row_move_left"><label>move_left</label><input id="move_left" type="range" min="0" max="1" step="0.01" value="0"/></div>
+        <div class="row" id="row_move_right"><label>move_right</label><input id="move_right" type="range" min="0" max="1" step="0.01" value="0"/></div>
+        <div class="row" id="row_move_up"><label>move_up</label><input id="move_up" type="range" min="0" max="1" step="0.01" value="0"/></div>
+        <div class="row" id="row_move_down"><label>move_down</label><input id="move_down" type="range" min="0" max="1" step="0.01" value="0"/></div>
+        <div class="row" id="row_jump"><label>jump</label><input id="jump" type="range" min="0" max="1" step="0.01" value="0"/></div>
+        <div class="row" id="row_boost"><label>boost</label><input id="boost" type="range" min="0" max="1" step="0.01" value="0"/></div>
+        <div class="row" id="row_brake"><label>brake</label><input id="brake" type="range" min="0" max="1" step="0.01" value="0"/></div>
+        <div class="row" id="row_touch"><label>touch</label><input id="touch" type="range" min="0" max="1" step="0.01" value="0"/></div>
+        <p>Pointer: <span id="pointer">-</span></p>
+    </div>
+    <div id="hint">Move with WASD, the arrows, a stick, the d-pad, or by holding where to go. Space or A jumps; Shift or the right trigger boosts; Ctrl or the left trigger brakes.</div>
+</body>
+</rml>

@@ -1,0 +1,52 @@
+[app]
+organization = "DreamEngine"
+name = "DreamShadows"
+title = "Dream Shadows"
+width = 1280
+height = 720
+
+[input.actions]
+quit = ["key:escape", "gamepad:back"]
+pause = ["key:space", "gamepad:south"]
+orbit_left = ["key:a", "key:left", "gamepad:left_stick_left", "gamepad:dpad_left"]
+orbit_right = ["key:d", "key:right", "gamepad:left_stick_right", "gamepad:dpad_right"]
+zoom_in = ["key:w", "key:up", "gamepad:left_stick_up", "gamepad:right_trigger"]
+zoom_out = ["key:s", "key:down", "gamepad:left_stick_down", "gamepad:left_trigger"]
+drag = ["mouse:left", "touch"]
+
+# Shadows from the sun reach 60 m, in four cascades, each a shadow map covering a farther part of
+# the view; neighbors blend over the last tenth of each (docs/adr/0029, 0041). Phones default to
+# three cascades of 1024 pixels, PCs to four of 2048.
+[renderer.shadows]
+mode = "on"
+cascades = 4
+distance = 60.0
+blend = 0.1
+
+[modules.windows]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "directx12", "directx", "opengl", "opengles", "null"]
+renderer = ["forward_plus", "forward", "null"]
+texture_decoder = ["ktx", "null"]
+
+[modules.android]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "opengles", "null"]
+renderer = ["forward_plus", "forward", "null"]
+texture_decoder = ["ktx", "null"]
+
+[modules.linux]
+platform = ["sdl3"]
+input_device = ["sdl3_gamepad", "null"]
+rhi = ["vulkan", "null"]
+renderer = ["forward_plus", "forward", "null"]
+texture_decoder = ["ktx", "null"]
+
+# What the editor opens (ADR 0046): dream_editor samples/shadows
+[editor]
+scene = "assets:/scenes/shadows.toml"
+game = "dream_shadows"
+assets = ["assets", "../assets"]
+build = "../../build/windows-debug"

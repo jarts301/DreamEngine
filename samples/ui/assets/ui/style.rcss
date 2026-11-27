@@ -1,0 +1,189 @@
+/* RmlUi starts with no styles at all, so even block layout is declared here. Sizes use dp, which
+   the engine scales with the screen's density. */
+
+body {
+    width: 100%;
+    height: 100%;
+    font-family: LatoLatin;
+    font-size: 18dp;
+    color: #ffffff;
+}
+
+div, h1, p {
+    display: block;
+}
+
+h1 {
+    font-size: 30dp;
+    font-weight: bold;
+    margin-bottom: 14dp;
+    text-align: center;
+}
+
+button {
+    display: block;
+    padding: 10dp 18dp;
+    margin: 6dp 0dp;
+    background-color: #2d4f7ccc;
+    border-radius: 8dp;
+    text-align: center;
+    font-weight: bold;
+}
+
+button:hover {
+    background-color: #4874b0e6;
+}
+
+button:active {
+    background-color: #6a9be0;
+}
+
+/* Menus darken the game behind them. */
+
+body.cover {
+    background-color: #00000080;
+}
+
+.panel {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 340dp;
+    margin-left: -190dp;
+    margin-top: -170dp;
+    padding: 20dp;
+    background-color: #1b2333ee;
+    border-radius: 12dp;
+}
+
+.subtitle {
+    text-align: center;
+    color: #ffffffaa;
+    margin-bottom: 14dp;
+}
+
+.row {
+    margin: 10dp 0dp;
+    height: 28dp;
+}
+
+.row label {
+    display: inline-block;
+    width: 90dp;
+}
+
+.row label.wide {
+    width: auto;
+}
+
+.amount {
+    display: inline-block;
+    width: 50dp;
+    text-align: right;
+    color: #ffd75e;
+}
+
+input.range {
+    display: inline-block;
+    width: 170dp;
+    height: 24dp;
+}
+
+input.range slidertrack {
+    margin-top: 10dp;
+    height: 4dp;
+    background-color: #ffffff55;
+}
+
+input.range sliderbar {
+    width: 18dp;
+    height: 24dp;
+    background-color: #ffd75e;
+    border-radius: 9dp;
+}
+
+input.range sliderarrowdec, input.range sliderarrowinc {
+    width: 0dp;
+    height: 0dp;
+}
+
+input.checkbox {
+    display: inline-block;
+    width: 22dp;
+    height: 22dp;
+    margin-right: 10dp;
+    background-color: #ffffff33;
+    border-radius: 4dp;
+}
+
+input.checkbox:checked {
+    background-color: #ffd75e;
+}
+
+/* The heads-up display. */
+
+#health_box, #score_box, #timer_box {
+    position: absolute;
+    top: 16dp;
+    padding: 8dp 14dp;
+    background-color: #00000080;
+    border-radius: 8dp;
+}
+
+#health_box {
+    left: 16dp;
+}
+
+.caption {
+    display: inline-block;
+    width: 64dp;
+}
+
+#health {
+    display: inline-block;
+}
+
+/* Ten cells, lit by the game as health changes. */
+.cell {
+    display: inline-block;
+    width: 14dp;
+    height: 16dp;
+    margin-right: 3dp;
+    background-color: #ffffff22;
+    border-radius: 3dp;
+}
+
+.cell.on {
+    background-color: #5bd16b;
+}
+
+.cell.on.low {
+    background-color: #e0503d;
+}
+
+/* Health, score and time stacked down the left, so they fit a phone held upright too. */
+#score_box {
+    left: 16dp;
+    top: 64dp;
+}
+
+#score, #timer {
+    font-weight: bold;
+    color: #ffd75e;
+}
+
+#timer_box {
+    left: 16dp;
+    top: 112dp;
+}
+
+#timer_box.hidden {
+    display: none;
+}
+
+#pause {
+    position: absolute;
+    right: 16dp;
+    top: 16dp;
+    margin: 0dp;
+}

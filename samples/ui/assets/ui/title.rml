@@ -1,0 +1,15 @@
+<rml>
+<head>
+    <title>Title</title>
+    <link type="text/rcss" href="style.rcss"/>
+</head>
+<body class="cover">
+    <div class="panel title">
+        <h1>Dream Interface</h1>
+        <p class="subtitle">Menus and a HUD in RML and RCSS</p>
+        <button id="play">Play</button>
+        <button id="settings">Settings</button>
+        <button id="quit">Quit</button>
+    </div>
+</body>
+</rml>

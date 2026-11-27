@@ -15,7 +15,7 @@ import zlib
 from pathlib import Path
 
 SIZE = 64
-OUTPUT = Path("samples/render_demo/assets/textures/smoke.png")
+OUTPUT = Path("samples/assets_3d/textures/smoke.png")
 
 
 def value_noise(cells: int, seed: int):
