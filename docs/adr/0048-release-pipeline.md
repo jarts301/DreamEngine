@@ -85,7 +85,9 @@ It runs on a self-hosted runner, a machine of the game's makers, which costs no 
 its build folders and vcpkg's libraries between runs, so a release rebuilds only what changed. The
 runner's environment gives the SDK, vcpkg and Android's tools, as a developer's does, and it needs
 nothing else installed: its steps use Windows PowerShell, and it publishes through an action rather
-than GitHub's command-line tool. Moving to
+than GitHub's command-line tool. That action tries once more, 15 seconds later, when an upload
+fails: on the first real release, a home router's DNS failed the first lookups of GitHub's upload
+server, twice. Moving to
 GitHub's machines means changing `runs-on` and setting those up in the workflow.
 
 ### Installers

@@ -89,7 +89,27 @@ jobs:
           path: release
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
+      # A file's upload can fail when the machine's DNS doesn't have GitHub's upload server yet, as
+      # some home routers do on a first lookup; a second try, a little later, finds it and replaces
+      # what the first left, in the same draft.
+      - name: Publish
+        id: publish
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: __GAME_TITLE__ ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release/*
+
+      - name: Wait before trying again
+        if: steps.publish.outcome == 'failure'
+        shell: powershell
+        run: Start-Sleep -Seconds 15
+
+      - name: Publish, a second try
+        if: steps.publish.outcome == 'failure'
+        uses: softprops/action-gh-release@v2
         with:
           draft: true
           name: __GAME_TITLE__ ${{ github.ref_name }}
