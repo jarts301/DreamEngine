@@ -161,11 +161,10 @@ input.checkbox:checked {
     background-color: #e0503d;
 }
 
+/* Health, score and time stacked down the left, so they fit a phone held upright too. */
 #score_box {
-    left: 50%;
-    margin-left: -60dp;
-    width: 92dp;
-    text-align: center;
+    left: 16dp;
+    top: 64dp;
 }
 
 #score, #timer {
@@ -174,7 +173,8 @@ input.checkbox:checked {
 }
 
 #timer_box {
-    right: 110dp;
+    left: 16dp;
+    top: 112dp;
 }
 
 #timer_box.hidden {
