@@ -111,9 +111,9 @@ jobs:
           path: release
           merge-multiple: true
 
-      # An upload can fail when the machine's DNS briefly can't find GitHub's servers, as happens
-      # on some home networks; a second try, a little later, replaces what the first left, in the
-      # same draft.
+      # A file's upload can fail when the machine's DNS doesn't have GitHub's upload server yet, as
+      # some home routers do on a first lookup; a second try, a little later, finds it and replaces
+      # what the first left, in the same draft.
       - name: Publish
         id: publish
         continue-on-error: true
